@@ -1,6 +1,6 @@
 // Public QML contract and private state of the Lem application controller.
 // Lem is the QML-facing controller type used throughout the client.
-// See docs/developer/client-state.md for the JSON fields and notification contract.
+// See docs/architecture.md for the JSON fields and notification contract.
 
 #pragma once
 #include <QObject>

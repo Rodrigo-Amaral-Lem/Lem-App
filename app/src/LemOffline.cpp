@@ -2,7 +2,7 @@
 // Reading order: journals -> scheduling -> report/photograph uploads -> catalogue
 // refresh -> photograph downloads/cleanup -> ownership/conflict recovery.
 // Worker tasks receive value snapshots; shared controller state stays on its thread.
-// See docs/developer/offline-sync.md for ordering and failure cases.
+// See docs/architecture.md for ordering and failure cases.
 
 #include "Lem.h"
 #include "Checklist.h"

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# CLI: python verify-pe.py EXE [--report OUTPUT_JSON]. Standard library only.
+# Reads normal/delay PE imports; writes only the optional report. Exit 1 rejects an import/parse error.
+# Allowlist validation cannot see arbitrary runtime LoadLibrary calls; also run isolated startup.
+
 """Reject non-system normal AND delay-loaded DLL imports in a Windows EXE.
 
 Uses only Python's standard library; no dumpbin/objdump/pefile installation.

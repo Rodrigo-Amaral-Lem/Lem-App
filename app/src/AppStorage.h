@@ -1,7 +1,7 @@
 // Startup-only storage migration helpers. Copy old data rather than moving it.
 // The migration marker supports retrying an interrupted copy; original data remains
 // available as a fallback. Rewrite private file URLs in BOTH cache and edit journals.
-// See docs/developer/platform-and-deployment.md before changing compatibility keys.
+// See docs/build-and-release.md before changing compatibility keys.
 
 #pragma once
 #include <QDir>

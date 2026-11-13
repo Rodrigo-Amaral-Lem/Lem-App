@@ -1,3 +1,7 @@
+# Build helper for Android targets only; documented in docs/build-and-release.md.
+# Input: selected Android ABIs plus discovered SDK paths or LEM_ANDROID_OPENSSL_ROOT.
+# Effect: validate suffixed OpenSSL 3 ELF libraries and add them to Qt Android deployment metadata.
+
 # OpenSSL 3 binaries built for Android, e.g. the repository recommended by Qt:
 # https://github.com/KDAB/android_openssl
 # Keep the dependency outside the source package; never use host/system OpenSSL.

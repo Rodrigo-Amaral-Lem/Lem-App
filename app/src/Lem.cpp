@@ -1,7 +1,7 @@
 // QML-facing application controller: identity, local reports, user actions and HTTP.
 // The same Lem object is implemented across this file and LemOffline.cpp.
 // State belongs to the QObject thread; callbacks explicitly reconcile snapshots.
-// Start reading at docs/developer/README.md, then client-state.md.
+// Start reading at docs/architecture.md for state, persistence and source ownership.
 
 #include "Lem.h"
 #include "NetworkSecurity.h"

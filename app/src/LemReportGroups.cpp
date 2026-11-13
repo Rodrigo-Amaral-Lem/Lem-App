@@ -1,4 +1,4 @@
-// Local-first QVE/measurement reuse and handwritten signatures. Evidence is copied
+// Local-first QVE/measurement reuse and drawn/imported signatures. Evidence is copied
 // under fresh IDs; source reports and their files remain immutable.
 #include "Lem.h"
 #include "SafeStorage.h"

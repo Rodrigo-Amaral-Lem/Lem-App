@@ -8,7 +8,7 @@
 
 // Correct the six voltage labels for display/export without rewriting frozen reports.
 namespace Checklist {
-// Apply the v6 manual-field bug fixes to editable reports; closed history stays frozen.
+// Normalize current v6 draft fields/order and optional notes; never reinterpret closed history.
 inline QJsonObject correctedDraft(QJsonObject report) {
     auto schema = report["template"].toObject();
     if (report["status"] != "draft" || schema["version"].toInt() != 6) return report;

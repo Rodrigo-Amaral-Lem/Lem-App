@@ -1,3 +1,7 @@
+# Opt-in static Windows packaging helper; documented in docs/build-and-release.md.
+# Validates static Qt/plugins, links native runtime libraries and adds a post-build PE audit.
+# Normal shared Qt Creator builds leave LEM_WINDOWS_STANDALONE disabled.
+
 # Single-file Windows builds require a separate STATIC Qt installation.
 # Opt in through the standalone packaging script or an explicit CMake option.
 function(lem_configure_windows_standalone target)

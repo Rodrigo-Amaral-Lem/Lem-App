@@ -1,3 +1,9 @@
+# Build tool: see docs/build-and-release.md in the App repository.
+# Inputs: required static -QtPrefix; optional -BuildQt/-QtSource/-QtBuild and native compiler.
+# Mutations: Qt/app build and install trees, PE report, portable EXE and app/windows-static-transcript.log.
+# Use -BuildDirectory under ongoing_work; Qt SDK build paths must be separate and space-free.
+# The isolated smoke test and PE audit are both required; copying a shared-kit EXE is insufficient.
+
 # Build native static Qt once, then link and validate a single portable Lem.exe.
 # Run from a Windows build shell with CMake, Ninja, Python and the compiler on PATH.
 [CmdletBinding()]
@@ -38,7 +44,7 @@ function Assert-NinjaBuild([string]$Directory, [string]$Stage) {
 }
 function Require-Tool([string]$Name) {
     $command = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $command) { throw "Missing $Name on PATH. See docs/windows-single-exe.md." }
+    if (-not $command) { throw "Missing $Name on PATH. See docs/build-and-release.md." }
     return $command.Source
 }
 $transcriptStarted = $false

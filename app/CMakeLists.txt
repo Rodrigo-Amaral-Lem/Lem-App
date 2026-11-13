@@ -12,7 +12,7 @@ find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Quic
 # App-level response limits do not replace Qt's internal HTTP parser fix.
 # Patched vendor kits may retain 6.12.0: their backport must be verified separately.
 if(Qt6_VERSION VERSION_LESS "6.12.1")
- message(WARNING "Qt ${Qt6_VERSION}: verify/apply upstream CVE-2026-116337 Qt Network patches, or use Qt 6.12.1+ when available. Lem does not patch the installed Qt SDK. See docs/security-review-0.1.33.md.")
+ message(WARNING "Qt ${Qt6_VERSION}: verify/apply upstream CVE-2026-116337 Qt Network patches, or use Qt 6.12.1+ when available. Lem does not patch the installed Qt SDK. See docs/build-and-release.md.")
 endif()
 qt_standard_project_setup(REQUIRES 6.12)
 qt_add_executable(Lem src/main.cpp src/Lem.cpp src/LemOffline.cpp src/LemReportGroups.cpp src/Lem.h src/ReportPdf.cpp src/ReportPdf.h src/Checklist.h src/ServerSettings.h src/Theme.h src/AppStorage.h src/NetworkSecurity.h src/SafeStorage.h src/EvidenceMedia.h)

@@ -1,17 +1,31 @@
-# LEM App — repositório do cliente Qt
+# LEM App
 
-Código do cliente em `app/`. Configurar o Qt Creator com `app/CMakeLists.txt` e o kit Qt 6.12/MinGW 15.1. Compilação normal: `LEM_WINDOWS_STANDALONE=OFF`.
+The Qt client for charger maintenance reports. The current source declares **0.1.57**, uses
+checklist **6**, and includes the manual-reading, general-notes and signature-photo changes approved
+after that release number was assigned. There is no newly numbered binary release implied by these
+guides.
 
-Usar `../ongoing_work/` como diretório de trabalho e colocar builds, dependências, logs e ficheiros temporários nesse diretório. Exemplo, a partir de `ongoing_work`:
+## Start here
 
-```powershell
-cmake -S ../App/app -B app-build -DCMAKE_PREFIX_PATH=C:/Qt/6.12.0/mingw_64 -DLEM_WINDOWS_STANDALONE=OFF
-cmake --build app-build --parallel 4
-python ../App/app/tests/test_general_notes.py
-```
+| Guide | Use it for |
+| --- | --- |
+| [Build and release](docs/build-and-release.md) | Qt Creator, desktop builds, Android HTTPS, Windows packaging and troubleshooting |
+| [Architecture](docs/architecture.md) | Source ownership, state, persistence, synchronization and asynchronous work |
+| [Field workflow](docs/field-workflow.md) | Reports, evidence, copying, signatures, conflicts and local cleanup |
+| [Testing](docs/testing.md) | Native tests, QML tests, integration runners and platform checks |
 
-`shared/` é uma cópia versionada dos recursos canónicos de `../Common/shared/`. Permite compilar este repositório sem depender de outro clone. Alterar os recursos canónicos e executar `python ../Common/tools/sync_shared.py --write`, revendo e fazendo commit em cada repositório afetado. Sem `--write`, a ferramenta apenas verifica igualdade.
+Open [app/CMakeLists.txt](app/CMakeLists.txt) in Qt Creator. Use a matching Qt/compiler kit and a
+**new build directory inside `../ongoing_work/` **. A normal Windows build uses
+`LEM_WINDOWS_STANDALONE=OFF`; a single-file build requires a separate static Qt installation.
 
-Documentação específica em `docs/`; arquitetura, contrato partilhado e guia da migração em `../Common/docs/`. Testes de integração com API usam o repositório irmão `Server` ou a variável `LEM_SERVER_REPO` (caminho para a raiz desse repositório).
+## Repository boundaries
 
-Base importada: `Lem_Qt_0.1.57_GeneralNotesAndSignaturePhoto.zip`, incluindo as correções de compilação e todas as alterações funcionais aprovadas. Sem binários de distribuição neste repositório.
+- `app/` contains the client and its platform/build helpers.
+- `shared/` is a tracked snapshot of the canonical resources in `../Common/shared/`.
+- `docs/` contains the four maintained client guides above. Update them when behavior changes rather
+  than adding version-named notes.
+
+See the [workspace guide](../Common/docs/workspace.md) for Git/review rules and the
+[report contract](../Common/docs/report-contract.md) for shared validation rules. Edit shared
+resources in Common, run its synchronization tool, and review the snapshots in both component
+repositories. Keep generated files in `ongoing_work`; `Brand_Images` remains user-managed.
