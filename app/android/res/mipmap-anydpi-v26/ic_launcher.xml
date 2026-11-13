@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+SPDX-License-Identifier: GPL-3.0-only
+Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/lem_icon_background" />
     <foreground><inset android:inset="18%"><bitmap android:src="@drawable/lem_foreground" android:gravity="fill" /></inset></foreground>

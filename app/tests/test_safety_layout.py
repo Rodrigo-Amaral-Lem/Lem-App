@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 from pathlib import Path
 source=Path(__file__).with_name('test_report_tabs.py')
 exec(compile(source.read_text().partition('def run_tests():')[0],str(source),'exec'))

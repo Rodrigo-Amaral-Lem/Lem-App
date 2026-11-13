@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 // Run only against the disposable test API provided by test_offline_sync.py.
 #include "Lem.h"
 #include <QGuiApplication>

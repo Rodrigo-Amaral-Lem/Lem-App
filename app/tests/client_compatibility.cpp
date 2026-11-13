@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 // Disposable HTTP harness verifies the real C++ pre-login handshake, not a QML mock.
 #include "Lem.h"
 #include <QGuiApplication>

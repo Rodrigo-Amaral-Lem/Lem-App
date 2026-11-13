@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """Explicit page Flickables retain desktop wheel and keyboard scrolling."""
 
 from pathlib import Path

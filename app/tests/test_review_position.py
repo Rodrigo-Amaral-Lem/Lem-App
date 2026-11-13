@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """Review jumps respect overlay groups and the real end of the question list.
 
 Offscreen QML geometry regression, with a mock backend (no server needed).

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 # Build helper for Android targets only; documented in docs/build-and-release.md.
 # Input: selected Android ABIs plus discovered SDK paths or LEM_ANDROID_OPENSSL_ROOT.
 # Effect: validate suffixed OpenSSL 3 ELF libraries and add them to Qt Android deployment metadata.

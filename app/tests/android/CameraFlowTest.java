@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 package pt.lem.app;
 
 /** Runs on a normal JVM; no Android services or media are accessed. */

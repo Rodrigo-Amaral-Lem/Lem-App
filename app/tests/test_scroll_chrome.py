@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """Android scroll-direction chrome regression, using the shared isolated QML mock.
 
 Run: python app/tests/test_scroll_chrome.py

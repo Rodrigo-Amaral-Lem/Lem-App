@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 // A progress/status notification must not cause the catalogue to be rebuilt in QML.
 #include "Lem.h"
 #include <QGuiApplication>

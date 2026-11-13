@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 # Opt-in static Windows packaging helper; documented in docs/build-and-release.md.
 # Validates static Qt/plugins, links native runtime libraries and adds a post-build PE audit.
 # Normal shared Qt Creator builds leave LEM_WINDOWS_STANDALONE disabled.

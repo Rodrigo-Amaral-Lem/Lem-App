@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """Isolated QML navigation regression; does not connect to the API or use real drafts.
 Requires PySide6 (validated with 6.10.2). Run: python app/tests/test_report_tabs.py
 For a narrow viewport: python app/tests/test_report_tabs.py report mobile

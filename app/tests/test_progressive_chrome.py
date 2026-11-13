@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """Real touch displacement drives chrome; chrome never resizes the document."""
 from pathlib import Path
 from shiboken6 import delete

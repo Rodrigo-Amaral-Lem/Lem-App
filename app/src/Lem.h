@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 // Public QML contract and private state of the Lem application controller.
 // Lem is the QML-facing controller type used throughout the client.
 // See docs/architecture.md for the JSON fields and notification contract.

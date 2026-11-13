@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 // Android-only camera bridge. Open the normal camera, then choose evidence;
 // return report/checkpoint identity through an atomic JSON file mailbox read by Qt.
 // See docs/developer/platform-and-deployment.md for ownership of temporary files.

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 # Build tool: see docs/build-and-release.md in the App repository.
 # Inputs: required static -QtPrefix; optional -BuildQt/-QtSource/-QtBuild and native compiler.
 # Mutations: Qt/app build and install trees, PE report, portable EXE and app/windows-static-transcript.log.

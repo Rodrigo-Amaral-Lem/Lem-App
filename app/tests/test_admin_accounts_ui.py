@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """Management roles and session-only diagnostic reveal with real QML controls."""
 from pathlib import Path
 from shiboken6 import delete

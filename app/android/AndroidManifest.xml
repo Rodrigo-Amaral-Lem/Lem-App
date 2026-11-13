@@ -1,4 +1,8 @@
 <?xml version="1.0"?>
+<!--
+SPDX-License-Identifier: GPL-3.0-only
+Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+-->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="pt.lem.app"
     android:installLocation="auto"

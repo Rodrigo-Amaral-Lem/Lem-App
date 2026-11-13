@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """Exercise exclusive splash choices, real PNG frame decoding, timing and error fallback.
 
 Uses the existing isolated QML backend; no network or user data is touched.

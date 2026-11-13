@@ -29,3 +29,16 @@ See the [workspace guide](../Common/docs/workspace.md) for Git/review rules and 
 [report contract](../Common/docs/report-contract.md) for shared validation rules. Edit shared
 resources in Common, run its synchronization tool, and review the snapshots in both component
 repositories. Keep generated files in `ongoing_work`; `Brand_Images` remains user-managed.
+
+## License
+
+First-party LEM source code, tests, build/deployment tools, configuration, schemas and accompanying
+project documentation are licensed under the **GNU General Public License, version 3 only**
+(`GPL-3.0-only`). See [LICENSE](LICENSE) for the complete terms and warranty disclaimer.
+
+Source files carry SPDX notices. JSON data keeps its original strict format and has adjacent
+`.json.license` notices. Existing third-party license notices remain applicable; this declaration
+does not relicense Qt, Python dependencies, bundled fonts or third-party customer artwork/trademarks.
+Generated reports and customer data are not relicensed by this source-code notice.
+
+A complete license copy also accompanies the client source at [app/LICENSE](app/LICENSE).

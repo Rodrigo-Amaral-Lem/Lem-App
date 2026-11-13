@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 // Local-first QVE/measurement reuse and drawn/imported signatures. Evidence is copied
 // under fresh IDs; source reports and their files remain immutable.
 #include "Lem.h"

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 # CLI: python verify-pe.py EXE [--report OUTPUT_JSON]. Standard library only.
 # Reads normal/delay PE imports; writes only the optional report. Exit 1 rejects an import/parse error.
 # Allowlist validation cannot see arbitrary runtime LoadLibrary calls; also run isolated startup.

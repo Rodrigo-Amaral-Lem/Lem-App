@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """Real QML checks: fixed first header and a complete virtualized preview."""
 from pathlib import Path
 from shiboken6 import delete

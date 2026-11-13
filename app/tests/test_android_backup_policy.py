@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """Reports must not enter personal cloud/device-transfer backup datasets."""
 
 from pathlib import Path

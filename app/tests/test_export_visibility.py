@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """Export options are absent for drafts and available for closed reports on desktop/mobile."""
 
 from pathlib import Path

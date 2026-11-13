@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """Disposable local HTTP integration runner for the C++ offline_sync executable.
 Usage: python app/tests/test_offline_sync.py /path/to/Lem-offline-test
 Requires the server's dependencies plus httpx and openpyxl. No real server access.

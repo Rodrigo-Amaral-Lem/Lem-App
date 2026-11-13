@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """QML input limits, typed comma/period, NA selection and live voltage NOK boundaries."""
 from pathlib import Path
 from shiboken6 import delete

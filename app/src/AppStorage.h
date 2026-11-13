@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 // Startup-only storage migration helpers. Copy old data rather than moving it.
 // The migration marker supports retrying an interrupted copy; original data remains
 // available as a fallback. Rewrite private file URLs in BOTH cache and edit journals.

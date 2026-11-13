@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """Photo crop preview and media controls at narrow Android and desktop sizes."""
 from pathlib import Path
 from shiboken6 import delete

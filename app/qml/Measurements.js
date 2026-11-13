@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 .pragma library
 
 function canonical(id) { return /^MAN\.\d{2}$/.test(id) ? "PC02." + ("0" + (Number(id.slice(4)) + 1)).slice(-2) : id; }

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 cmake_minimum_required(VERSION 3.25)
 project(Lem VERSION 0.1.57 LANGUAGES CXX)
 # Normal Qt Creator builds use the selected shared Qt kit.

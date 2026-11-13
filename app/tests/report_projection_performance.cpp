@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 // Repeatable native microbenchmark; not a claim about physical Android frame times.
 #include "Lem.h"
 #include <QGuiApplication>

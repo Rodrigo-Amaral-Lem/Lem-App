@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
+
 """PE normal/delay import audit and CMake standalone guards (no Windows needed)."""
 import importlib.util
 from pathlib import Path
