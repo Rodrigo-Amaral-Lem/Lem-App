@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Lem
+Comment=Manutenção de carregadores
+Exec=Lem
+Icon=lem
+Terminal=false
+Categories=Utility;

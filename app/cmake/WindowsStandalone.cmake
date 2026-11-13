@@ -1,0 +1,35 @@
+# Single-file Windows builds require a separate STATIC Qt installation.
+# Opt in through the standalone packaging script or an explicit CMake option.
+function(lem_configure_windows_standalone target)
+ if(NOT LEM_WINDOWS_STANDALONE)
+  return()
+ endif()
+ if(NOT WIN32)
+  message(FATAL_ERROR "LEM_WINDOWS_STANDALONE is only supported on Windows.")
+ endif()
+ get_target_property(qt_core_type Qt6::Core TYPE)
+ if(NOT qt_core_type STREQUAL "STATIC_LIBRARY")
+  message(FATAL_ERROR "A single Lem.exe requires STATIC Qt. Use app/windows/build-standalone.ps1 -BuildQt, or select an existing static Qt installation.")
+ endif()
+ if(MSVC)
+  set_property(TARGET ${target} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+ elseif(MINGW)
+  # Include libgcc, libstdc++ and winpthreads rather than shipping runtime DLLs.
+  target_link_options(${target} PRIVATE -static -static-libgcc -static-libstdc++)
+ else()
+  message(FATAL_ERROR "Standalone Windows builds support MSVC and MinGW.")
+ endif()
+ foreach(plugin QWindowsIntegrationPlugin QOffscreenIntegrationPlugin QJpegPlugin QSchannelBackendPlugin)
+  if(NOT TARGET Qt6::${plugin})
+   message(FATAL_ERROR "Static Qt is missing ${plugin}. Rebuild using the supplied Windows script (Schannel TLS, JPEG and offscreen support are required).")
+  endif()
+ endforeach()
+ qt_import_plugins(${target} INCLUDE Qt6::QWindowsIntegrationPlugin Qt6::QOffscreenIntegrationPlugin Qt6::QJpegPlugin Qt6::QSchannelBackendPlugin)
+ # Explicit styles ensure the static QML scanner embeds the runtime-selected Fusion style.
+ qt_target_qml_sources(${target} QML_FILES qml/StaticImports.qml)
+ target_compile_definitions(${target} PRIVATE LEM_WINDOWS_STANDALONE)
+ find_package(Python3 3.8 REQUIRED COMPONENTS Interpreter)
+ add_custom_command(TARGET ${target} POST_BUILD
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/windows/verify-pe.py" "$<TARGET_FILE:${target}>"
+  COMMENT "Checking Lem.exe for external DLL dependencies" VERBATIM)
+endfunction()
