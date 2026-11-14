@@ -49,6 +49,15 @@ namespace {
 QByteArray json(QJsonObject o) {
     return QJsonDocument(o).toJson(QJsonDocument::Compact);
 }
+// Journals/checkpoints contain complete report snapshots. A valid JSON object can
+// still be incomplete; replaying it must not discard answers or evidence metadata.
+bool readableReport(const QJsonObject &report) {
+    return !report.value("id").toString().isEmpty() &&
+           report.value("payload").isObject() &&
+           report.value("payload").toObject().value("answers").isObject() &&
+           report.value("photos").isArray() && report.value("template").isObject() &&
+           report.value("snapshot").isObject();
+}
 QString uuid() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
@@ -154,7 +163,7 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
     }
     if (!m_user.isEmpty()) {
         loadUser();
-        m_message = "Dados locais disponíveis. Entre para sincronizar.";
+        if (!m_localReadError) m_message = "Dados locais disponíveis. Entre para sincronizar.";
     }
 }
 Lem::~Lem() {
@@ -217,6 +226,8 @@ QString Lem::cacheDir() const {
 // Restore the full checkpoint, then replay only newer journals owned by this user.
 // Deleted report IDs prevent an older journal from resurrecting a deleted report.
 void Lem::loadUser() {
+    m_localReadError = false;
+    m_localSaveError = false;
     m_autoSync.stop();
     m_syncConflicts.clear();
     m_retryNotBefore = 0;
@@ -228,10 +239,20 @@ void Lem::loadUser() {
     m_current = {};
     m_catalogues = {};
     m_contract.clear();
-    QDir().mkpath(cacheDir());
+    if (!QDir().mkpath(cacheDir())) m_localReadError = true;
     QFile f(cacheDir() + "/cache.json");
     if (f.open(QIODevice::ReadOnly)) {
-        auto o = QJsonDocument::fromJson(f.readAll()).object();
+        QJsonParseError parseError;
+        const auto document = QJsonDocument::fromJson(f.readAll(), &parseError);
+        auto o = document.object();
+        bool valid = f.error() == QFile::NoError && parseError.error == QJsonParseError::NoError && document.isObject() &&
+                     o.value("reports").isObject();
+        for (const auto &key : {"contracts", "chargers", "deleted_reports"})
+            if (o.contains(key) && !o.value(key).isArray()) valid = false;
+        for (const auto &key : {"catalogues", "catalogue_times"})
+            if (o.contains(key) && !o.value(key).isObject()) valid = false;
+        if (o.contains("contract") && !o.value("contract").isString()) valid = false;
+        if (!valid) { m_localReadError = true; o = {}; }
         m_contracts = o["contracts"].toArray();
         m_chargers = o["chargers"].toArray();
         m_reports = o["reports"].toObject();
@@ -248,20 +269,40 @@ void Lem::loadUser() {
             if (m_reports.value(key).isNull() ||
                 (m_reports.value(key).isObject() && m_reports.value(key).toObject().isEmpty()))
                 m_reports.remove(key);
+            else if (!m_reports.value(key).isObject() ||
+                     m_reports.value(key).toObject().value("id").toString() != key ||
+                     !readableReport(m_reports.value(key).toObject()))
+                m_localReadError = true;
+    } else if (QFileInfo::exists(f.fileName())) {
+        m_localReadError = true;
     }
     // Small per-report edit journals are newer than an older full-cache checkpoint.
     const QDir edits(cacheDir() + "/edits");
+    const QFileInfo editFolder(edits.path());
+    if (editFolder.exists() && (!editFolder.isDir() || !edits.isReadable())) m_localReadError = true;
     for (const auto &name : edits.entryList({"*.json"}, QDir::Files | QDir::NoSymLinks)) {
         QFile file(edits.filePath(name));
-        if (!file.open(QIODevice::ReadOnly))
+        if (!file.open(QIODevice::ReadOnly)) {
+            m_localReadError = true;
             continue;
-        const auto report = QJsonDocument::fromJson(file.readAll()).object();
+        }
+        QJsonParseError parseError;
+        const auto document = QJsonDocument::fromJson(file.readAll(), &parseError);
+        const auto report = document.object();
         const auto id = report["id"].toString();
+        if (file.error() != QFile::NoError || parseError.error != QJsonParseError::NoError || !document.isObject() || !readableReport(report)) {
+            m_localReadError = true;
+            continue;
+        }
         if (!id.isEmpty() && !m_deletedReports.contains(id) && report["owner_id"] == m_user["id"] &&
             report["_edit_seq"].toDouble() > m_reports[id].toObject()["_edit_seq"].toDouble())
             m_reports[id] = report;
     }
-    cleanPhotoCache();
+    if (m_localReadError) storageWritable();
+    else {
+        emit localSaveStateChanged();
+        cleanPhotoCache();
+    }
     emit changed();
 }
 
@@ -515,6 +556,7 @@ void Lem::login(QString email, QString password) {
                             f.commit();
                         }
                         m_busy = false;
+                        if (m_localReadError) { emit changed(); return; }
                         refresh();
                         scheduleSync(1500);
                     });
@@ -706,6 +748,7 @@ void Lem::openReport(QString chargerId, QString reportId) {
         });
         return;
     }
+    if (!storageWritable()) return;
     QJsonObject charger, contract;
     for (auto v : m_chargers)
         if (v.toObject()["id"].toString() == chargerId)
@@ -779,6 +822,7 @@ void Lem::getPhotos(QJsonObject report, int index) {
 // Hot input path: update memory and queue a small journal instead of rewriting the cache.
 // _edit_seq distinguishes newer local typing from an older in-flight server snapshot.
 void Lem::answer(QString key, QString value, QString notes) {
+    if (!storageWritable()) return;
     if (copyLocksCheckpoint(m_current["id"].toString(), key) || m_busy || m_current.isEmpty() || m_current["_conflict"].toBool() ||
         m_current["status"].toString() == "closed" || m_current["owner_id"] != m_user["id"])
         return;
@@ -812,6 +856,7 @@ void Lem::answer(QString key, QString value, QString notes) {
 }
 // Manual assessment is independent of the technician's mandatory reading.
 void Lem::setAssessment(QString key, QString assessment) {
+    if (!storageWritable()) return;
     if (copyLocksCheckpoint(m_current["id"].toString(), key) || m_busy || m_current.isEmpty() ||
         m_current["_conflict"].toBool() || m_current["status"] != "draft" ||
         m_current["owner_id"] != m_user["id"] || (assessment != "OK" && assessment != "NOK")) return;
@@ -1698,6 +1743,7 @@ void Lem::demo() {
               {"role", "admin"},
               {"email", "demo@local"}};
     loadUser();
+    if (m_localReadError) return;
     QString cid = "demo-contract", chargerId = "demo-charger";
     m_contract = cid;
     m_contracts = QJsonArray{QJsonObject{{"id", cid},

@@ -31,6 +31,7 @@ locate fonts, point `QT_QPA_FONTDIR` to the system font directory for that test 
 | `network-security`, `evidence-crop-video` | Redirect/reply bounds, paths, cropping and media validation |
 | `connector-checklist`, `measurement-rules` | Shared connector and numeric cases |
 | `review-regressions`, `station-identity`, `copy-measurements`, `rules-057` | Guards, station corrections, scoped copying and manual-reading rules |
+| `data-safety-storage`, `data-safety-signature`, `data-safety-cleanup` | Corrupt/unreadable snapshots and journals, signature reference remapping, and protected evidence eviction |
 
 Test names with historical suffixes identify regressions; they are executable tests, not maintained
 release documentation. Inspect failures and skips rather than assuming that an old test's fixture

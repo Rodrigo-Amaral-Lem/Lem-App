@@ -57,6 +57,12 @@ stays queued. `flushEdits()` is a blocking durability boundary; `persist()` chec
 removing old journals. Startup replays newer eligible journals, excluding tombstones and mismatched
 owners.
 
+Cache and journal reads validate JSON and the essential report structure. An unreadable or incomplete
+local store is a recovery condition: the client reports a local-save error and suspends report metadata writes,
+synchronization and evidence cleanup. It preserves the original files rather than replacing them
+with an empty account. It does not repair corrupt bytes automatically; restore/recover the affected
+files and restart/reload before resuming work.
+
 A successful UI edit is not the same as a completed disk write or server acknowledgement. Surface
 `saving` and `localSaveError`; do not remove evidence after a failed save.
 
@@ -104,9 +110,14 @@ private evidence rather than reviving it.
 Explicit refresh refuses to overwrite dirty local work. Opening cached metadata does not download
 every original. Offline download pins a report and fetches missing files; the download pump bounds
 concurrency. Local evidence cleanup retains report metadata and only removes eligible synchronized
-private files. Unsaved, unacknowledged, dirty or conflicted work remains protected.
+private files. Unsaved, unacknowledged, dirty or conflicted work remains protected. Automatic eviction also
+requires a confirmed server revision and no pending evidence deletions.
 
 ## Copying and signatures
+
+An independent report backup remaps signature references to its new evidence IDs, preserving the
+signer, timestamp and image bytes. An invalid/missing source signature reference blocks that backup
+rather than marking an incomplete copy as safe for discarding the original.
 
 A group copy stages fresh evidence IDs/files, verifies source metadata/digests and commits only
 after all files are durable. Unrelated fields remain editable and are read from the latest target at

@@ -18,6 +18,9 @@
 **/*.user
 **/.qmlls.ini
 **/app-build
+**/app/windows-static-transcript.log
+**/..gitignore.un~
+**/.gitignore~
 
 # Local agent instructions and coordination notes (keep product docs tracked).
 AGENTS.md

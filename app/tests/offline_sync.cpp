@@ -92,6 +92,7 @@ int main(int argc, char **argv) {
         for (const auto &entry : QDir(dir + "/edits").entryList({"*.json"}, QDir::Files))
             CHECK(QFile::remove(dir + "/edits/" + entry));
         closed["status"] = "closed";
+        closed["revision"] = 1; // This fixture represents server-confirmed evidence.
         closed["dirty"] = false;
         closed["last_access"] = 0;
         auto photos = closed["photos"].toArray();

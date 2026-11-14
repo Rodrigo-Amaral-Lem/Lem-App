@@ -49,6 +49,7 @@ QString Lem::editPath(QString reportId) const {
 
 // Coalesce rapid input for 20 ms and retain the newest snapshot for each report ID.
 void Lem::queueEdits(QJsonObject report) {
+    if (!storageWritable()) return;
     m_pendingEdits[report["id"].toString()] = report;
     emit localSaveStateChanged();
     if (m_activeEditId.isEmpty() && !m_editTimer.isActive())
@@ -57,7 +58,7 @@ void Lem::queueEdits(QJsonObject report) {
 
 // Start at most one immutable journal snapshot on the worker pool.
 void Lem::writeNextEdits() {
-    if (m_flushingEdits || !m_activeEditId.isEmpty() || m_pendingEdits.isEmpty())
+    if (m_localReadError || m_flushingEdits || !m_activeEditId.isEmpty() || m_pendingEdits.isEmpty())
         return;
     m_activeEditId = m_pendingEdits.keys().first();
     m_activeEdit = m_pendingEdits[m_activeEditId].toObject();
@@ -91,9 +92,20 @@ void Lem::completeEditWrite() {
     }
 }
 
+// An incomplete read is a recovery condition, not an empty account. Do not write
+// checkpoints/journals or erase evidence until a repaired reload succeeds.
+bool Lem::storageWritable() {
+    if (!m_localReadError) return true;
+    m_localSaveError = true;
+    status("Falha ao ler os dados locais. Os ficheiros foram conservados; gravação, envio e limpeza suspensos até recuperar os dados e reabrir a conta.");
+    emit localSaveStateChanged();
+    return false;
+}
+
 // Durability boundary for identity changes, full checkpoints and application backgrounding.
 // This deliberately waits for the active write, then synchronously saves the latest snapshots.
 bool Lem::flushEdits() {
+    if (!storageWritable()) return false;
     m_editTimer.stop();
     m_flushingEdits = true;
     if (!m_activeEditId.isEmpty()) {
@@ -170,6 +182,7 @@ void Lem::sync() {
 // Select eligible dirty reports. Manual send releases photograph holds but does not
 // override a durable ownership/revision conflict requiring a user decision.
 void Lem::startSync(bool manual) {
+    if (!storageWritable()) return;
     if (m_busy || !m_qveCopyTarget.isEmpty() || attachingFiles() || m_syncing || m_refreshing || m_catalogueLoading) {
         scheduleSync(3000);
         return;
@@ -949,6 +962,7 @@ void Lem::fetchPhotoForReport(QString reportId, QString photoId) {
 // and answers remain available offline and visible without a catalogue refresh.
 // Protect unpublished/unsent/conflicted work; never delete gallery originals.
 void Lem::clearLocalCopies() {
+    if (!storageWritable()) return;
     if (m_user.isEmpty()) {
         status("Não existe uma conta local para limpar.");
         return;
@@ -1028,7 +1042,7 @@ void Lem::clearLocalCopies() {
 // Automatic image eviction: oldest eligible images first, using a 256 MiB budget/7-day age.
 // Dirty, draft, active and explicitly pinned reports are excluded from automatic eviction.
 void Lem::cleanPhotoCache() {
-    if (m_user.isEmpty() || !m_qveCopyTarget.isEmpty() || attachingFiles() || m_syncing || !m_downloads.isEmpty())
+    if (m_localReadError || m_user.isEmpty() || !m_qveCopyTarget.isEmpty() || attachingFiles() || m_syncing || !m_downloads.isEmpty())
         return;
     constexpr qint64 budget = 256LL * 1024 * 1024, age = 7 * 24 * 60 * 60;
     const auto now = QDateTime::currentSecsSinceEpoch();
@@ -1046,7 +1060,8 @@ void Lem::cleanPhotoCache() {
     QList<Candidate> candidates;
     for (auto it = m_reports.begin(); it != m_reports.end(); ++it) {
         const auto r = it.value().toObject();
-        if (r["offline_photos"].toBool() || r["dirty"].toBool() ||
+        if (r["offline_photos"].toBool() || r["dirty"].toBool() || r["_conflict"].toBool() ||
+            r["revision"].toInt() <= 0 || !r["deleted_photos"].toArray().isEmpty() ||
             r["status"].toString() != "closed" || r["id"] == m_current.value("id"))
             continue;
         for (auto value : r["photos"].toArray()) {
@@ -1204,6 +1219,7 @@ void Lem::copyLocalReport() {
     copy["payload"] = payload;
     copy = Checklist::correctedDraft(copy);
     QJsonArray photos;
+    QJsonObject copiedPhotoIds;
     QList<QPair<QString, QString>> files;
     for (auto value : source["photos"].toArray()) {
         auto p = value.toObject();
@@ -1215,12 +1231,32 @@ void Lem::copyLocalReport() {
         p["mime"] = mime;
         p["filename"] = pid + ext;
         files.append({localPath(QUrl(p["path"].toString())), target});
+        copiedPhotoIds[p["id"].toString()] = pid;
         p["id"] = pid;
         p["path"] = QUrl::fromLocalFile(target).toString();
         p["uploaded"] = false;
         p.remove("digest");
         photos.append(p);
     }
+    auto signatures = payload["signatures"].toObject();
+    for (const auto &key : signatures.keys()) {
+        auto signature = signatures[key].toObject();
+        const auto oldId = signature["photo_id"].toString();
+        bool validSource = false;
+        for (auto value : source["photos"].toArray()) {
+            const auto photo = value.toObject();
+            if (photo["id"] == oldId && photo["checkpoint"] == key && photo["mime"] == "image/png")
+                validSource = true;
+        }
+        if (!validSource || !copiedPhotoIds.contains(oldId)) {
+            status("A assinatura referencia uma fotografia em falta ou inválida. A cópia não foi criada; o original foi conservado.");
+            return;
+        }
+        signature["photo_id"] = copiedPhotoIds[oldId];
+        signatures[key] = signature;
+    }
+    if (payload.contains("signatures")) payload["signatures"] = signatures;
+    copy["payload"] = payload;
     copy["photos"] = photos;
     m_busy = true;
     status("A criar uma cópia independente com todas as fotografias…");

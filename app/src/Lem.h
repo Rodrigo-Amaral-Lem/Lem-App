@@ -65,7 +65,7 @@ class Lem : public QObject {
         return !m_pendingEdits.isEmpty();
     }
     bool localSaveError() const {
-        return m_localSaveError;
+        return m_localSaveError || m_localReadError;
     }
     QString server() const {
         return m_server;
@@ -265,6 +265,7 @@ class Lem : public QObject {
     void exportSaved(const QString &kind, const QUrl &target, bool local = false);
     void status(QString s);
     bool online();
+    bool storageWritable();
     bool persist();
     void loadUser();
     QString cacheDir() const;
@@ -289,6 +290,7 @@ class Lem : public QObject {
     QString m_activeEditId;
     QJsonObject m_activeEdit;
     bool m_flushingEdits = false, m_localSaveError = false;
+    bool m_localReadError = false; // Never replace unreadable recovery evidence with empty state.
     // Emit model-specific notifications only when their contents actually change.
     QJsonObject m_notifiedTemplate, m_notifiedCurrent;
     QJsonArray m_notifiedPhotos;
