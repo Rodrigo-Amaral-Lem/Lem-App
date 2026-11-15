@@ -21,6 +21,7 @@ with the small tagline removed and transparent background/counters. It is not an
 master. The original request preserved the cyan plug and dark-grey lowercase wordmark, with no extra
 text, 3D, shadows or framing. Platform sizes were prepared from the raster masters.
 
-Customer resources in the workspace's user-managed `Brand_Images` directory are not automatically
-incorporated. See [workspace ownership](../../../Common/docs/workspace.md) and
+Customer artwork must be deliberately added to the appropriate tracked assets; files in a
+developer's local resource folders are not automatically incorporated. See
+[workspace ownership](../../../Common/docs/workspace.md) and
 [build/deployment](../../docs/build-and-release.md) before changing assets or package identity.

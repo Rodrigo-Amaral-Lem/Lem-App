@@ -4,7 +4,8 @@
 # Build tool: see docs/build-and-release.md in the App repository.
 # Inputs: required static -QtPrefix; optional -BuildQt/-QtSource/-QtBuild and native compiler.
 # Mutations: Qt/app build and install trees, PE report, portable EXE and app/windows-static-transcript.log.
-# Use -BuildDirectory under ongoing_work; Qt SDK build paths must be separate and space-free.
+# Run from the App repository root; use -BuildDirectory ./build/standalone for local outputs.
+# Qt SDK source/build/install paths must be separate and space-free.
 # The isolated smoke test and PE audit are both required; copying a shared-kit EXE is insufficient.
 
 # Build native static Qt once, then link and validate a single portable Lem.exe.

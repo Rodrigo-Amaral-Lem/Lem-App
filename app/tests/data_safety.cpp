@@ -203,7 +203,7 @@ struct LemReviewTest {
 
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
-    app.setApplicationVersion("0.1.57");
+    app.setApplicationVersion("0.2.0");
     QTemporaryDir root;
     const QString mode = argc > 1 ? argv[1] : "";
     const bool ok = mode == "storage"     ? LemReviewTest::storage(root.path())

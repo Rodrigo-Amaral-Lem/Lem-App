@@ -1083,6 +1083,8 @@ ApplicationWindow {
     })
     function itemIssues(item) {
         const a = answerFor(item.id), value = String(a.value || "").trim(), issues = [];
+        if (item.kind === "status" && String(a.value || "") && ["OK", "NOK", "NA"].indexOf(String(a.value)) < 0)
+            issues.push("Escolha OK, NOK ou N/A");
         if (!value && !item.optional)
             issues.push("Falta resposta");
         if (value && Measurements.digits(item.id) && Measurements.format(item.id, value) === null)
@@ -1093,6 +1095,13 @@ ApplicationWindow {
             issues.push("Falta observação NOK");
         if (item.na_notes_required && Measurements.notApplicable(value) && !String(a.notes || "").trim())
             issues.push("Falta observação N/A");
+        if (item.signature_required) {
+            const signature = (((lem.current.payload || {}).signatures || {})[item.id]);
+            if (!signature)
+                issues.push("Falta assinatura do técnico");
+            else if (signature.signed_by !== value || !(lem.current.photos || []).some(p => p.id === signature.photo_id && p.checkpoint === item.id && p.mime === "image/png"))
+                issues.push("Assinatura inválida; assine novamente");
+        }
         if (item.photo_required && (item.photo_always || !Measurements.notApplicable(value)) && !photographsFor(item.id).length)
             issues.push("Falta fotografia");
         return issues;
@@ -1668,7 +1677,7 @@ ApplicationWindow {
                 primary: true
                 enabled: !lem.busy
                 onClicked: {
-                    if (lem.current.id === removeNotesDialog.reportId && win.editing && win.answerFor(removeNotesDialog.checkpoint).value !== "NOK") {
+                    if (lem.current.id === removeNotesDialog.reportId && win.editing) {
                         Qt.inputMethod.hide();
                         lem.answer(removeNotesDialog.checkpoint, win.answerFor(removeNotesDialog.checkpoint).value || "", "");
                     }
@@ -1776,8 +1785,8 @@ ApplicationWindow {
             UiButton {
                 objectName: "syncButton"
                 Layout.fillWidth: win.compact
-                text: "Sinc. (" + lem.pendingCount() + ")"
-                Accessible.name: "Sincronizar. " + lem.pendingCount() + " reports pendentes"
+                text: "Sinc. (" + lem.pendingReports + ")"
+                Accessible.name: "Sincronizar. " + lem.pendingReports + " reports pendentes"
                 enabled: !lem.busy && !lem.syncing && !!lem.user.id
                 onClicked: lem.sync()
             }
@@ -1929,7 +1938,8 @@ ApplicationWindow {
                         Layout.fillWidth: true
                     }
                     UiLabel {
-                        text: lem.pendingCount() + " report(s) por sincronizar"
+                        objectName: "pendingReportsLabel"
+                        text: lem.pendingReports + " report(s) por sincronizar"
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true
                     }
@@ -2970,7 +2980,7 @@ ApplicationWindow {
     }
     FileDialog {
         id: videoDialog
-        title: "Adicionar vídeos · até 60 segundos e 20 MB por vídeo"
+        title: "Adicionar vídeos · até 120 segundos e 60 MiB por vídeo"
         nameFilters: ["Vídeos (*.mp4 *.3gp)"]
         fileMode: FileDialog.OpenFiles
         onAccepted: lem.attachMany(win.photoItem, selectedFiles)
@@ -3663,7 +3673,7 @@ ApplicationWindow {
                                                     visible: win.editing && itemCard.modelData.kind === "text"
                                                     Layout.fillWidth: true
                                                     // NA is a selected state, never partially editable text.
-                                                    placeholderText: itemCard.modelData.reading_required ? (Measurements.unit(itemCard.modelData.id) === "Ω" ? "Valor medido em Ω (ou NA)" : itemCard.modelData.id === "MAN.12" ? "Corrente de disparo medida (ou NA)" : "Valor medido em MΩ (ou NA)") : itemCard.modelData.allow_status && (itemCard.answerValue === "OK" || (itemCard.answerValue === "NOK" || win.answerFor(itemCard.modelData.id).assessment === "NOK")) ? itemCard.answerValue + " selecionado" : Measurements.notApplicable(itemCard.answerValue) && Measurements.digits(itemCard.modelData.id) ? "NA" : Measurements.digits(itemCard.modelData.id) ? (Measurements.unit(itemCard.modelData.id) === "V" ? "Ex.: 238,3" : "Ex.: 4564,4") : "Valor / resultado (ou NA)"
+                                                    placeholderText: itemCard.modelData.id === "FIN.02" ? "Nome" : /^MAN\.(14|15|16|17)$/.test(itemCard.modelData.id) ? "Valor medido (ou NA)" : itemCard.modelData.reading_required ? (Measurements.unit(itemCard.modelData.id) === "Ω" ? "Valor medido em Ω (ou NA)" : itemCard.modelData.id === "MAN.12" ? "Intensidade de disparo medida (ou NA)" : "Valor medido em MΩ (ou NA)") : itemCard.modelData.allow_status && (itemCard.answerValue === "OK" || (itemCard.answerValue === "NOK" || win.answerFor(itemCard.modelData.id).assessment === "NOK")) ? itemCard.answerValue + " selecionado" : Measurements.notApplicable(itemCard.answerValue) && Measurements.digits(itemCard.modelData.id) ? "NA" : Measurements.digits(itemCard.modelData.id) ? (Measurements.unit(itemCard.modelData.id) === "V" ? "Ex.: 238,3" : "Ex.: 4564,4") : "Valor / resultado (ou NA)"
                                                     rightPadding: Measurements.digits(itemCard.modelData.id) ? 38 : 12
                                                     UiLabel {
                                                         anchors.right: parent.right
@@ -3677,7 +3687,7 @@ ApplicationWindow {
                                                         regularExpression: Measurements.editorPattern(itemCard.modelData.id)
                                                     }
                                                     inputMethodHints: Measurements.digits(itemCard.modelData.id) ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
-                                                    text: Measurements.editorText(itemCard.modelData.id, win.answerFor(itemCard.modelData.id).value)
+                                                    text: itemCard.modelData.id === "MAN.18" && Measurements.notApplicable(itemCard.answerValue) ? "NA" : Measurements.editorText(itemCard.modelData.id, win.answerFor(itemCard.modelData.id).value)
                                                     enabled: !lem.busy
                                                     selectByMouse: true
                                                     Accessible.name: itemCard.modelData.label
@@ -3778,7 +3788,7 @@ ApplicationWindow {
                                                     Layout.fillWidth: true
                                                     placeholderText: (itemCard.answerValue === "NOK" || win.answerFor(itemCard.modelData.id).assessment === "NOK") ? "Descreva a não conformidade" : itemCard.notesRequired ? "Indique o motivo de N/A" : "Observações"
                                                     wrapMode: TextEdit.Wrap
-                                                    visible: win.editing && !itemCard.modelData.notes_disabled && (itemCard.modelData.kind === "notes" || itemCard.noteExpanded || itemCard.notesRequired || text.length > 0)
+                                                    visible: win.editing && !itemCard.modelData.notes_disabled && (itemCard.modelData.kind === "notes" || itemCard.modelData.notes_visible || itemCard.noteExpanded || itemCard.notesRequired || text.length > 0)
                                                     text: win.answerFor(itemCard.modelData.id).notes || ""
                                                     enabled: !lem.busy
                                                     selectByMouse: true
@@ -3862,7 +3872,7 @@ ApplicationWindow {
                                                             text: "Vídeo"
                                                             Accessible.name: "Adicionar vídeo · " + itemCard.modelData.id
                                                             ToolTip.visible: hovered
-                                                            ToolTip.text: "Vídeo · até 60 segundos e 20 MB"
+                                                            ToolTip.text: "Vídeo · até 120 segundos e 60 MiB"
                                                             enabled: win.editing && !lem.busy
                                                             onClicked: {
                                                                 win.photoItem = itemCard.modelData.id;
@@ -3897,6 +3907,7 @@ ApplicationWindow {
                                                         }
                                                         UiButton {
                                                             objectName: "toggleNotes_" + itemCard.modelData.id
+                                                            visible: !itemCard.modelData.notes_button_hidden
                                                             Layout.minimumWidth: 44
                                                             Layout.preferredWidth: win.touchHeight
                                                             Layout.maximumWidth: win.touchHeight
@@ -3906,7 +3917,7 @@ ApplicationWindow {
                                                             Accessible.name: (notes.visible ? "Remover observação" : "Adicionar observação") + " · " + itemCard.modelData.id
                                                             ToolTip.visible: hovered
                                                             ToolTip.text: (itemCard.answerValue === "NOK" || win.answerFor(itemCard.modelData.id).assessment === "NOK") ? "Observação obrigatória em NOK" : notes.visible ? "Remover observação" : "Adicionar observação"
-                                                            enabled: !lem.busy && !itemCard.notesRequired
+                                                            enabled: !lem.busy
                                                             onClicked: {
                                                                 if (notes.visible) {
                                                                     itemCard.noteExpanded = false;

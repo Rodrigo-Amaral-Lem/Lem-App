@@ -42,6 +42,7 @@ class Lem : public QObject {
     Q_PROPERTY(QVariantMap clientCompatibility READ clientCompatibility NOTIFY compatibilityChanged)
     Q_PROPERTY(bool authenticated READ authenticated NOTIFY changed)
     Q_PROPERTY(bool syncing READ syncing NOTIFY changed)
+    Q_PROPERTY(int pendingReports READ pendingCount NOTIFY changed)
     Q_PROPERTY(bool refreshing READ refreshing NOTIFY changed)
     Q_PROPERTY(QString syncState READ syncState NOTIFY changed)
     Q_PROPERTY(double photoCacheMB READ photoCacheMB NOTIFY changed)

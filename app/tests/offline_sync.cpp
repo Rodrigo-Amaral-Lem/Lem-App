@@ -49,7 +49,7 @@ static bool write(QString path, QJsonObject o) {
 }
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
-    app.setApplicationVersion("0.1.57");
+    app.setApplicationVersion("0.2.0");
     app.setOrganizationName("Lem-Offline-Test");
     app.setApplicationName("Lem Offline Test");
     QTemporaryDir temp;

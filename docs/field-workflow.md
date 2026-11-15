@@ -22,12 +22,15 @@ releases deferred evidence synchronization. Review shows missing answers, requir
 required observations; tapping an issue returns to the field.
 
 Status questions use OK/NOK/N/A. Measurement questions keep the reading separate from `assessment`.
-OK/NOK never fills or replaces a mandatory reading. N/A clears its separate assessment. NOK normally
-requires an observation; SEG.02–SEG.06 are the explicit exception, with no observation or attachment
-controls.
+OK/NOK never fills or replaces a mandatory reading. N/A clears its separate assessment. NOK requires an observation, including SEG.02–SEG.06. These items show the field automatically
+without an observation button or attachment controls; SEG.02 and SEG.04 also require a reason for N/A.
 
-SEG.07, QVE.14 and MAN.21 are optional observation/media entries with no status buttons. Leaving
-them empty does not block completion. MAN.12 always needs a photograph, even with N/A. A video does
+MAN.02 uses OK/NOK/N/A and requires an observation for NOK; N/A does not require one.
+
+SEG.01 requires an explanatory observation for N/A; a photograph remains exempt for N/A.
+
+SEG.07, SITE.06, QVE.14, EST.18, MAN.21, CARG.07 and FIN.03 are optional observation/media entries with no status buttons. Leaving
+them empty does not block completion. MAN.12 needs a photograph when applicable; N/A exempts the photograph but requires an observation. A video does
 not satisfy a required photograph.
 
 The application validates closure locally; the server validates again after synchronization. A
@@ -100,3 +103,7 @@ Server PDF/ZIP exports require server access and accepted evidence. Local PDF ge
 current report and locally available evidence. A ZIP includes media originals as well as the report;
 videos are not still photographs. Verify that required files are available before relying on an
 offline export.
+
+N/A suggestions are editable and apply only when entering N/A with empty notes. Existing notes
+are preserved. See the report contract for all required-note items. FIN.02 hides general media
+buttons and keeps notes and dedicated signature controls. QVE.01–03 use “Botoneira”.

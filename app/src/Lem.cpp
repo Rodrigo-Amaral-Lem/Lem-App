@@ -834,6 +834,12 @@ void Lem::answer(QString key, QString value, QString notes) {
     auto payload = m_current["payload"].toObject();
     auto answers = payload["answers"].toObject();
     auto nextAnswer = answers[key].toObject();
+    const auto suggested = Checklist::naNotesDefault(m_current["template"].toObject(), key);
+    const bool wasNA = Measurements::notApplicable(nextAnswer["value"].toString());
+    const bool isNA = Measurements::notApplicable(value);
+    if (isNA && !wasNA && notes.trimmed().isEmpty()) notes = suggested;
+    // Clear only the unchanged suggestion when leaving N/A; preserve custom notes.
+    if (wasNA && !isNA && !suggested.isEmpty() && notes == suggested) notes.clear();
     nextAnswer["value"] = value;
     nextAnswer["notes"] = notes;
     if (Measurements::notApplicable(value)) nextAnswer.remove("assessment");
@@ -869,7 +875,11 @@ void Lem::setAssessment(QString key, QString assessment) {
     auto answers = payload["answers"].toObject();
     auto answer = answers[key].toObject();
     if (answer["assessment"] == assessment && !Measurements::notApplicable(answer["value"].toString())) return;
-    if (Measurements::notApplicable(answer["value"].toString())) answer["value"] = "";
+    if (Measurements::notApplicable(answer["value"].toString())) {
+        const auto suggested = Checklist::naNotesDefault(m_current["template"].toObject(), key);
+        if (!suggested.isEmpty() && answer["notes"].toString() == suggested) answer["notes"] = "";
+        answer["value"] = "";
+    }
     answer["value"] = answer["value"].toString();
     answer["notes"] = answer["notes"].toString();
     answer["assessment"] = assessment;
@@ -915,16 +925,19 @@ bool Lem::attachToReport(QString reportId, QString key, QUrl url) {
         status("Não foi possível ler a fotografia.");
         return false;
     }
-    auto bytes = f.read(20 * 1024 * 1024 + 1);
-    if (bytes.size() > 20 * 1024 * 1024) {
-        status("Máximo 20 MB por evidência.");
+    auto bytes = f.read(60 * 1024 * 1024 + 1);
+    if (bytes.size() > 60 * 1024 * 1024) {
+        status("Máximo 60 MiB por vídeo.");
         return false;
     }
     const auto videoMime = EvidenceMedia::videoMime(bytes);
+    if (videoMime.isEmpty() && bytes.size() > 20 * 1024 * 1024) {
+        status("Máximo 20 MiB por fotografia."); return false;
+    }
     QString ext;
     if (!videoMime.isEmpty()) {
         if (!EvidenceMedia::durationValid(bytes)) {
-            status("Vídeo inválido ou superior a 60 segundos. Use MP4 ou 3GP.");
+            status("Vídeo inválido ou superior a 120 segundos. Use MP4 ou 3GP.");
             return false;
         }
         ext = videoMime == "video/3gpp" ? ".3gp" : ".mp4";
@@ -956,14 +969,14 @@ bool Lem::attachToReport(QString reportId, QString key, QUrl url) {
         ext = ".jpg";
     }
     }
-    if (bytes.size() > 20 * 1024 * 1024) {
-        status("Máximo 20 MB por evidência após conversão."); return false;
+    if (bytes.size() > (videoMime.isEmpty() ? 20 : 60) * 1024 * 1024) {
+        status("Limite por ficheiro: 20 MiB por fotografia ou 60 MiB por vídeo."); return false;
     }
     auto existing = report["photos"].toArray();
     qint64 total = bytes.size();
     for (auto value : existing) total += value.toObject()["size"].toDouble();
-    if (existing.size() >= 200 || total > 250 * 1024 * 1024) {
-        status("Limite por report: 200 evidências e 250 MB."); return false;
+    if (existing.size() >= 200 || total > 400 * 1024 * 1024) {
+        status("Limite por report: 200 evidências e 400 MiB."); return false;
     }
     QString id = uuid(), path = cacheDir() + "/photos/" + id + ext;
     QDir().mkpath(cacheDir() + "/photos");
@@ -1049,8 +1062,8 @@ void Lem::cropPhoto(QString photoId, qreal x, qreal y, qreal width, qreal height
         qint64 total = size;
         for (auto value : photos)
             if (value.toObject()["id"].toString() != photoId) total += value.toObject()["size"].toDouble();
-        if (total > 250 * 1024 * 1024) {
-            QFile::remove(target); status("Limite de 250 MB por report. Fotografia original conservada."); return;
+        if (total > 400 * 1024 * 1024) {
+            QFile::remove(target); status("Limite de 400 MiB por report. Fotografia original conservada."); return;
         }
         auto replacement = old;
         replacement["id"] = newId; replacement["mime"] = mime;
@@ -1372,7 +1385,7 @@ void Lem::finish() {
         for (auto i : s.toObject()["items"].toArray()) {
             auto item = i.toObject();
             auto id = item["id"].toString();
-            auto a = answers[id].toObject();
+            auto a = answers.value(id).toObject();
             auto value = a["value"].toString().trimmed();
             if (Measurements::digits(id) && !value.isEmpty()) {
                 bool valid = false;
@@ -1385,6 +1398,8 @@ void Lem::finish() {
                 }
             }
             const auto signature = m_current["payload"].toObject()["signatures"].toObject()[id].toObject();
+            if (item["signature_required"].toBool() && signature.isEmpty())
+                errors << id + ": falta assinatura do técnico";
             if (!signature.isEmpty()) {
                 bool signatureFound = false;
                 for (auto entry : photos) {
@@ -1397,6 +1412,9 @@ void Lem::finish() {
             if (m_template["version"].toInt() >= 4 && identityFields.contains(id) && !Measurements::notApplicable(value) &&
                 value != m_current["snapshot"].toObject()["charger"].toObject()[identityFields.value(id)].toString().trimmed() && value.size() > 500)
                 errors << id + ": máximo 500 caracteres";
+            if (item["kind"] == "status" && !a["value"].toString().isEmpty() &&
+                !QStringList{"OK", "NOK", "NA"}.contains(a["value"].toString()))
+                errors << id + ": escolha OK, NOK ou N/A";
             if (value.isEmpty() && !item["optional"].toBool())
                 errors << id + ": falta resposta";
             if (item["reading_required"].toBool() && (value.compare("OK", Qt::CaseInsensitive) == 0 || value.compare("NOK", Qt::CaseInsensitive) == 0))

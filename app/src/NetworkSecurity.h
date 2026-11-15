@@ -39,9 +39,9 @@ inline QSharedPointer<ReplyBody> boundReply(QNetworkReply *reply, qsizetype limi
     return body;
 }
 inline qsizetype responseLimit(const QString &path) {
-    if (path.contains(QStringLiteral("/photos/"))) return 20 * 1024 * 1024;
+    if (path.contains(QStringLiteral("/photos/"))) return 60 * 1024 * 1024;
     if (path.endsWith(QStringLiteral("/bundle")) || path.endsWith(QStringLiteral("/pdf")))
-        return 350 * 1024 * 1024;
+        return 500 * 1024 * 1024;
     return 64 * 1024 * 1024;
 }
 }

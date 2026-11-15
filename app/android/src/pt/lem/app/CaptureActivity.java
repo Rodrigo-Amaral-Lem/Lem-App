@@ -85,7 +85,7 @@ public class CaptureActivity extends Activity {
                                                  : MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA);
                 startActivity(camera);
                 android.widget.Toast.makeText(this,
-                    video ? "Grave até 60 s / 20 MB. Depois volte à Lem e selecione o vídeo."
+                    video ? "Grave até 120 s / 60 MiB. Depois volte à Lem e selecione o vídeo."
                           : "Tire a fotografia. Depois volte à Lem e selecione a imagem.",
                     android.widget.Toast.LENGTH_LONG).show();
             } catch (android.content.ActivityNotFoundException e) {
@@ -120,8 +120,8 @@ public class CaptureActivity extends Activity {
             flow.state = CameraFlow.CAPTURE;
             Intent camera = new Intent(video ? MediaStore.ACTION_VIDEO_CAPTURE : MediaStore.ACTION_IMAGE_CAPTURE);
             if (video) {
-                camera.putExtra(MediaStore.EXTRA_DURATION_LIMIT, 60);
-                camera.putExtra(MediaStore.EXTRA_SIZE_LIMIT, 20L * 1024 * 1024);
+                camera.putExtra(MediaStore.EXTRA_DURATION_LIMIT, 120);
+                camera.putExtra(MediaStore.EXTRA_SIZE_LIMIT, 60L * 1024 * 1024);
                 camera.putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 0);
             }
             camera.putExtra(MediaStore.EXTRA_OUTPUT, photoUri);
@@ -168,16 +168,16 @@ public class CaptureActivity extends Activity {
                         if (input == null) throw new java.io.IOException("No camera data");
                         while ((count = input.read(buffer)) != -1) {
                             total += count;
-                            if (total > 20L * 1024 * 1024) throw new java.io.IOException("Evidence too large");
+                            if (total > (video ? 60L : 20L) * 1024 * 1024) throw new java.io.IOException("Evidence too large");
                             output.write(buffer, 0, count);
                         }
                     }
                 }
-                if (photo == null || !photo.isFile() || photo.length() == 0 || photo.length() > 20L * 1024 * 1024)
+                if (photo == null || !photo.isFile() || photo.length() == 0 || photo.length() > (video ? 60L : 20L) * 1024 * 1024)
                     throw new java.io.IOException("Invalid capture");
                 finishCapture("", true);
             } catch (Exception error) {
-                finishCapture("Captura inválida ou superior a 20 MB. Tente uma captura mais curta.", false);
+                finishCapture("Captura inválida: máximo 20 MiB por fotografia ou 60 MiB por vídeo.", false);
             }
         }
     }

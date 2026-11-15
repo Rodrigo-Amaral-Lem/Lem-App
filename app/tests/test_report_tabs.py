@@ -32,6 +32,7 @@ for role in [QPalette.ColorRole.WindowText, QPalette.ColorRole.Text, QPalette.Co
     p.setColor(role, QColor("#ffffff"))
 app.setPalette(p)
 values = {
+    "pendingReports": 1,
     "operationStatus": {
         "active": False,
         "title": "Sem transferências em curso",
@@ -99,6 +100,8 @@ for name, value in values.items():
             )
         )
     )
+    if name == "pendingReports":
+        typ = int
     attrs[name] = Property(
         typ,
         lambda self, n=name: values[n],
@@ -553,9 +556,9 @@ def run_tests():
             QTest.qWait(60)
         trigger("answer_EST.01_NOK")
         assert notes.isVisible(), "NOK must open required observations"
-        assert not find_visual(w.contentItem(), "toggleNotes_EST.01").property(
+        assert find_visual(w.contentItem(), "toggleNotes_EST.01").property(
             "enabled"
-        ), "NOK observations remain mandatory"
+        ), "Mandatory observations can be cleared after confirmation"
         assert "Falta observação NOK" in js("itemIssues(lem.sections[1].items[0]).join()")
         notes.forceActiveFocus()
         for ch in "Teste":

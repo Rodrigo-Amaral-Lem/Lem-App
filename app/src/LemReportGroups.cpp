@@ -154,7 +154,7 @@ void Lem::beginQveCopy(QJsonObject source) {
         m_qveCopyPhotos.append(photo);
         ++count; size += qint64(photo["size"].toDouble());
     }
-    if (count > 200 || size > 250 * 1024 * 1024) { failQveCopy("A cópia ultrapassa o limite de 200 evidências ou 250 MB."); return; }
+    if (count > 200 || size > 400 * 1024 * 1024) { failQveCopy("A cópia ultrapassa o limite de 200 evidências ou 400 MiB."); return; }
     copyNextQvePhoto(0);
 }
 
@@ -165,7 +165,7 @@ void Lem::copyNextQvePhoto(int index) {
     if (!QFileInfo(path).isFile()) path = SafeStorage::photoPath(cacheDir(), photo["id"].toString(), photo["mime"].toString());
     QFile file(path);
     if (file.open(QIODevice::ReadOnly)) {
-        auto bytes = file.read(20 * 1024 * 1024 + 1);
+        auto bytes = file.read(60 * 1024 * 1024 + 1);
         stageQvePhoto(index, bytes); return;
     }
     if (m_token.isEmpty() || m_server.startsWith("demo:")) {
@@ -177,8 +177,9 @@ void Lem::copyNextQvePhoto(int index) {
 }
 
 void Lem::stageQvePhoto(int index, const QByteArray &bytes) {
-    if (bytes.isEmpty() || bytes.size() > 20 * 1024 * 1024) { failQveCopy("Evidência QVE inválida ou superior a 20 MB."); return; }
     auto photo = m_qveCopyPhotos[index].toObject();
+    const auto limit = (photo["mime"].toString().startsWith("video/") ? 60 : 20) * 1024 * 1024;
+    if (bytes.isEmpty() || bytes.size() > limit) { failQveCopy("Evidência inválida: máximo 20 MiB por fotografia ou 60 MiB por vídeo."); return; }
     const auto digest = photo["digest"].toString();
     if (!digest.isEmpty() && QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) != digest) {
         failQveCopy("A evidência da origem está incompleta ou danificada. Descarregue novamente a origem."); return;
@@ -233,7 +234,7 @@ void Lem::commitQveCopy() {
     }
     for (auto entry : m_qveCopyPhotos) photos.append(entry);
     for (auto entry : photos) total += qint64(entry.toObject()["size"].toDouble());
-    if (total > 250 * 1024 * 1024 || photos.size() > 200) { failQveCopy("A cópia ultrapassa os limites de evidências do report."); return; }
+    if (total > 400 * 1024 * 1024 || photos.size() > 200) { failQveCopy("A cópia ultrapassa os limites de evidências do report."); return; }
     report["payload"] = payload; report["photos"] = photos; report["deleted_photos"] = deleted;
     report["dirty"] = true; report["_defer_photo_sync"] = true;
     report["_edit_seq"] = report["_edit_seq"].toDouble() + 1;
@@ -323,7 +324,7 @@ bool Lem::saveSignature(QString checkpoint, QString dataUrl) {
         if (p["id"] == old) { if (!deleted.contains(old)) deleted.append(old); }
         else { photos.append(p); total += qint64(p["size"].toDouble()); }
     }
-    if (photos.size() >= 200 || total > 250 * 1024 * 1024) { status("Limite de evidências do report atingido."); return false; }
+    if (photos.size() >= 200 || total > 400 * 1024 * 1024) { status("Limite de evidências do report atingido."); return false; }
     QDir().mkpath(cacheDir() + "/photos"); QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
         status("Não foi possível guardar a assinatura."); return false;
@@ -348,7 +349,10 @@ bool Lem::saveSignature(QString checkpoint, QString dataUrl) {
 }
 
 void Lem::attachMany(QString checkpoint, const QList<QUrl> &files) {
-    if (files.isEmpty() || switchingBlocked(false) || m_current["status"] != "draft" ||
+    // Attaching is a local edit: an in-flight sync merges its acknowledgement
+    // into the latest report, retaining new evidence and its pending upload flag.
+    if (files.isEmpty() || m_busy || m_refreshing || !m_downloads.isEmpty() ||
+        downloadingPhotos() || attachingFiles() || m_current["status"] != "draft" ||
         m_current["owner_id"] != m_user["id"] || m_current["_conflict"].toBool() ||
         copyLocksCheckpoint(m_current["id"].toString(), checkpoint)) return;
     if (files.size() + m_current["photos"].toArray().size() > 200) {

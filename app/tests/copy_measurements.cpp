@@ -59,4 +59,4 @@ struct LemReviewTest {
   return true;
  }
 };
-int main(int argc,char **argv){QGuiApplication app(argc,argv);app.setApplicationVersion("0.1.57");QTemporaryDir root;Lem c(root.path());return LemReviewTest::run(c,root.path(),argc>1?QString::fromLocal8Bit(argv[1]):QString())?0:1;}
+int main(int argc,char **argv){QGuiApplication app(argc,argv);app.setApplicationVersion("0.2.0");QTemporaryDir root;Lem c(root.path());return LemReviewTest::run(c,root.path(),argc>1?QString::fromLocal8Bit(argv[1]):QString())?0:1;}

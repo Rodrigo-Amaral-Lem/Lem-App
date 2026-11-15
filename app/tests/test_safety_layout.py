@@ -11,14 +11,17 @@ for n in range(2,7):
  trigger('answer_'+key+'_NOK');QTest.qWait(10)
  assert not find_visual(w.contentItem(),'addPhoto_'+key).isVisible()
  assert not find_visual(w.contentItem(),'toggleNotes_'+key).isVisible()
- assert not find_visual(w.contentItem(),'notes_'+key).isVisible()
- assert js(f'itemIssues(lem.sections[0].items.find(i=>i.id==="{key}")).length')==0
+ assert find_visual(w.contentItem(),'notes_'+key).isVisible()
+ assert js(f'itemIssues(lem.sections[0].items.find(i=>i.id==="{key}")).length')>0
+ trigger('answer_'+key+'_NA');QTest.qWait(10)
+ assert find_visual(w.contentItem(),'notes_'+key).isVisible() == (n in (2,4))
+ assert not find_visual(w.contentItem(),'toggleNotes_'+key).isVisible()
 for status in ['OK','NOK','NA']:
  assert find_visual(w.contentItem(),'answer_SEG.07_'+status) is None or not find_visual(w.contentItem(),'answer_SEG.07_'+status).isVisible()
 assert find_visual(w.contentItem(),'notes_SEG.07').isVisible()
 assert find_visual(w.contentItem(),'addPhoto_SEG.07').isVisible()
 assert js('itemIssues(lem.sections[0].items.find(i=>i.id==="SEG.07")).length')==0
 assert not errors,errors
-print('PASS: group order, SEG.02-06 without attachments/notes, optional SEG.07 with photos/notes and no statuses')
+print('PASS: group order, SEG.02-06 conditional required notes without attachment/note buttons, optional SEG.07 with photos/notes and no statuses')
 from shiboken6 import delete
 delete(engine)

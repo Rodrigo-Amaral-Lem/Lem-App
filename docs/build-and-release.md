@@ -1,8 +1,8 @@
 # Build and release the client
 
-This guide describes the current `0.1.57` source. Run local commands from the sibling `ongoing_work`
-directory. Paths in examples assume `App`, `Server`, `Common` and `ongoing_work` share the same
-parent.
+This guide describes the current `0.2.0` source. Run all commands from the **App repository
+root**, which contains `app/`, `shared/` and `docs/`. Build and staging examples use ignored
+subdirectories of `build/`; no sibling working directory is required.
 
 ## Prerequisites and kit selection
 
@@ -10,9 +10,11 @@ The project requires CMake **3.25+**, C++17 and Qt **6.12+**, with Core, Gui, Qm
 QuickControls2, QuickDialogs2, Network and Concurrent. Build Qt and the application with compatible
 compiler/runtime versions.
 
-The installed Windows kit at `C:/Qt/6.12.0/mingw_64` identifies GCC **15.1** in its
-`mkspecs/qconfig.pri`. Use `C:/Qt/Tools/mingw1510_64/bin/g++.exe`, not MinGW 13.1, for that kit.
-Other installations must be checked against their own metadata.
+Select the compiler supplied for your Qt kit. Check its `mkspecs/qconfig.pri` metadata rather
+than choosing a compiler from an unrelated Qt installation. In the PowerShell examples, set
+`QT_PREFIX` to the selected shared Qt installation and `QT_COMPILER_BIN` to its matching MinGW
+compiler directory. Put CMake and Ninja on PATH. These are installed SDK/tool paths, not
+additional source repositories.
 
 Changing compiler, Qt prefix, generator or static/shared linkage requires a fresh build directory.
 Moving a configured build does not update its cached absolute paths.
@@ -21,24 +23,27 @@ Moving a configured build does not update its cached absolute paths.
 
 1. Open [CMakeLists.txt](../app/CMakeLists.txt).
 2. Select the matching desktop Qt kit and compiler.
-3. Set the build directory to `ongoing_work/app-build`, outside the Git repository.
+3. Set a fresh build directory, for example `build/desktop` under this repository root.
 4. Set `LEM_WINDOWS_STANDALONE=OFF`. It is the default for a new cache; an old cache can retain
    `ON`.
 5. Configure, build and run. For a shared build, Qt DLLs/plugins must be available at runtime.
 
-Equivalent commands in PowerShell, from `ongoing_work`:
+Equivalent commands in PowerShell, from the App repository root:
 
 ```powershell
-$env:PATH = "C:/Qt/Tools/mingw1510_64/bin;C:/Qt/Tools/Ninja;C:/Qt/Tools/CMake_64/bin;C:/Qt/6.12.0/mingw_64/bin;$env:PATH"
-cmake -S ../App/app -B app-build -G Ninja `
-  -DCMAKE_PREFIX_PATH=C:/Qt/6.12.0/mingw_64 `
-  -DCMAKE_CXX_COMPILER=C:/Qt/Tools/mingw1510_64/bin/g++.exe `
+$qtPrefix = $env:QT_PREFIX
+$compilerBin = $env:QT_COMPILER_BIN
+if (-not $qtPrefix -or -not $compilerBin) { throw "Set QT_PREFIX and QT_COMPILER_BIN for your installed Qt kit." }
+$env:PATH = "$compilerBin;$qtPrefix/bin;$env:PATH"
+cmake -S app -B build/desktop -G Ninja `
+  "-DCMAKE_PREFIX_PATH=$qtPrefix" `
+  "-DCMAKE_CXX_COMPILER=$compilerBin/g++.exe" `
   -DCMAKE_BUILD_TYPE=Release -DLEM_WINDOWS_STANDALONE=OFF
-cmake --build app-build --target Lem --parallel 4
+cmake --build build/desktop --target Lem --parallel 4
 ```
 
 Run through Qt Creator or a Qt-enabled shell. To prepare an installed shared build, use
-`cmake --install app-build --prefix app-stage`; the project installs its Qt QML deployment script
+`cmake --install build/desktop --prefix build/stage`; the project installs its Qt QML deployment script
 on Windows/macOS. Verify that staging directory on the destination machine. A shared `Lem.exe` alone
 is not a portable package.
 
@@ -49,10 +54,12 @@ and runs an isolated smoke test. It explicitly enables `LEM_WINDOWS_STANDALONE`.
 is a **static** Qt prefix, not the normal installer kit.
 
 ```powershell
-& ../App/app/windows/build-standalone.ps1 `
-  -QtPrefix C:/Qt/6.12.0-static-mingw `
-  -ToolchainBin C:/Qt/Tools/mingw1510_64/bin `
-  -BuildDirectory "$PWD/app-static-build" -Jobs 4
+$staticQt = $env:QT_STATIC_PREFIX
+if (-not $staticQt -or -not $env:QT_COMPILER_BIN) { throw "Set QT_STATIC_PREFIX and QT_COMPILER_BIN for your static Qt kit." }
+& ./app/windows/build-standalone.ps1 `
+  -QtPrefix $staticQt `
+  -ToolchainBin $env:QT_COMPILER_BIN `
+  -BuildDirectory "$PWD/build/standalone" -Jobs 4
 ```
 
 | Parameter | Meaning |
@@ -62,13 +69,13 @@ is a **static** Qt prefix, not the normal installer kit.
 | `-QtSource`, `-QtBuild` | Qt source and build trees; use separate paths without spaces when building Qt |
 | `-Compiler MinGW` or `MSVC` | Native toolchain; MSVC requires an x64 Visual Studio developer shell |
 | `-ToolchainBin` | Optional directory prepended to PATH during the script |
-| `-BuildDirectory` | Lem output directory; specify it explicitly to keep outputs in `ongoing_work` |
+| `-BuildDirectory` | Lem output directory; set explicitly to `build/standalone` in the example |
 | `-Jobs` | Parallel jobs, 1–128; default 4 |
 
 For a first static Qt build, add
-`-BuildQt -QtSource C:/Qt/6.12.0/Src -QtBuild C:/Qt/build-lem-static`. These external Qt SDK paths
-are deliberate: the Qt build helper rejects spaces in source/build/install paths. They are not
-application source directories.
+`-BuildQt -QtSource $env:QT_SOURCE -QtBuild $env:QT_BUILD_DIR`. Set these variables to your
+Qt source and a separate Qt build directory. Qt source/build/install paths must be space-free;
+this SDK constraint does not require running the command outside the App repository.
 
 The script requires CMake, Ninja, Python and the chosen compiler on PATH. It builds Qt with Schannel
 rather than OpenSSL and requires Windows, offscreen, JPEG and TLS plugins. A configuration marker
@@ -76,14 +83,14 @@ prevents resuming an incompatible Qt build.
 
 Outputs include `Lem.exe`, `dll-imports.json`, and `portable/Lem.exe` under the selected build
 directory. The portable smoke directory must contain only the executable. The script also writes
-`app/windows-static-transcript.log` inside this repository; move that diagnostic log into
-`ongoing_work` after the run and do not stage it.
+`app/windows-static-transcript.log` inside this repository. That diagnostic log is ignored by
+Git; do not force-add it.
 
 [verify-pe.py](../app/windows/verify-pe.py) can audit an existing executable without building
 anything:
 
 ```powershell
-python ../App/app/windows/verify-pe.py app-static-build/Lem.exe --report dll-imports.json
+python app/windows/verify-pe.py build/standalone/Lem.exe --report build/standalone/dll-imports.json
 ```
 
 It reads normal and delay-loaded PE imports, rejects DLL names outside its explicit Windows-system
@@ -92,14 +99,14 @@ arbitrary `LoadLibrary` calls or replace the isolated runtime test.
 
 ## Linux and macOS
 
-Use the platform's Qt 6.12+ kit. From `ongoing_work`:
+Use the platform's Qt 6.12+ kit. From the App repository root, with `QT_PREFIX` set to that kit:
 
 ```bash
-cmake -S ../App/app -B app-build-linux -G Ninja \
-  -DCMAKE_PREFIX_PATH=/path/to/Qt/6.12.0/gcc_64 \
+cmake -S app -B build/desktop -G Ninja \
+  -DCMAKE_PREFIX_PATH="$QT_PREFIX" \
   -DCMAKE_BUILD_TYPE=Release
-cmake --build app-build-linux --parallel 4
-cmake --install app-build-linux --prefix "$PWD/app-stage-linux"
+cmake --build build/desktop --parallel 4
+cmake --install build/desktop --prefix "$PWD/build/stage"
 ```
 
 The Linux install adds the desktop entry and icon; distribute the required runtime libraries
@@ -109,7 +116,7 @@ project configuration, not a claim that every platform has been validated on thi
 ## Android
 
 Use an Android Qt kit, compatible SDK/NDK/JDK and the desired ABIs in Qt Creator. The project
-currently declares package ID `pt.lem.app`, version name `0.1.57`, and version code **170**.
+currently declares package ID `pt.lem.app`, version name `0.2.0`, and version code **171**.
 Increase the version code for a future Android release. Changing a package ID creates a different
 installation; synchronize outstanding reports before switching or uninstalling.
 
@@ -139,3 +146,22 @@ Android correctness.
 
 Release validation and current test commands are in [Testing](testing.md). Keep SDK advisories and
 dependency checks distinct from evidence that a particular application build was tested.
+
+## Release 0.2.0
+
+This release aligns the app and API at 0.2.0, Android version code 171, and checklist version 6.
+It includes the revised checklist rules and N/A suggestions, optional general observations in
+all groups, required technician signature on closure, 120-second/60-MiB videos and 400-MiB
+report evidence totals. Synchronization fixes recover null optional answers, keep the pending
+counter current and allow adding evidence while a draft is being synchronized.
+
+Both user manuals are editable Markdown/Typst sources with regenerated PDFs for 0.2.0.
+
+Deploy the matching server policy and update the app in place, retaining package ID `pt.lem.app`
+and the existing signing key. The default minimum/latest client versions are both 0.2.0, so
+older clients will need the update. Preserve local reports while updating; do not uninstall or
+clear app data to resolve pending synchronization. Release artifacts still require the normal
+build, signing and device checks; a source version bump does not publish an APK.
+
+The user creates final commits. Prepare and review each repository separately, then let the
+user execute the chosen commit, tag and push commands.

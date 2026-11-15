@@ -1,21 +1,22 @@
 # Test the client
 
-Run commands from `ongoing_work`, keeping build trees, environments and output files outside the
-repositories. Use fictitious data and disposable storage.
+Run commands from the **App repository root**. Keep build/test outputs in ignored `build/`
+subdirectories and Python environments in `.venv/`. Use fictitious data and disposable storage.
 
 ## Native C++ tests
 
-Use the [build guide](build-and-release.md) and configure a fresh desktop build with tests enabled:
+Use the [build guide](build-and-release.md) to select the matching Qt/compiler kit and set
+`QT_PREFIX` and `QT_COMPILER_BIN`. From the same Qt-enabled shell, configure a fresh build:
 
 ```powershell
-cmake -S ../App/app -B app-tests -G Ninja `
-  -DCMAKE_PREFIX_PATH=C:/Qt/6.12.0/mingw_64 `
-  -DCMAKE_CXX_COMPILER=C:/Qt/Tools/mingw1510_64/bin/g++.exe `
+cmake -S app -B build/tests -G Ninja `
+  "-DCMAKE_PREFIX_PATH=$env:QT_PREFIX" `
+  "-DCMAKE_CXX_COMPILER=$env:QT_COMPILER_BIN/g++.exe" `
   -DLEM_WINDOWS_STANDALONE=OFF -DLEM_BUILD_TESTS=ON
-cmake --build app-tests --parallel 4
+cmake --build build/tests --parallel 4
 $env:QT_QPA_PLATFORM = 'offscreen'
 $env:QT_QUICK_BACKEND = 'software'
-ctest --test-dir app-tests --output-on-failure
+ctest --test-dir build/tests --output-on-failure
 ```
 
 CMake always registers `qml-startup`; the additional targets require `LEM_BUILD_TESTS=ON`.
@@ -44,12 +45,12 @@ use a mock controller. They exercise actual QML controls but do not establish C+
 network correctness.
 
 ```powershell
-python ../App/app/tests/test_general_notes.py
-python ../App/app/tests/test_safety_layout.py
-python ../App/app/tests/test_rules_057_ui.py
-python ../App/app/tests/test_measurement_inputs.py
-python ../App/app/tests/test_photo_delegate_stability.py
-python ../App/app/tests/test_report_groups_054.py
+python app/tests/test_general_notes.py
+python app/tests/test_safety_layout.py
+python app/tests/test_rules_057_ui.py
+python app/tests/test_measurement_inputs.py
+python app/tests/test_photo_delegate_stability.py
+python app/tests/test_report_groups_054.py
 ```
 
 The wider `app/tests/test_*.py` collection covers navigation, scroll bounds, Android margins, import
@@ -63,8 +64,8 @@ The two network runners start disposable local APIs. They require the sibling Se
 native executable:
 
 ```powershell
-python ../App/app/tests/test_offline_sync.py app-tests/Lem-offline-test.exe
-python ../App/app/tests/test_client_compatibility.py app-tests/Lem-compatibility-test.exe
+python app/tests/test_offline_sync.py build/tests/Lem-offline-test.exe
+python app/tests/test_client_compatibility.py build/tests/Lem-compatibility-test.exe
 ```
 
 They need available local sockets/ports. The offline runner uses port 18765. Do not point either
@@ -74,8 +75,8 @@ The Android OpenSSL and Windows standalone helper checks run without Android har
 build:
 
 ```powershell
-python ../App/app/tests/test_android_openssl.py
-python ../App/app/tests/test_windows_standalone.py
+python app/tests/test_android_openssl.py
+python app/tests/test_windows_standalone.py
 ```
 
 Put CMake and a working compiler/generator on PATH for helper tests that configure small projects. A
@@ -92,6 +93,6 @@ For Windows single-file delivery, use both the PE audit and the script's isolate
 then test on a machine without Qt installed. For a shared build, test the deployed staging folder
 rather than the developer build directory.
 
-Record the exact commands, environment and results under `ongoing_work`. Update the maintained
-guides when behavior changes; do not turn each test run into a new version-named document in this
-repository.
+Record command transcripts and test reports in an ignored directory such as `build/test-reports/`.
+Update the maintained guides when behavior changes; do not turn each test run into a new
+version-named document in this repository.

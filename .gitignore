@@ -32,3 +32,53 @@ AGENTS.override.md
 *.agent-notes.txt
 *.agent-handoff.md
 *.agent-handoff.txt
+
+# Local agent work and disposable analysis; maintained tools/tests/docs stay tracked.
+.codex/
+ongoing_work/
+
+# Python tooling caches and local test reports.
+.ruff_cache/
+.mypy_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Out-of-source and accidental in-source CMake/Qt build outputs.
+cmake-build*/
+CMakeUserPresets.json
+compile_commands.json
+cmake_install.cmake
+CTestTestfile.cmake
+DartConfiguration.tcl
+Testing/
+build.ninja
+.ninja_deps
+.ninja_log
+.qt/
+.rcc/
+*_autogen/
+.qmlls.build.ini
+
+# Android SDK/Gradle local state and compiled application packages.
+.gradle/
+.cxx/
+.externalNativeBuild/
+local.properties
+android-build*/
+*.apk
+*.aab
+*.exe
+*.dll
+*.o
+*.obj
+*.a
+*.lib
+*.pdb
+
+# Editor recovery files.
+*.swp
+*.swo
+*~

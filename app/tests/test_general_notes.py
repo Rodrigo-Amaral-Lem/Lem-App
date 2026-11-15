@@ -5,7 +5,7 @@ from pathlib import Path
 source=Path(__file__).with_name('test_report_tabs.py')
 exec(compile(source.read_text().partition('def run_tests():')[0],str(source),'exec'))
 js('splashActive=false;page="report"');w.setWidth(390);w.setHeight(844)
-for index,key in [(2,'QVE.14'),(4,'MAN.21')]:
+for index,key in [(1,'SITE.06'),(2,'QVE.14'),(3,'EST.18'),(4,'MAN.21'),(5,'CARG.07'),(6,'FIN.03')]:
  js(f'selectSection({index})');QTest.qWait(30)
  assert find_visual(w.contentItem(),'notes_'+key).isVisible()
  assert find_visual(w.contentItem(),'addPhoto_'+key).isVisible()
@@ -13,6 +13,10 @@ for index,key in [(2,'QVE.14'),(4,'MAN.21')]:
  assert not find_visual(w.contentItem(),'answer_'+key+'_OK').isVisible()
  assert js(f'itemIssues(lem.sections[{index}].items.find(i=>i.id==="{key}")).length')==0
 js('selectSection(6)');lem.answer('FIN.02','Tecnico','');QTest.qWait(30)
+assert 'Falta assinatura do técnico' in js('itemIssues(lem.sections[6].items.find(i=>i.id==="FIN.02")).join()')
+assert find_visual(w.contentItem(),'notes_FIN.02').isVisible()
+assert not find_visual(w.contentItem(),'addPhoto_FIN.02').isVisible()
+assert not find_visual(w.contentItem(),'addVideo_FIN.02').isVisible()
 button=find_visual(w.contentItem(),'importSignature_FIN.02')
 assert button.isVisible() and button.property('enabled')
 trigger('importSignature_FIN.02');assert js('signaturePhotoDialog.visible')

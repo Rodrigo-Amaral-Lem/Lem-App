@@ -35,7 +35,7 @@ inline bool durationValid(const QByteArray &b) {
             const auto scale = u32(p + (v1 ? 20 : 12));
             const auto ticks = v1 ? u64(p + 24) : quint64(u32(p + 16));
             const double seconds = scale ? double(ticks) / scale : 0;
-            return std::isfinite(seconds) && seconds > 0 && seconds <= 60.5;
+            return std::isfinite(seconds) && seconds > 0 && seconds <= 120.5;
         }
         pos += qint64(length);
     }

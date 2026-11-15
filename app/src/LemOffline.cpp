@@ -395,6 +395,15 @@ void Lem::syncNext(QStringList ids, int index) {
         syncNext(ids, index + 1);
         return;
     }
+    const auto repaired = Checklist::withoutNullOptionalAnswers(r);
+    if (repaired != r) {
+        r = repaired;
+        r["_edit_seq"] = r["_edit_seq"].toDouble() + 1;
+        m_reports[id] = r;
+        if (m_current["id"] == id) m_current = r;
+        if (!persist()) { m_syncing = false; emit changed(); return; }
+        emit changed();
+    }
     m_syncState =
         "Report " + QString::number(index + 1) + " / " + QString::number(ids.size()) +
         " · verificar dados no servidor · " +
@@ -907,7 +916,7 @@ void Lem::fetchPhotoForReport(QString reportId, QString photoId) {
         "GET", "/api/reports/" + reportId + "/photos/" + photoId, {},
         [this, photoId, reportId, path, photo](QByteArray bytes) {
             m_downloads.remove(photoId);
-            if (bytes.size() > 20 * 1024 * 1024 ||
+            if (bytes.size() > (photo["mime"].toString().startsWith("video/") ? 60 : 20) * 1024 * 1024 ||
                 (!photo["digest"].toString().isEmpty() &&
                  QString::fromLatin1(
                      QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) !=
