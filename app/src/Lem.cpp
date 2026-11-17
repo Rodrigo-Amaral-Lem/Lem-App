@@ -13,6 +13,9 @@
 #include <cmath>
 #include "Measurements.h"
 #include "ReportPdf.h"
+#include "ReportBundle.h"
+#include <QTemporaryDir>
+#include "ReportNaming.h"
 #include <QVersionNumber>
 #include <QDesktopServices>
 #include <QRegularExpression>
@@ -28,6 +31,7 @@
 #include <QCryptographicHash>
 #include <QImageReader>
 #include <QImage>
+#include <QTransform>
 #include <QBuffer>
 #include <QUuid>
 #include <QDateTime>
@@ -72,6 +76,7 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
     connect(this, &Lem::changed, this, &Lem::operationChanged);
     connect(this, &Lem::localSaveStateChanged, this, &Lem::operationChanged);
     m_editPool.setMaxThreadCount(1);
+    m_exportPool.setMaxThreadCount(1);
     m_editTimer.setSingleShot(true);
     connect(&m_editTimer, &QTimer::timeout, this, &Lem::writeNextEdits);
     connect(&m_editWatcher, &QFutureWatcher<bool>::finished, this, &Lem::completeEditWrite);
@@ -91,8 +96,11 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
         QJsonArray reportSummaries;
         for (auto it = m_reports.constBegin(); it != m_reports.constEnd(); ++it) {
             const auto r = it.value().toObject();
+            const auto snapshot = r["snapshot"].toObject();
             reportSummaries.append(
-                QJsonArray{r["id"], r["charger_id"], r["status"], r["owner_id"], r["dirty"]});
+                QJsonArray{r["id"], r["charger_id"], r["status"], r["owner_id"], r["dirty"], r["revision"],
+                           r["finished"], r["payload"].toObject()["finished"],
+                           snapshot["charger"].toObject()["external_id"], snapshot["contract"].toObject()["name"]});
         }
         if (!m_rowsBuilt || m_rowsChargers != m_chargers || m_rowsReports != reportSummaries) {
             m_rowsBuilt = true;
@@ -169,6 +177,7 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
 Lem::~Lem() {
     flushEdits();
     m_editPool.waitForDone();
+    m_exportPool.waitForDone();
 }
 
 // Changing the server also changes the storage namespace and authentication scope.
@@ -198,6 +207,7 @@ void Lem::setServer(QString s) {
     if (!flushEdits())
         return;
     m_server = s;
+    m_reportPresentationSave = {};
     m_clientCompatibility = {};
     emit compatibilityChanged();
     m_token.clear();
@@ -226,6 +236,7 @@ QString Lem::cacheDir() const {
 // Restore the full checkpoint, then replay only newer journals owned by this user.
 // Deleted report IDs prevent an older journal from resurrecting a deleted report.
 void Lem::loadUser() {
+    m_manualSyncRequested = false;
     m_localReadError = false;
     m_localSaveError = false;
     m_autoSync.stop();
@@ -298,6 +309,22 @@ void Lem::loadUser() {
             report["_edit_seq"].toDouble() > m_reports[id].toObject()["_edit_seq"].toDouble())
             m_reports[id] = report;
     }
+    // Recover validated files committed between batch metadata checkpoints.
+    // A .part/QSaveFile temporary is never considered complete evidence.
+    for (const auto &id : m_reports.keys()) {
+        auto report = m_reports[id].toObject(); auto photos = report["photos"].toArray();
+        for (int i = 0; i < photos.size(); ++i) {
+            auto photo = photos[i].toObject();
+            if (!photo["uploaded"].toBool() || !photo["path"].toString().isEmpty()) continue;
+            const auto path = SafeStorage::photoPath(cacheDir(), photo["id"].toString(), photo["mime"].toString());
+            const QFileInfo file(path); const auto expected = qint64(photo["size"].toDouble());
+            if (!path.isEmpty() && file.isFile() && !file.isSymLink() && file.size() > 0 && (!expected || expected == file.size())) {
+                photo["path"] = QUrl::fromLocalFile(path).toString(); photos[i] = photo;
+            }
+        }
+        report["photos"] = photos; m_reports[id] = report;
+    }
+    applyContractPresentations();
     if (m_localReadError) storageWritable();
     else {
         emit localSaveStateChanged();
@@ -363,11 +390,12 @@ bool Lem::online() {
 
 // Send JSON or another single-body HTTP request and track its operation progress.
 // A caller-supplied failure handler owns recovery; otherwise release the busy UI state.
-void Lem::request(QString method, QString path, QByteArray body, Callback cb, QString content,
+QNetworkReply *Lem::request(QString method, QString path, QByteArray body, Callback cb, QString content,
                   Failure error) {
     QNetworkRequest req(QUrl(m_server + path));
     NetworkSecurity::restrictRedirects(req);
     req.setRawHeader("X-Lem-Client-Version", QCoreApplication::applicationVersion().toUtf8());
+    req.setRawHeader("X-Lem-Client-Platform", NetworkSecurity::clientPlatform());
     // The server sends nothing while it renders a PDF/ZIP with many photographs.
     const bool exporting = path.endsWith("/pdf") || path.endsWith("/bundle");
     req.setTransferTimeout(exporting ? 180000 : 30000);
@@ -410,12 +438,80 @@ void Lem::request(QString method, QString path, QByteArray body, Callback cb, QS
             cb(data);
         reply->deleteLater();
     });
+    return reply;
+}
+
+// Evidence bypasses the in-memory response accumulator used for JSON/exports.
+void Lem::requestPhoto(QString path, QString destination, qint64 limit,
+                       std::function<void(QSharedPointer<NetworkSecurity::FileBody>)> cb, Failure error,
+                       QString digest, QSharedPointer<NetworkSecurity::FileBody> body,
+                       int attempt, std::function<bool()> retryAllowed, bool contractExport) {
+    if (!body) body = QSharedPointer<NetworkSecurity::FileBody>::create(destination, limit);
+    QNetworkRequest req(QUrl(m_server + path));
+    NetworkSecurity::restrictRedirects(req);
+    req.setRawHeader("X-Lem-Client-Version", QCoreApplication::applicationVersion().toUtf8());
+    req.setRawHeader("X-Lem-Client-Platform", NetworkSecurity::clientPlatform());
+    req.setTransferTimeout(path.endsWith("/bundle") || path.endsWith("/pdf") ? 300000 : 60000);
+    req.setRawHeader("Accept-Encoding", "identity");
+    req.setRawHeader("Authorization", "Bearer " + m_token.toUtf8());
+    const auto offset = digest.isEmpty() ? 0 : body->received;
+    if (offset > 0) {
+        req.setRawHeader("Range", "bytes=" + QByteArray::number(offset) + "-");
+        req.setRawHeader("If-Range", "\"" + digest.toUtf8() + "\"");
+    }
+    body->beginAttempt(offset);
+    const auto requestToken = m_token, requestServer = m_server;
+    auto reply = net.get(req);
+    if (contractExport)
+        connect(this, &Lem::contractExportCancelled, reply, &QNetworkReply::abort);
+    reply->setReadBufferSize(1024 * 1024);
+    connect(reply, &QIODevice::readyRead, reply, [reply, body] { body->consume(reply); });
+    trackReply(reply, "GET", path, false);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, body, cb, error, requestToken, requestServer,
+            path, destination, limit, digest, attempt, retryAllowed, contractExport] {
+        body->consume(reply);
+        const int code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool sameSession = m_server == requestServer && m_token == requestToken;
+        if (!sameSession) {
+            error(401, "A sessão mudou durante a transferência."); reply->deleteLater(); return;
+        }
+        if (code == 426) rejectIncompatibleReply(body->errorData);
+        if (code == 401) { m_token.clear(); emit changed(); }
+        const bool failed = reply->error() != QNetworkReply::NoError || code >= 400;
+        const bool transient = code == 0 || code == 408 || code == 429 || code == 500 || code == 502 || code == 503 || code == 504 || (code == 200 || code == 206);
+        if (failed && transient && attempt < 3 && !body->exceeded && !body->writeFailed && !body->invalidRange &&
+            (!retryAllowed || retryAllowed())) {
+            const int retryAfter = reply->rawHeader("Retry-After").toInt();
+            const int delay = retryAfter > 0 ? qBound(1, retryAfter, 30) * 1000 : (500 << attempt);
+            status("A retomar transferência · tentativa " + QString::number(attempt + 2) + " / 4");
+            QTimer::singleShot(delay, this, [this, path, destination, limit, cb, error, digest, body, attempt,
+                                            retryAllowed, requestToken, requestServer, contractExport] {
+                if (m_token != requestToken || m_server != requestServer || (retryAllowed && !retryAllowed())) {
+                    error(0, "Transferência interrompida. Os ficheiros concluídos foram conservados."); return;
+                }
+                requestPhoto(path, destination, limit, cb, error, digest, body, attempt + 1, retryAllowed, contractExport);
+            });
+        } else if (failed && (code == 401 || code == 426)) {
+            // A bounded/oversized error body is still an authentication rejection.
+            // Deliver its HTTP status to the caller instead of the file-success
+            // callback, so queues stop and the user is prompted to sign in/update.
+            auto detail = QJsonDocument::fromJson(body->errorData).object()["detail"].toString();
+            if (detail.isEmpty()) detail = reply->errorString();
+            error(code, detail.left(500));
+        } else if (body->exceeded || body->writeFailed || body->invalidRange) cb(body);
+        else if (failed) {
+            auto detail = QJsonDocument::fromJson(body->errorData).object()["detail"].toString();
+            if (detail.isEmpty()) detail = reply->errorString();
+            error(code, detail.left(500));
+        } else cb(body);
+        reply->deleteLater();
+    });
 }
 
 // Keep the multipart body alive by parenting it to the network reply.
 // Photograph uploads and Excel analysis use this separate request path.
 void Lem::multipart(QString method, QString path, QList<QPair<QString, QString>> fields,
-                    QString filename, QByteArray data, Callback cb, Failure error) {
+                    QString filename, QByteArray data, Callback cb, Failure error, QFile *file) {
     auto multi = new QHttpMultiPart(QHttpMultiPart::FormDataType);
     for (auto field : fields) {
         QHttpPart p;
@@ -429,11 +525,16 @@ void Lem::multipart(QString method, QString path, QList<QPair<QString, QString>>
                 "form-data; name=\"file\"; filename=\"upload" +
                     QFileInfo(filename).suffix().prepend('.') + "\"");
     p.setHeader(QNetworkRequest::ContentTypeHeader, "application/octet-stream");
-    p.setBody(data);
+    if (file) {
+        file->setParent(multi); // The open file survives until the request has finished.
+        p.setBodyDevice(file);
+    } else
+        p.setBody(data);
     multi->append(p);
     QNetworkRequest req(QUrl(m_server + path));
     NetworkSecurity::restrictRedirects(req);
     req.setRawHeader("X-Lem-Client-Version", QCoreApplication::applicationVersion().toUtf8());
+    req.setRawHeader("X-Lem-Client-Platform", NetworkSecurity::clientPlatform());
     req.setTransferTimeout(60000);
     req.setRawHeader("Authorization", "Bearer " + m_token.toUtf8());
     const auto requestToken = m_token;
@@ -442,7 +543,8 @@ void Lem::multipart(QString method, QString path, QList<QPair<QString, QString>>
     auto responseBody = NetworkSecurity::boundReply(reply, NetworkSecurity::responseLimit(path));
     multi->setParent(reply);
     trackReply(reply, method, path, true);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, cb, error, requestToken, requestServer, responseBody]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, cb, error, requestToken, requestServer, responseBody, file]() {
+        if (file) file->close();
         responseBody->consume(reply);
         auto data = responseBody->data;
         auto code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -584,6 +686,9 @@ void Lem::logout() {
             "POST", "/api/logout", "{}", [](QByteArray) {}, "application/json",
             [](int, QString) {});
     m_token.clear();
+    m_reportPresentationSave = {};
+    m_passwordReset = {};
+    m_contractExportState = {};
     m_users = {};
     m_deletedContracts = {};
     emit contractTrashChanged();
@@ -607,7 +712,15 @@ void Lem::refresh() {
     request(
         "GET", "/api/contracts", {},
         [this](QByteArray data) {
+            const auto previousContracts = m_contracts;
             m_contracts = QJsonDocument::fromJson(data).array();
+            // An older catalogue reply must not undo an acknowledged settings save.
+            for (auto value : previousContracts) {
+                const auto contract = value.toObject();
+                receiveContractPresentation(contract["id"].toString(), contract["presentation"].toObject());
+            }
+            applyContractPresentations();
+            reconcileContractSync();
             // A deleted/unassigned contract must not remain the active catalogue.
             // Preserve report journals and local photographs for offline recovery.
             bool stillAccessible = false;
@@ -659,6 +772,7 @@ QVariantMap Lem::current() const {
     if (m_projectedCurrent != m_current) {
         m_projectedCurrent = m_current;
         m_currentProjection = m_current.toVariantMap();
+        if (!m_current.isEmpty()) m_currentProjection["identifier"] = ReportNaming::identifier(m_current);
     }
     return m_currentProjection;
 }
@@ -686,13 +800,17 @@ QVariantList Lem::chargers() const {
 }
 
 QVariantList Lem::buildChargerRows() const {
+    QString contractName;
+    for (const auto &value : m_contracts)
+        if (value.toObject()["id"] == m_contract) contractName = value.toObject()["name"].toString();
     QHash<QString, QJsonArray> localReports;
     for (auto value : m_reports) {
         const auto r = value.toObject();
         localReports[r["charger_id"].toString()].append(QJsonObject{{"id", r["id"]},
                                                                     {"status", r["status"]},
                                                                     {"owner_id", r["owner_id"]},
-                                                                    {"dirty", r["dirty"]}});
+                                                                    {"identifier", ReportNaming::identifier(r)},
+                                                                    {"dirty", r["dirty"]}, {"revision", r["revision"]}});
     }
     QJsonArray out;
     for (auto value : m_chargers) {
@@ -706,13 +824,33 @@ QVariantList Lem::buildChargerRows() const {
             const auto id = r["id"].toString();
             if (positions.contains(id)) {
                 auto summary = reports[positions[id]].toObject();
-                summary["status"] = r["status"];
-                summary["owner_id"] = r["owner_id"];
+                const bool pendingOwner = r["dirty"].toBool() && r["owner_id"] == m_user["id"] &&
+                                          r["owner_id"] == summary["owner_id"] && summary["status"] != "closed";
+                const bool newerLocal = summary.contains("revision") &&
+                                        r["revision"].toInt() > summary["revision"].toInt();
+                if (pendingOwner || newerLocal) {
+                    summary["status"] = r["status"];
+                    summary["owner_id"] = r["owner_id"];
+                    summary["revision"] = r["revision"];
+                    summary["identifier"] = r["identifier"];
+                }
+                if (summary["identifier"].toString().isEmpty()) summary["identifier"] = r["identifier"];
                 summary["dirty"] = r["dirty"];
                 reports[positions[id]] = summary;
             } else {
                 positions[id] = reports.size();
                 reports.append(r);
+            }
+        }
+        // Older catalogues may not yet carry the public identifier.
+        for (int i = 0; i < reports.size(); ++i) {
+            auto summary = reports[i].toObject();
+            if (summary["identifier"].toString().isEmpty()) {
+                auto context = summary;
+                context["snapshot"] = QJsonObject{{"charger", QJsonObject{{"external_id", c["external_id"]}}},
+                                                  {"contract", QJsonObject{{"name", contractName}}}};
+                summary["identifier"] = ReportNaming::identifier(context);
+                reports[i] = summary;
             }
         }
         c["reports"] = reports;
@@ -721,7 +859,7 @@ QVariantList Lem::buildChargerRows() const {
     return out.toVariantList();
 }
 
-// Open a cached report without a request, fetch uncached metadata, or create a draft.
+// Show cached reports immediately, refresh clean observer/stale copies, or create a draft.
 // Switching reports also releases photographs deferred until a question-group boundary.
 void Lem::openReport(QString chargerId, QString reportId) {
     if (m_busy || !m_qveCopyTarget.isEmpty() || attachingFiles() || m_user.isEmpty() || m_deletedReports.contains(reportId))
@@ -730,11 +868,25 @@ void Lem::openReport(QString chargerId, QString reportId) {
         reportSyncBoundary();
     if (!reportId.isEmpty()) {
         if (m_reports.contains(reportId)) {
-            m_current = Checklist::correctedDraft(m_reports[reportId].toObject());
+            m_current = withContractPresentation(Checklist::correctedDraft(m_reports[reportId].toObject()));
             m_template = m_current["template"].toObject();
             m_current["last_access"] = double(QDateTime::currentSecsSinceEpoch());
             m_reports[reportId] = m_current;
             emit changed();
+            // A clean cached draft may have been closed on another device.
+            bool stale = (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]);
+            for (const auto &row : m_chargers)
+                for (const auto &entry : row.toObject()["reports"].toArray()) {
+                    const auto summary = entry.toObject();
+                    if (summary["id"] == reportId &&
+                        (summary["revision"].toInt() > m_current["revision"].toInt() ||
+                         summary["owner_id"] != m_current["owner_id"] ||
+                         (summary["status"] == "closed" && m_current["status"] != "closed")))
+                        stale = true;
+                }
+            if (!m_token.isEmpty() && !m_current["dirty"].toBool() &&
+                m_current["revision"].toInt() > 0 && stale)
+                refreshReport();
             return;
         }
         if (!online())
@@ -779,6 +931,8 @@ void Lem::openReport(QString chargerId, QString reportId) {
     answers["FIN.02"] = QJsonObject{{"value", m_user["name"]}, {"notes", ""}};
     m_current = {{"id", uuid()},
                  {"charger_id", chargerId},
+                 {"contract_id", m_contract},
+                 {"presentation", contract["presentation"]},
                  {"owner_id", m_user["id"]},
                  {"revision", 0},
                  {"status", "draft"},
@@ -812,7 +966,7 @@ void Lem::getPhotos(QJsonObject report, int index) {
     }
     report["photos"] = photos;
     report["last_access"] = double(QDateTime::currentSecsSinceEpoch());
-    m_current = Checklist::correctedDraft(report);
+    m_current = withContractPresentation(Checklist::correctedDraft(report));
     m_template = m_current["template"].toObject();
     m_busy = false;
     remember();
@@ -824,7 +978,7 @@ void Lem::getPhotos(QJsonObject report, int index) {
 void Lem::answer(QString key, QString value, QString notes) {
     if (!storageWritable()) return;
     if (copyLocksCheckpoint(m_current["id"].toString(), key) || m_busy || m_current.isEmpty() || m_current["_conflict"].toBool() ||
-        m_current["status"].toString() == "closed" || m_current["owner_id"] != m_user["id"])
+        m_current["status"].toString() == "closed" || (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]))
         return;
     const auto signedPhoto = m_current["payload"].toObject()["signatures"].toObject()[key].toObject()["photo_id"].toString();
     if (!signedPhoto.isEmpty() && m_current["payload"].toObject()["answers"].toObject()[key].toObject()["value"].toString() != value) {
@@ -834,15 +988,22 @@ void Lem::answer(QString key, QString value, QString notes) {
     auto payload = m_current["payload"].toObject();
     auto answers = payload["answers"].toObject();
     auto nextAnswer = answers[key].toObject();
-    const auto suggested = Checklist::naNotesDefault(m_current["template"].toObject(), key);
-    const bool wasNA = Measurements::notApplicable(nextAnswer["value"].toString());
+    const auto previous = nextAnswer;
+    const bool valueChanged = previous["value"].toString() != value;
+    const bool wasNA = Measurements::notApplicable(previous["value"].toString());
     const bool isNA = Measurements::notApplicable(value);
-    if (isNA && !wasNA && notes.trimmed().isEmpty()) notes = suggested;
-    // Clear only the unchanged suggestion when leaving N/A; preserve custom notes.
-    if (wasNA && !isNA && !suggested.isEmpty() && notes == suggested) notes.clear();
-    nextAnswer["value"] = value;
+    // Provenance, not wording alone, identifies a removable automatic note.
+    if (notes != previous["notes"].toString()) nextAnswer.remove("suggested_notes");
     nextAnswer["notes"] = notes;
-    if (Measurements::notApplicable(value)) nextAnswer.remove("assessment");
+    if (valueChanged && (wasNA || isNA || value.isEmpty() || previous["value"] == "OK" || previous["value"] == "NOK"))
+        MaintenanceRules::clearSuggestion(nextAnswer);
+    nextAnswer["value"] = value;
+    if (!value.trimmed().isEmpty()) nextAnswer.remove("previous_value");
+    if (isNA || value.isEmpty()) {
+        nextAnswer.remove("assessment"); nextAnswer.remove("auto_assessment");
+    }
+    if (isNA && !wasNA)
+        MaintenanceRules::suggest(nextAnswer, Checklist::naNotesDefault(m_current["template"].toObject(), key));
     if (answers[key].toObject() == nextAnswer)
         return;
     if (answers[key].toObject()["value"].toString() != value) {
@@ -851,6 +1012,9 @@ void Lem::answer(QString key, QString value, QString notes) {
         payload["signatures"] = signatures;
     }
     answers[key] = nextAnswer;
+    if (m_template["version"].toInt() >= 7 && valueChanged &&
+        (key == "MAN.11" || key == "MAN.12" || key == "MAN.18"))
+        answers = MaintenanceRules::apply(answers, true);
     payload["answers"] = answers;
     m_current["payload"] = payload;
     m_current["dirty"] = true;
@@ -860,12 +1024,18 @@ void Lem::answer(QString key, QString value, QString notes) {
     emit changed();
     scheduleSync();
 }
+// Focus is an explicit request to replace a generated observation. A custom
+// observation, even one with identical wording, has no marker and is preserved.
+void Lem::beginNotesEdit(QString key) {
+    const auto currentAnswer = m_current["payload"].toObject()["answers"].toObject()[key].toObject();
+    if (MaintenanceRules::untouched(currentAnswer)) answer(key, currentAnswer["value"].toString(), "");
+}
 // Manual assessment is independent of the technician's mandatory reading.
 void Lem::setAssessment(QString key, QString assessment) {
     if (!storageWritable()) return;
     if (copyLocksCheckpoint(m_current["id"].toString(), key) || m_busy || m_current.isEmpty() ||
         m_current["_conflict"].toBool() || m_current["status"] != "draft" ||
-        m_current["owner_id"] != m_user["id"] || (assessment != "OK" && assessment != "NOK")) return;
+        (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]) || (assessment != "OK" && assessment != "NOK")) return;
     bool allowed = false;
     for (auto section : m_template["sections"].toArray())
         for (auto item : section.toObject()["items"].toArray())
@@ -875,15 +1045,16 @@ void Lem::setAssessment(QString key, QString assessment) {
     auto answers = payload["answers"].toObject();
     auto answer = answers[key].toObject();
     if (answer["assessment"] == assessment && !Measurements::notApplicable(answer["value"].toString())) return;
-    if (Measurements::notApplicable(answer["value"].toString())) {
-        const auto suggested = Checklist::naNotesDefault(m_current["template"].toObject(), key);
-        if (!suggested.isEmpty() && answer["notes"].toString() == suggested) answer["notes"] = "";
-        answer["value"] = "";
-    }
+    if (answer["assessment"] != assessment || Measurements::notApplicable(answer["value"].toString()))
+        MaintenanceRules::clearSuggestion(answer);
+    if (Measurements::notApplicable(answer["value"].toString())) answer["value"] = "";
     answer["value"] = answer["value"].toString();
     answer["notes"] = answer["notes"].toString();
     answer["assessment"] = assessment;
+    answer.remove("auto_assessment");
     answers[key] = answer;
+    // A manual OK cannot override a measured failure; custom notes still survive.
+    if (m_template["version"].toInt() >= 7) answers = MaintenanceRules::apply(answers, false);
     payload["answers"] = answers;
     m_current["payload"] = payload;
     m_current["dirty"] = true;
@@ -906,7 +1077,7 @@ bool Lem::attachToReport(QString reportId, QString key, QUrl url) {
                       ? m_current
                       : m_reports.value(reportId).toObject();
     if (copyLocksCheckpoint(reportId, key) || m_busy || report.isEmpty() || report["_conflict"].toBool() ||
-        report["status"].toString() == "closed" || report["owner_id"] != m_user["id"]) {
+        report["status"].toString() == "closed" || !correctionAllowed(report) || report["owner_id"] != m_user["id"]) {
         status("Não é possível adicionar fotografias a este report.");
         return false;
     }
@@ -1019,32 +1190,44 @@ bool Lem::attachToReport(QString reportId, QString key, QUrl url) {
     return true;
 }
 
-// Crops create a fresh evidence identity: an acknowledged server attachment is
+// Image edits create a fresh evidence identity: an acknowledged server attachment is
 // immutable. Persist the replacement and deletion tombstone before unlinking it.
 void Lem::cropPhoto(QString photoId, qreal x, qreal y, qreal width, qreal height) {
-    if (switchingBlocked(false) || m_current.isEmpty() || m_current["_conflict"].toBool() ||
-        m_current["status"].toString() != "draft" || m_current["owner_id"] != m_user["id"])
-        return;
+    editPhoto(photoId, 0, x, y, width, height);
+}
+
+void Lem::rotatePhoto(QString photoId) {
+    editPhoto(photoId, 1, 0, 0, 1, 1);
+}
+
+bool Lem::editPhoto(QString photoId, int quarterTurns, qreal x, qreal y, qreal width, qreal height) {
+    if (reportActionBlocked(false) || m_current.isEmpty() || m_current["_conflict"].toBool() ||
+        m_current["status"].toString() != "draft" || (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]))
+        return false;
     for (auto entry : m_current["payload"].toObject()["signatures"].toObject())
         if (entry.toObject()["photo_id"].toString() == photoId) {
-            status("Para alterar a assinatura, assine novamente em FIN.02."); return;
+            status("Para alterar a assinatura, assine novamente em FIN.02."); return false;
         }
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(width) || !std::isfinite(height) ||
-        x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1.000001 || y + height > 1.000001)
-        return;
+        x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1.000001 || y + height > 1.000001 ||
+        quarterTurns < 0 || quarterTurns > 3)
+        return false;
     QJsonObject old;
     for (auto entry : m_current["photos"].toArray())
         if (entry.toObject()["id"].toString() == photoId) old = entry.toObject();
-    if (copyLocksCheckpoint(m_current["id"].toString(), old["checkpoint"].toString())) return;
+    if (copyLocksCheckpoint(m_current["id"].toString(), old["checkpoint"].toString())) return false;
     const auto source = localPath(QUrl(old["path"].toString()));
-    if (old.isEmpty() || old["mime"].toString().startsWith("video/") || !QFileInfo::exists(source)) return;
-    if (!flushEdits()) return;
+    if (old.isEmpty() || old["mime"].toString().startsWith("video/") || !QFileInfo::exists(source)) return false;
+    // Opening and saving without changes (including four preview turns) must not
+    // recompress a JPEG, create a tombstone or schedule an unnecessary upload.
+    if (quarterTurns == 0 && x == 0 && y == 0 && width == 1 && height == 1) return true;
+    if (!flushEdits()) return false;
     const auto reportId = m_current["id"].toString(), newId = uuid();
     const auto mime = old["mime"].toString() == "image/png" || QFileInfo(source).suffix() == "png"
         ? QString("image/png") : QString("image/jpeg");
     const auto target = SafeStorage::photoPath(cacheDir(), newId, mime);
     m_busy = true;
-    m_localOperationTitle = "A recortar fotografia";
+    m_localOperationTitle = "A editar fotografia";
     status(m_localOperationTitle);
     auto watcher = new QFutureWatcher<qint64>(this);
     connect(watcher, &QFutureWatcher<qint64>::finished, this,
@@ -1056,8 +1239,8 @@ void Lem::cropPhoto(QString photoId, qreal x, qreal y, qreal width, qreal height
         for (int i = 0; i < photos.size(); ++i)
             if (photos[i].toObject()["id"].toString() == photoId) index = i;
         if (size <= 0 || index < 0 || report["status"].toString() != "draft" ||
-            report["owner_id"] != m_user["id"] || report["_conflict"].toBool()) {
-            QFile::remove(target); status("Não foi possível recortar. Fotografia original conservada."); return;
+            !correctionAllowed(report) || report["owner_id"] != m_user["id"] || report["_conflict"].toBool()) {
+            QFile::remove(target); status("Não foi possível editar. Fotografia original conservada."); return;
         }
         qint64 total = size;
         for (auto value : photos)
@@ -1087,23 +1270,28 @@ void Lem::cropPhoto(QString photoId, qreal x, qreal y, qreal width, qreal height
             const auto oldSize = original.size();
             if (QFile::remove(source)) m_photoBytes = qMax(qint64(0), m_photoBytes - oldSize);
         }
-        status("Fotografia recortada. Envio ao mudar de grupo ou sair do report.");
+        status("Fotografia editada. Envio ao mudar de grupo ou sair do report.");
     });
-    watcher->setFuture(QtConcurrent::run(&m_editPool, [source, target, x, y, width, height, mime]() -> qint64 {
+    watcher->setFuture(QtConcurrent::run(&m_editPool, [source, target, x, y, width, height, mime, quarterTurns]() -> qint64 {
         QImageReader reader(source); reader.setAutoTransform(true);
         const auto dimensions = reader.size();
         if (!dimensions.isValid() || qint64(dimensions.width()) * dimensions.height() > 40000000) return -1;
-        const auto image = reader.read(); if (image.isNull()) return -1;
+        auto image = reader.read(); if (image.isNull()) return -1;
+        // Match the preview: decode EXIF, rotate, then crop in the rotated space.
+        // One encoding and one journal replacement cover the entire edit.
+        if (quarterTurns) image = image.transformed(QTransform().rotate(quarterTurns * 90));
         const int left = qBound(0, int(std::floor(x * image.width())), image.width() - 1);
         const int top = qBound(0, int(std::floor(y * image.height())), image.height() - 1);
         const int right = qBound(left + 1, int(std::ceil((x + width) * image.width())), image.width());
         const int bottom = qBound(top + 1, int(std::ceil((y + height) * image.height())), image.height());
+        const auto edited = image.copy(left, top, right - left, bottom - top);
         QByteArray bytes; QBuffer buffer(&bytes); buffer.open(QIODevice::WriteOnly);
-        if (!image.copy(left, top, right - left, bottom - top).save(&buffer, mime == "image/png" ? "PNG" : "JPEG", 92) || bytes.size() > 20 * 1024 * 1024) return -1;
+        if (!edited.save(&buffer, mime == "image/png" ? "PNG" : "JPEG", 92) || bytes.size() > 20 * 1024 * 1024) return -1;
         QSaveFile file(target);
         if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) return -1;
         return bytes.size();
     }));
+    return true;
 }
 
 void Lem::openVideo(QString photoId) {
@@ -1173,8 +1361,9 @@ bool Lem::forgetReport(QString id) {
 // Never-uploaded drafts can be removed offline; server-backed deletions need a revision.
 // The administrator privilege to delete closed reports is separate from draft ownership.
 void Lem::deleteReport(QString id) {
+    if (!correctionAllowed(m_current)) return;
     if (id == m_qveCopyTarget || id == m_attachReport) return;
-    if (id != m_current.value("id").toString() || switchingBlocked())
+    if (id != m_current.value("id").toString() || reportActionBlocked())
         return;
     const auto r = m_current;
     const bool admin = m_user["role"].toString() == "admin";
@@ -1193,7 +1382,8 @@ void Lem::deleteReport(QString id) {
     m_busy = true;
     emit changed();
     request("DELETE",
-            "/api/reports/" + id + "?base_revision=" + QString::number(r["revision"].toInt()), {},
+            "/api/reports/" + id + "?base_revision=" + QString::number(r["revision"].toInt()) +
+                (r["correction"].toObject()["state"] == "editing" ? "&correction_only=true" : ""), {},
             [this, id](QByteArray bytes) {
                 const auto ack = QJsonDocument::fromJson(bytes).object();
                 m_busy = false;
@@ -1210,7 +1400,7 @@ void Lem::deleteReport(QString id) {
 // A lost upload response may mean the server already has the photograph.
 void Lem::removePhoto(QString photoId) {
     if (m_busy || m_current.isEmpty() || m_current["_conflict"].toBool() ||
-        m_current["status"].toString() != "draft" || m_current["owner_id"] != m_user["id"])
+        m_current["status"].toString() != "draft" || (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]))
         return;
     auto photos = m_current["photos"].toArray();
     int found = -1;
@@ -1248,16 +1438,23 @@ void Lem::removePhoto(QString photoId) {
         emit changed();
         return;
     }
-    // Only remove our private cache copy, never the original in the user's gallery.
-    const QFileInfo cached(localPath(QUrl(removed["path"].toString())));
-    if (cached.canonicalPath() == QFileInfo(cacheDir() + "/photos").canonicalFilePath() &&
-        (cached.fileName() == photoId + ".jpg" || cached.fileName() == photoId + ".png" || cached.fileName() == photoId + ".mp4" || cached.fileName() == photoId + ".3gp")) {
-        if (QFile::remove(cached.absoluteFilePath()))
-            m_photoBytes = qMax(qint64(0), m_photoBytes - cached.size());
-    }
+    removeCachedPhoto(removed);
     emit changed();
     status("Fotografia removida do rascunho. A remoção será enviada automaticamente.");
     scheduleSync();
+}
+
+// Called only after durable removal, including a retry once an upload releases its handle.
+void Lem::removeCachedPhoto(const QJsonObject &photo) {
+    // Only remove our private cache copy, never the original in the user's gallery.
+    const auto photoId = photo["id"].toString();
+    const QFileInfo cached(localPath(QUrl(photo["path"].toString())));
+    if (cached.canonicalPath() == QFileInfo(cacheDir() + "/photos").canonicalFilePath() &&
+        (cached.fileName() == photoId + ".jpg" || cached.fileName() == photoId + ".png" || cached.fileName() == photoId + ".mp4" || cached.fileName() == photoId + ".3gp")) {
+        const auto bytes = cached.size();
+        if (QFile::remove(cached.absoluteFilePath()))
+            m_photoBytes = qMax(qint64(0), m_photoBytes - bytes);
+    }
 }
 
 // Android delegates to the installed camera through a small Java Activity.
@@ -1267,7 +1464,7 @@ void Lem::takeVideo(QString key) { takeCapture(key, true); }
 void Lem::takeCapture(QString key, bool video) {
 #ifdef Q_OS_ANDROID
     if (m_busy || m_cameraPending || m_current.isEmpty() || m_current["_conflict"].toBool() ||
-        m_current["status"].toString() == "closed" || m_current["owner_id"] != m_user["id"])
+        m_current["status"].toString() == "closed" || (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]))
         return;
     checkCameraResult();
     if (QFile::exists(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) +
@@ -1372,14 +1569,115 @@ int Lem::pendingCount() const {
 
 // Validate the local checklist and evidence, then close locally before background sending.
 // The server independently validates closure after photograph uploads are acknowledged.
+bool Lem::desktopCorrections() const {
+    return NetworkSecurity::clientPlatform() == "windows" || NetworkSecurity::clientPlatform() == "linux";
+}
+
+bool Lem::correctionAllowed(const QJsonObject &report) const {
+    if (report["status"] == "draft" && report["template"].toObject()["frozen_upload"].toBool()) return false;
+    const auto correction = report["correction"].toObject();
+    return correction["state"] != "editing" || (desktopCorrections() && m_user["role"] == "admin" &&
+        correction["editor_id"] == m_user["id"]);
+}
+
+void Lem::beginReportCorrection() {
+    if (!desktopCorrections() || m_user["role"] != "admin" || reportActionBlocked() ||
+        m_current["status"] != "closed" || m_current["dirty"].toBool() ||
+        m_current["revision"].toInt() < 1 || !online() || !flushEdits()) return;
+    const auto original = m_current;
+    const auto sourceId = original["id"].toString();
+    auto requestId = original["_correction_request_id"].toString();
+    if (requestId.isEmpty()) requestId = uuid();
+    m_current["_correction_request_id"] = requestId;
+    m_reports[sourceId] = m_current;
+    if (!persist()) return;
+    m_busy = true;
+    status("A preparar cópia de correção; o original mantém-se disponível…");
+    request("POST", "/api/reports/" + sourceId + "/corrections",
+        json({{"id", requestId}, {"base_revision", original["revision"]}}),
+        [this, original, requestId](QByteArray data) {
+            auto report = QJsonDocument::fromJson(data).object();
+            if (report["id"] != requestId || report["correction"].toObject()["state"] != "editing") {
+                m_busy = false; status("Resposta inválida; repita a abertura da correção para recuperar a cópia."); return;
+            }
+            const auto directory = cacheDir();
+            auto watcher = new QFutureWatcher<void>(this);
+            connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher, report, original] {
+                watcher->deleteLater();
+                auto source = m_reports.value(original["id"].toString()).toObject();
+                source.remove("_correction_request_id");
+                if (!source.isEmpty()) m_reports[original["id"].toString()] = source;
+                auto ready = report; ready["dirty"] = false;
+                getPhotos(ready, 0);
+                status("Cópia de correção aberta. O original só será substituído ao guardar a correção completa.");
+            });
+            watcher->setFuture(QtConcurrent::run(&m_editPool, [original, report, directory] {
+                const auto mapping = report["correction"].toObject()["photo_map"].toObject();
+                for (auto value : original["photos"].toArray()) {
+                    const auto photo = value.toObject();
+                    const auto target = SafeStorage::photoPath(directory, mapping[photo["id"].toString()].toString(), photo["mime"].toString());
+                    if (target.isEmpty() || QFileInfo::exists(target)) continue;
+                    const auto local = QUrl(photo["path"].toString()).toLocalFile();
+                    if (local.isEmpty()) continue;
+                    QFile input(local);
+                    QSaveFile output(target);
+                    if (input.open(QIODevice::ReadOnly) && output.open(QIODevice::WriteOnly) &&
+                        ReportBundle::copy(input, output)) output.commit();
+                }
+            }));
+        }, "application/json", [this](int, QString detail) {
+            m_busy = false; status("Não foi possível abrir a correção. O original foi conservado. " + detail);
+        });
+}
+
+bool Lem::setCorrectionTimes(QString started, QString finished) {
+    if (!correctionAllowed(m_current) || m_current["correction"].toObject()["state"] != "editing" ||
+        m_current["status"] != "draft" || m_busy || m_current["_conflict"].toBool()) return false;
+    const auto start = QDateTime::fromString(started.trimmed(), Qt::ISODate);
+    const auto end = QDateTime::fromString(finished.trimmed(), Qt::ISODate);
+    if (!start.isValid() || !end.isValid() || start.timeSpec() == Qt::LocalTime ||
+        end.timeSpec() == Qt::LocalTime || end < start) {
+        status("Indique início e fim com fuso horário (ex.: 2026-11-16T09:30:00+00:00). O fim não pode ser anterior ao início.");
+        return false;
+    }
+    auto payload = m_current["payload"].toObject();
+    payload["started"] = start.toUTC().toString(Qt::ISODate);
+    payload["finished"] = end.toUTC().toString(Qt::ISODate);
+    m_current["payload"] = payload;
+    m_current["started"] = payload["started"];
+    m_current["finished"] = payload["finished"];
+    m_current["dirty"] = true;
+    m_current["_edit_seq"] = m_current["_edit_seq"].toDouble() + 1;
+    remember();
+    status("Datas da correção guardadas. O nome do PDF/ZIP utiliza a data e hora de fim.");
+    return true;
+}
+
+bool Lem::receiveReplacement(const QString &oldId, const QString &newId) {
+    auto old = m_reports.value(oldId).toObject();
+    if (old.isEmpty()) return true;
+    if (!old["dirty"].toBool()) return forgetReport(oldId);
+    old["_conflict"] = true;
+    old["_replacement_id"] = newId;
+    old["_conflict_reason"] = "O original foi substituído por uma correção. As suas alterações locais foram conservadas para consulta ou cópia.";
+    m_reports[oldId] = old;
+    if (m_current["id"] == oldId) m_current = old;
+    m_syncConflicts.insert(oldId);
+    saveEdits(old);
+    return persist();
+}
+
 void Lem::finish() {
     if (!m_qveCopyTarget.isEmpty() || attachingFiles()) { status("Aguarde o fim da cópia ou da seleção de evidências antes de concluir."); return; }
     if (m_busy || m_current.isEmpty() || m_current["_conflict"].toBool() ||
-        m_current["owner_id"] != m_user["id"] || m_current["status"].toString() == "closed")
+        (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]) || m_current["status"].toString() == "closed")
         return;
     auto answers = m_current["payload"].toObject()["answers"].toObject();
+    if (m_template["version"].toInt() >= 7) answers = MaintenanceRules::apply(answers, false);
     auto photos = m_current["photos"].toArray();
     QStringList errors;
+    if (m_template["version"].toInt() >= 7 && MaintenanceRules::reading(answers, "MAN.11") == 0)
+        errors << "MAN.11: o calibre configurado deve ser superior a zero";
     const QMap<QString, QString> identityFields{{"EST.02", "manufacturer"}, {"EST.03", "model"}, {"EST.04", "serial"}};
     for (auto s : m_template["sections"].toArray())
         for (auto i : s.toObject()["items"].toArray()) {
@@ -1387,9 +1685,10 @@ void Lem::finish() {
             auto id = item["id"].toString();
             auto a = answers.value(id).toObject();
             auto value = a["value"].toString().trimmed();
-            if (Measurements::digits(id) && !value.isEmpty()) {
+            const auto measurementKey = m_template["version"].toInt() < 7 && Measurements::milliamp(id) ? Measurements::canonical(id) : id;
+            if (Measurements::digits(measurementKey) && !value.isEmpty()) {
                 bool valid = false;
-                const auto formatted = Measurements::format(id, value, &valid);
+                const auto formatted = Measurements::format(measurementKey, value, &valid);
                 if (!valid) errors << id + ": valor numérico inválido";
                 else {
                     value = formatted;
@@ -1442,11 +1741,21 @@ void Lem::finish() {
     m_current["status"] = "closed";
     auto payload = m_current["payload"].toObject();
     payload["answers"] = answers;
-    payload["finished"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    const bool correction = m_current["correction"].toObject()["state"] == "editing";
+    if (!correction) payload["finished"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    else {
+        const auto start = QDateTime::fromString(payload["started"].toString(), Qt::ISODate);
+        const auto end = QDateTime::fromString(payload["finished"].toString(), Qt::ISODate);
+        if (!start.isValid() || !end.isValid() || start.timeSpec() == Qt::LocalTime ||
+            end.timeSpec() == Qt::LocalTime || end < start) {
+            m_current = previous;
+            status("Corrija as datas de início e fim antes de guardar a correção."); return;
+        }
+    }
     m_current["payload"] = payload;
     m_current["dirty"] = true;
     m_current["_edit_seq"] = m_current["_edit_seq"].toDouble() + 1;
-    applyClosedIdentity(m_current);
+    if (!correction) applyClosedIdentity(m_current);
     if (m_template["version"].toInt() >= 4) {
         auto snapshot = m_current["snapshot"].toObject();
         auto details = snapshot["charger"].toObject();
@@ -1473,7 +1782,7 @@ void Lem::finish() {
 }
 QString Lem::defaultExport(QString kind) const {
     return QUrl::fromLocalFile(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) +
-                               "/report-" + m_current.value("id").toString() +
+                               "/" + ReportNaming::identifier(m_current) +
                                (kind == "pdf" ? ".pdf" : ".zip"))
         .toString();
 }
@@ -1489,6 +1798,9 @@ bool Lem::prepareExport(QString kind) {
         status("Conclua o report antes de exportar PDF ou ZIP.");
         return false;
     }
+    if (m_current["correction"].toObject()["state"] == "editing") {
+        status("Aguarde a confirmação da correção pelo servidor antes de exportar."); return false;
+    }
     if (kind == "pdf") {
         const auto problem = ReportPdf::validate(m_current);
         if (problem.isEmpty())
@@ -1499,11 +1811,12 @@ bool Lem::prepareExport(QString kind) {
         return false;
     }
     if (kind == "bundle") {
+        if (ReportPdf::validate(m_current).isEmpty()) return true;
         if (!online())
             return false;
         if (m_current["dirty"].toBool()) {
             status(
-                "Sincronize o report antes de exportar o ZIP. O PDF pode ser gerado localmente.");
+                "Faltam evidências neste dispositivo. Sincronize o report e descarregue-as antes de exportar o ZIP.");
             return false;
         }
         return true;
@@ -1512,7 +1825,7 @@ bool Lem::prepareExport(QString kind) {
 }
 void Lem::exportSaved(const QString &kind, const QUrl &target, bool local) {
     QString message =
-        (local ? "PDF exportado localmente: " : "Exportado: ") + target.toDisplayString();
+        (local ? (kind == "bundle" ? "ZIP exportado localmente: " : "PDF exportado localmente: ") : "Exportado: ") + target.toDisplayString();
     // Called on the GUI thread only after the writer has closed/committed the file.
     // Qt uses Android's content URI/FileProvider support, or the desktop file association.
     if (kind == "pdf" && !QDesktopServices::openUrl(target))
@@ -1523,10 +1836,62 @@ void Lem::exportSaved(const QString &kind, const QUrl &target, bool local) {
 void Lem::exportReport(QString kind, QUrl target) {
     if (!prepareExport(kind))
         return;
-    if (kind == "pdf" && ReportPdf::validate(m_current).isEmpty()) {
+    const auto report = withContractPresentation(m_current);
+    const auto cid = report["contract_id"].toString();
+    const auto rid = report["id"].toString();
+    // Pre-branding server reports have no contract ID in their frozen snapshot.
+    // A missing/evicted catalogue must not silently turn an online export into LEM.
+    const bool resolveContract = cid.isEmpty() && report["revision"].toInt() > 0;
+    if (!m_token.isEmpty() && (!cid.isEmpty() || resolveContract)) {
+        m_busy = true;
+        status("A confirmar o formato atual do contrato…");
+        const auto path = resolveContract ? "/api/reports/" + rid : "/api/contracts/" + cid + "/presentation";
+        request("GET", path, {},
+            [this, cid, rid, resolveContract, chargerId = report["charger_id"].toString(), kind, target](QByteArray data) {
+                const auto received = QJsonDocument::fromJson(data).object();
+                const auto resolved = resolveContract ? received["contract_id"].toString() : cid;
+                const auto style = resolveContract ? received["presentation"].toObject() : received;
+                if (m_current["id"].toString() != rid || resolved.isEmpty() ||
+                    (style["issuer"] != "Lem" && style["issuer"] != "CSMTEC") ||
+                    (resolveContract && (received["id"].toString() != rid || received["charger_id"].toString() != chargerId))) {
+                    m_busy = false;
+                    status("Não foi possível confirmar o contrato e o formato deste report. A exportação foi cancelada.");
+                    return;
+                }
+                if (resolveContract) {
+                    // An administrator may export somebody else's closed report.
+                    // Bind only metadata; never replace local answers/evidence or mark it dirty.
+                    m_current["contract_id"] = resolved;
+                    if (m_reports.contains(rid)) {
+                        auto cached = m_reports[rid].toObject(); cached["contract_id"] = resolved; m_reports[rid] = cached;
+                    }
+                    if (m_pendingEdits.contains(rid)) {
+                        auto pending = m_pendingEdits[rid].toObject(); pending["contract_id"] = resolved; m_pendingEdits[rid] = pending;
+                    }
+                }
+                receiveContractPresentation(resolved, style);
+                m_busy = false;
+                if (!persist()) { emit changed(); return; }
+                exportPreparedReport(kind, target);
+            }, "application/json", [this, rid, resolveContract, kind, target](int code, QString detail) {
+                m_busy = false;
+                if (m_current["id"].toString() != rid) { emit changed(); return; }
+                // Offline export remains possible with the last received contract format.
+                if (!resolveContract && (code == 0 || code >= 500)) {
+                    exportPreparedReport(kind, target);
+                } else status("Não foi possível confirmar o formato do contrato: " + detail);
+            });
+        return;
+    }
+    exportPreparedReport(kind, target);
+}
+
+void Lem::exportPreparedReport(QString kind, QUrl target) {
+    if (!prepareExport(kind)) return;
+    if ((kind == "pdf" || kind == "bundle") && ReportPdf::validate(m_current).isEmpty()) {
         if (!flushEdits())
             return;
-        auto report = m_current;
+        auto report = withContractPresentation(m_current);
         if (report["technician"].toString().isEmpty() && report["owner_id"] == m_user["id"])
             report["technician"] = m_user["name"];
         if (report["technician"].toString().isEmpty())
@@ -1534,56 +1899,297 @@ void Lem::exportReport(QString kind, QUrl target) {
                 report["payload"].toObject()["answers"].toObject()[report["template"].toObject()["version"].toInt() >= 3 ? "FIN.02" : "PG04.02"].toObject()["value"];
         const auto destination = localPath(target);
         m_busy = true;
-        m_localOperationTitle = "A gerar e guardar PDF neste dispositivo";
+        m_localOperationTitle = kind == "bundle" ? "A gerar e guardar ZIP neste dispositivo" : "A gerar e guardar PDF neste dispositivo";
         status(m_localOperationTitle);
         auto watcher = new QFutureWatcher<QString>(this);
-        connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, target] {
+        connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, target, kind] {
             const auto error = watcher->result();
             watcher->deleteLater();
             m_busy = false;
             m_localOperationTitle.clear();
             if (error.isEmpty())
-                exportSaved("pdf", target, true);
+                exportSaved(kind, target, true);
             else
                 status(error);
         });
-        watcher->setFuture(QtConcurrent::run(&m_editPool, [report, destination] {
+        watcher->setFuture(QtConcurrent::run(&m_editPool, [report, destination, kind] {
             QString error;
-            ReportPdf::write(report, destination, &error);
+            if (kind == "bundle") ReportBundle::write(report, destination, &error);
+            else ReportPdf::write(report, destination, &error);
             return error;
         }));
         return;
     }
-    // Server fallback for clean reports whose originals have not been cached.
+    // Large exports are staged to disk, never accumulated as a report-sized QByteArray.
+    auto staged = QSharedPointer<QTemporaryDir>::create(cacheDir() + "/export-XXXXXX");
+    if (!staged->isValid()) { status("Não foi possível preparar o ficheiro de exportação."); return; }
+    // No open temporary-file handle: it would prevent QSaveFile's replacement on Windows.
+    const auto stagedPath = staged->filePath("download");
     m_busy = true;
     emit changed();
-    request("GET", "/api/reports/" + m_current.value("id").toString() + "/" + kind, {},
-            [this, target, kind](QByteArray data) {
+    requestPhoto("/api/reports/" + m_current.value("id").toString() + "/" + kind,
+        stagedPath, NetworkSecurity::responseLimit("/" + kind),
+        [this, target, kind, staged, stagedPath](QSharedPointer<NetworkSecurity::FileBody> body) {
+            if (body->writeFailed || body->exceeded || body->invalidRange ||
+                (kind == "pdf" && !body->prefix.startsWith("%PDF-")) ||
+                (kind == "bundle" && !body->prefix.startsWith("PK")) || !body->commit()) {
                 m_busy = false;
-                if ((kind == "pdf" && !data.startsWith("%PDF-")) ||
-                    (kind == "bundle" && !data.startsWith("PK"))) {
-                    status("O servidor não devolveu um documento válido; destino não alterado.");
-                    return;
-                }
-                const auto destination = localPath(target);
-                if (target.scheme() == "content") {
-                    QFile file(destination);
-                    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() ||
-                        !file.flush()) {
-                        status("Não foi possível gravar o documento selecionado.");
-                        return;
-                    }
-                } else {
-                    QSaveFile file(destination);
-                    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() ||
-                        !file.commit()) {
-                        status("Não foi possível guardar o ficheiro.");
-                        return;
-                    }
-                }
-                exportSaved(kind, target);
+                status(body->exceeded ? "A exportação excede o limite de 500 MiB." : "Não foi possível receber a exportação completa. O destino foi conservado.");
+                return;
+            }
+            m_localOperationTitle = "A guardar exportação";
+            status(m_localOperationTitle);
+            auto watcher = new QFutureWatcher<QString>(this);
+            connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, target, kind, staged] {
+                const auto error = watcher->result(); watcher->deleteLater();
+                m_busy = false; m_localOperationTitle.clear();
+                if (error.isEmpty()) exportSaved(kind, target);
+                else status(error);
             });
+            const auto destination = localPath(target);
+            watcher->setFuture(QtConcurrent::run(&m_editPool, [stagedPath, destination] {
+                QFile source(stagedPath);
+                if (!source.open(QIODevice::ReadOnly)) return QString("Não foi possível ler a exportação recebida.");
+                if (destination.startsWith("content:")) {
+                    QFile output(destination);
+                    if (!output.open(QIODevice::WriteOnly) || !ReportBundle::copy(source, output) || !output.flush())
+                        return QString("Não foi possível guardar o documento selecionado.");
+                } else {
+                    QSaveFile output(destination);
+                    if (!output.open(QIODevice::WriteOnly) || !ReportBundle::copy(source, output) || !output.commit())
+                        return QString("Não foi possível guardar o ficheiro.");
+                }
+                return QString();
+            }));
+        }, [this, staged](int, QString detail) {
+            m_busy = false; status("Exportação interrompida: " + detail + ". Pode repetir; o destino foi conservado.");
+        });
 }
+
+// A contract export owns its queue and worker. It never changes m_current or
+// m_busy, and one report at a time bounds memory, disk staging and server load.
+void Lem::exportContract(QString cid, QString kind, QUrl directory) {
+    if (!desktopCorrections() || m_contractExportJob || (kind != "pdf" && kind != "bundle")) return;
+    if (!online()) return;
+    QString name;
+    for (const auto value : m_contracts)
+        if (value.toObject()["id"].toString() == cid) name = value.toObject()["name"].toString();
+    if (name.isEmpty() || !SafeStorage::component(cid) || !directory.isLocalFile() ||
+        !QFileInfo(directory.toLocalFile()).isDir()) {
+        status("Escolha um contrato ativo e uma pasta local para exportar."); return;
+    }
+    QTemporaryDir output(QDir(directory.toLocalFile()).filePath(
+        ReportNaming::component(name, "Contrato", 40) + (kind == "pdf" ? "_PDF_" : "_ZIP_") + "XXXXXX"));
+    if (!output.isValid()) { status("Não foi possível criar a pasta de exportação."); return; }
+    output.setAutoRemove(false); // Completed files survive cancellation, failures and app restarts.
+    auto job = QSharedPointer<ContractExportJob>::create();
+    job->contractId = cid; job->contractName = name; job->kind = kind; job->directory = output.path();
+    job->token = m_token; job->server = m_server; m_contractExportJob = job;
+    // Capture pending closures before requesting the catalogue. A sync ACK can
+    // clear dirty while that older catalogue still lists the report as a draft.
+    for (const auto value : m_reports) {
+        const auto report = withContractPresentation(value.toObject());
+        if (report["contract_id"].toString() == cid && report["status"] == "closed" &&
+            report["owner_id"] == m_user["id"] && report["dirty"].toBool() &&
+            !report["_conflict"].toBool() && !report.contains("_contract_unavailable") &&
+            SafeStorage::component(report["id"].toString()) && report["correction"].toObject()["state"] != "editing")
+            job->localClosures.append(report);
+    }
+    updateContractExportState("A obter os reports fechados do contrato…");
+    auto fail = [this, job](int, QString detail) {
+        if (m_contractExportJob == job) finishContractExport(detail.left(500));
+    };
+    auto reply = request("GET", "/api/contracts/" + cid + "/presentation", {},
+        [this, job, fail](QByteArray data) {
+            if (job->cancelled) { finishContractExport(); return; }
+            job->presentation = QJsonDocument::fromJson(data).object();
+            if (job->presentation["issuer"] != "Lem" && job->presentation["issuer"] != "CSMTEC") {
+                finishContractExport("Formato do contrato inválido."); return;
+            }
+            auto reply = request("GET", "/api/contracts/" + job->contractId + "/chargers", {},
+                [this, job](QByteArray data) {
+                    if (job->cancelled) { finishContractExport(); return; }
+                    const auto doc = QJsonDocument::fromJson(data);
+                    if (!doc.isArray()) { finishContractExport("Lista de reports inválida."); return; }
+                    QSet<QString> included;
+                    for (const auto row : doc.array()) {
+                        for (const auto value : row.toObject()["reports"].toArray()) {
+                            const auto report = value.toObject(); const auto id = report["id"].toString();
+                            if (report["status"] != "closed" || included.contains(id)) continue;
+                            if (!SafeStorage::component(id)) { finishContractExport("Identificação de report inválida."); return; }
+                            job->queue.append(QJsonObject{{"id", id}}); included.insert(id);
+                        }
+                    }
+                    // Also include the owner's locally closed, pending work. Never
+                    // let another user's stale local draft hide a server closure.
+                    for (const auto value : job->localClosures) {
+                        auto report = value.toObject();
+                        const auto id = report["id"].toString();
+                        if (included.contains(id)) continue;
+                        report["presentation"] = job->presentation;
+                        job->queue.append(QJsonObject{{"id", id}, {"local", report}}); included.insert(id);
+                    }
+                    job->localClosures = {};
+                    nextContractExport();
+                }, "application/json", fail);
+            connect(this, &Lem::contractExportCancelled, reply, &QNetworkReply::abort);
+        }, "application/json", fail);
+    connect(this, &Lem::contractExportCancelled, reply, &QNetworkReply::abort);
+}
+
+void Lem::updateContractExportState(QString detail) {
+    const auto job = m_contractExportJob; if (!job) return;
+    m_contractExportState = {{"active", true}, {"contract_id", job->contractId}, {"contract_name", job->contractName}, {"kind", job->kind},
+        {"total", job->queue.size()}, {"processed", job->index}, {"saved", job->saved}, {"failed", job->failed},
+        {"cancelling", job->cancelled}, {"directory", job->directory},
+        {"directory_url", QUrl::fromLocalFile(job->directory).toString()}, {"message", detail}};
+    emit changed();
+}
+
+void Lem::cancelContractExport() {
+    const auto job = m_contractExportJob; if (!job) return;
+    job->cancelled = true;
+    updateContractExportState("A cancelar. Os ficheiros concluídos serão conservados.");
+    // Only replies explicitly owned by this batch are connected to this signal.
+    emit contractExportCancelled();
+}
+
+void Lem::nextContractExport() {
+    const auto job = m_contractExportJob; if (!job) return;
+    if (job->cancelled || job->index >= job->queue.size()) { finishContractExport(); return; }
+    if (job->token != m_token || job->server != m_server) {
+        finishContractExport("A sessão mudou. Entre novamente para exportar os restantes reports."); return;
+    }
+    const auto item = job->queue[job->index].toObject(); const auto id = item["id"].toString();
+    updateContractExportState(QString("A exportar %1 / %2 · %3 guardados · %4 falhas")
+        .arg(job->index + 1).arg(job->queue.size()).arg(job->saved).arg(job->failed));
+    if (item.contains("local")) { renderContractExport(item["local"].toObject(), true); return; }
+    auto reply = request("GET", "/api/reports/" + id, {}, [this, job, id](QByteArray data) {
+        if (job->cancelled) { finishContractExport(); return; }
+        auto report = QJsonDocument::fromJson(data).object();
+        if (!readableReport(report) || report["id"].toString() != id ||
+            report["contract_id"].toString() != job->contractId || report["status"] != "closed" ||
+            report["correction"].toObject()["state"] == "editing") {
+            completeContractExportItem(id, {}, {}, "O report já não está fechado/disponível neste contrato.", {}); return;
+        }
+        // Reuse only immutable evidence IDs from the same report, never cached
+        // answers/status. A stale observer draft cannot downgrade this snapshot.
+        QMap<QString, QJsonObject> cached;
+        for (const auto value : m_reports.value(id).toObject()["photos"].toArray()) {
+            const auto photo = value.toObject(); cached[photo["id"].toString()] = photo;
+        }
+        auto photos = report["photos"].toArray();
+        for (int i = 0; i < photos.size(); ++i) {
+            auto photo = photos[i].toObject(); const auto local = cached.value(photo["id"].toString());
+            photo.remove("path");
+            if (!local.isEmpty() && local["mime"] == photo["mime"] && QFileInfo::exists(localPath(QUrl(local["path"].toString()))))
+                photo["path"] = local["path"];
+            photos[i] = photo;
+        }
+        report["photos"] = photos;
+        renderContractExport(report, false);
+    }, "application/json", [this, id](int code, QString detail) {
+        if (code == 401 || code == 423 || code == 426) { finishContractExport(detail.left(500)); return; }
+        completeContractExportItem(id, {}, {}, detail.left(500), {});
+    });
+    connect(this, &Lem::contractExportCancelled, reply, &QNetworkReply::abort);
+}
+
+void Lem::renderContractExport(QJsonObject report, bool localOnly) {
+    const auto job = m_contractExportJob; if (!job) return;
+    if (job->cancelled) { finishContractExport(); return; }
+    const auto problem = ReportPdf::validate(report);
+    if (!problem.isEmpty()) {
+        if (localOnly) completeContractExportItem(report["id"].toString(), ReportNaming::identifier(report), {}, problem, "local");
+        else downloadContractExport(report);
+        return;
+    }
+    // Local work uses a separate pool, so a large ZIP cannot delay saving answers.
+    const auto staged = QSharedPointer<QTemporaryDir>::create(job->directory + "/.tmp-XXXXXX");
+    if (!staged->isValid()) {
+        completeContractExportItem(report["id"].toString(), {}, {}, "Não foi possível preparar o ficheiro.", "local"); return;
+    }
+    const auto path = staged->filePath("export");
+    auto watcher = new QFutureWatcher<QString>(this);
+    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, job, report, staged, path, localOnly] {
+        const auto error = watcher->result(); watcher->deleteLater();
+        if (m_contractExportJob != job) return;
+        // Evidence may be evicted/removed during an unrelated operation. Fall back
+        // to the server without publishing an incomplete local file.
+        if (!error.isEmpty() && !localOnly && !job->cancelled) { downloadContractExport(report); return; }
+        completeContractExportItem(report["id"].toString(), ReportNaming::identifier(report), path, error, "local");
+    });
+    watcher->setFuture(QtConcurrent::run(&m_exportPool, [report, path, kind = job->kind] {
+        QString error;
+        if (kind == "pdf") ReportPdf::write(report, path, &error);
+        else ReportBundle::write(report, path, &error);
+        return error;
+    }));
+}
+
+void Lem::downloadContractExport(QJsonObject report) {
+    const auto job = m_contractExportJob; if (!job) return;
+    const auto id = report["id"].toString(), name = ReportNaming::identifier(report);
+    auto staged = QSharedPointer<QTemporaryDir>::create(job->directory + "/.tmp-XXXXXX");
+    if (!staged->isValid()) { completeContractExportItem(id, name, {}, "Não foi possível preparar a descarga.", "server"); return; }
+    const auto path = staged->filePath("export");
+    requestPhoto("/api/reports/" + id + "/" + job->kind, path, NetworkSecurity::responseLimit("/" + job->kind),
+        [this, job, id, name, staged, path](QSharedPointer<NetworkSecurity::FileBody> body) {
+            QString error;
+            if (body->writeFailed || body->exceeded || body->invalidRange ||
+                (job->kind == "pdf" ? !body->prefix.startsWith("%PDF-") : !body->prefix.startsWith("PK")) || !body->commit())
+                error = "Exportação incompleta ou inválida. Nenhum ficheiro parcial foi publicado.";
+            completeContractExportItem(id, name, path, error, "server");
+        }, [this, id, name, staged](int code, QString detail) {
+            if (code == 401 || code == 423 || code == 426) { finishContractExport(detail.left(500)); return; }
+            completeContractExportItem(id, name, {}, detail.left(500), "server");
+        }, {}, {}, 0, [this, job] { return m_contractExportJob == job && !job->cancelled; }, true);
+}
+
+void Lem::completeContractExportItem(QString id, QString name, QString staged, QString error, QString source) {
+    const auto job = m_contractExportJob; if (!job) return;
+    if (job->cancelled) { finishContractExport(); return; }
+    QString relative = name + (job->kind == "pdf" ? ".pdf" : ".zip");
+    if (error.isEmpty()) {
+        // Preserve the required public filename even for two reports with the
+        // same charger/end time. A collision gets its own internal-ID subfolder.
+        if (QFileInfo::exists(QDir(job->directory).filePath(relative))) {
+            const auto folder = "report-" + id;
+            if (!SafeStorage::component(id) || !QDir(job->directory).mkdir(folder)) error = "Nome de exportação já existente.";
+            else relative = folder + "/" + relative;
+        }
+        if (error.isEmpty() && !QFile::rename(staged, QDir(job->directory).filePath(relative)))
+            error = "Não foi possível guardar o ficheiro. O destino existente foi conservado.";
+    }
+    if (error.isEmpty()) ++job->saved; else ++job->failed;
+    job->results.append(QJsonObject{{"id", id}, {"identifier", name}, {"status", error.isEmpty() ? "saved" : "failed"},
+        {"file", error.isEmpty() ? relative : QString()}, {"source", source}, {"error", error}});
+    ++job->index;
+    QTimer::singleShot(0, this, &Lem::nextContractExport);
+}
+
+void Lem::finishContractExport(QString detail) {
+    const auto job = m_contractExportJob; if (!job) return;
+    const bool partial = job->cancelled || !detail.isEmpty() || job->index < job->queue.size();
+    const auto message = QString("%1: %2 ficheiros guardados, %3 falhas, %4 por exportar.%5")
+        .arg(partial ? "Exportação interrompida" : "Exportação concluída").arg(job->saved).arg(job->failed)
+        .arg(job->queue.size() - job->index).arg(detail.isEmpty() ? QString() : " " + detail);
+    updateContractExportState(message);
+    m_contractExportState["active"] = false;
+    m_contractExportState["state"] = partial ? "interrupted" : job->failed ? "partial" : "complete";
+    QJsonArray remaining;
+    for (int i = job->index; i < job->queue.size(); ++i) remaining.append(job->queue[i].toObject()["id"]);
+    QJsonObject summary{{"contract_id", job->contractId}, {"kind", job->kind}, {"message", message},
+                        {"results", job->results}, {"remaining", remaining}};
+    QSaveFile manifest(QDir(job->directory).filePath("resumo-exportacao.json"));
+    const auto bytes = QJsonDocument(summary).toJson(QJsonDocument::Indented);
+    if (QFileInfo::exists(manifest.fileName()) || !manifest.open(QIODevice::WriteOnly) ||
+        manifest.write(bytes) != bytes.size() || !manifest.commit())
+        m_contractExportState["message"] = message + " Não foi possível guardar o resumo na pasta.";
+    m_contractExportJob.clear();
+    emit changed();
+}
+
 void Lem::createContract(QString company, int year, int semester, QString kind) {
     if (m_busy || !online())
         return;
@@ -1605,6 +2211,7 @@ void Lem::deleteContract(QString id, QString confirmation) {
     emit changed();
     request("POST", "/api/contracts/" + id + "/trash", json({{"confirmation", confirmation}}),
             [this, id](QByteArray) {
+                suspendContractSync(id, "Contrato em espera de eliminação durante 30 dias. Sincronização suspensa até recuperação pelo administrador.");
                 if (m_contract == id) {
                     m_current = {};
                     m_contract.clear();
@@ -1689,12 +2296,151 @@ void Lem::analyseExcel(QUrl url) {
     });
 }
 
-// Validate a proposed mapping without writing chargers; commitExcel reuses that mapping.
-void Lem::previewExcel(QString sheet, int row, QVariantMap columns) {
-    if (m_busy || !online() || m_contract.isEmpty() || m_excel.isEmpty())
+// Resolve cached contract identity and overlay the newest received presentation.
+QJsonObject Lem::withContractPresentation(QJsonObject report) const {
+    auto cid = report["contract_id"].toString();
+    if (cid.isEmpty()) cid = report["snapshot"].toObject()["contract"].toObject()["id"].toString();
+    const auto chargerId = report["charger_id"].toString();
+    if (cid.isEmpty() && !chargerId.isEmpty()) {
+        QSet<QString> matches;
+        for (const auto &key : m_catalogues.keys())
+            for (auto charger : m_catalogues[key].toArray())
+                if (charger.toObject()["id"].toString() == chargerId && !key.isEmpty()) matches.insert(key);
+        // Older caches stored only the selected charger's catalogue.
+        for (auto charger : m_chargers) {
+            const auto row = charger.toObject();
+            if (row["id"].toString() != chargerId) continue;
+            const auto found = row["contract_id"].toString(m_contract);
+            if (!found.isEmpty()) matches.insert(found);
+        }
+        if (matches.size() == 1) cid = *matches.cbegin();
+    }
+    if (!cid.isEmpty()) report["contract_id"] = cid;
+    for (auto entry : m_contracts) {
+        const auto contract = entry.toObject();
+        const auto style = contract["presentation"].toObject();
+        if (contract["id"].toString() == cid && !style.isEmpty() &&
+            style["revision"].toInt() >= report["presentation"].toObject()["revision"].toInt()) {
+            report["contract_id"] = cid;
+            report["presentation"] = style;
+        }
+    }
+    return report;
+}
+
+void Lem::applyContractPresentations() {
+    // Presentation is contract metadata: never change answers, owner or dirty/revision state.
+    for (const auto &id : m_reports.keys()) m_reports[id] = withContractPresentation(m_reports[id].toObject());
+    for (const auto &id : m_pendingEdits.keys()) m_pendingEdits[id] = withContractPresentation(m_pendingEdits[id].toObject());
+    if (!m_current.isEmpty()) m_current = withContractPresentation(m_current);
+}
+
+void Lem::receiveContractPresentation(const QString &cid, const QJsonObject &style) {
+    if (style["issuer"] != "Lem" && style["issuer"] != "CSMTEC") return;
+    for (int i = 0; i < m_contracts.size(); ++i) {
+        auto contract = m_contracts[i].toObject();
+        if (contract["id"].toString() != cid ||
+            style["revision"].toInt() < contract["presentation"].toObject()["revision"].toInt()) continue;
+        contract["presentation"] = style;
+        contract["report_logos"] = style["client_logos"];
+        m_contracts[i] = contract;
+    }
+    applyContractPresentations();
+    const auto apply = [this, &cid, &style](QJsonObject report) {
+        report = withContractPresentation(report);
+        if (report["contract_id"].toString() == cid &&
+            style["revision"].toInt() >= report["presentation"].toObject()["revision"].toInt()) report["presentation"] = style;
+        return report;
+    };
+    for (const auto &id : m_reports.keys()) m_reports[id] = apply(m_reports[id].toObject());
+    for (const auto &id : m_pendingEdits.keys()) m_pendingEdits[id] = apply(m_pendingEdits[id].toObject());
+    if (!m_current.isEmpty()) m_current = apply(m_current);
+}
+
+void Lem::saveReportPresentation(QString issuer, QString primary, QString secondary, int revision) {
+    const auto cid = m_contract;
+    if (!canSaveReportPresentation()) {
+        const auto message = m_user["role"] != "admin" ? "Só um administrador pode guardar o formato dos reports." :
+            !authenticated() ? "Inicie sessão para guardar o formato no servidor." :
+            cid.isEmpty() ? "Selecione o contrato antes de guardar o formato." :
+            "Aguarde a operação em curso e volte a guardar o formato.";
+        setPresentationSaveState(cid, "error", message);
+        return;
+    }
+    QJsonArray logos;
+    if (!primary.isEmpty()) logos.append(primary);
+    if (!secondary.isEmpty()) logos.append(secondary);
+    m_busy = true;
+    setPresentationSaveState(cid, "saving", "A guardar o formato no servidor…");
+    // A successful HTTP response is not sufficient: read the committed settings
+    // independently, including after a lost acknowledgement or a safe retry.
+    const auto confirm = [this, cid, issuer, logos, revision](int acknowledgedRevision) {
+        setPresentationSaveState(cid, "saving", "A confirmar o formato guardado no servidor…");
+        request("GET", "/api/contracts/" + cid + "/presentation", {},
+            [this, cid, issuer, logos, revision, acknowledgedRevision](QByteArray data) {
+                const auto saved = QJsonDocument::fromJson(data).object();
+                const auto savedIssuer = saved["issuer"].toString();
+                const int savedRevision = saved["revision"].toInt(-1);
+                QJsonArray savedLogos;
+                for (auto logo : saved["client_logos"].toArray()) savedLogos.append(logo.toObject()["id"]);
+                const bool valid = (savedIssuer == "Lem" || savedIssuer == "CSMTEC") &&
+                    savedRevision >= qMax(revision, acknowledgedRevision) && saved["client_logos"].isArray();
+                m_busy = false;
+                if (!valid || savedIssuer != issuer || savedLogos != logos) {
+                    if (valid) { receiveContractPresentation(cid, saved); persist(); }
+                    setPresentationSaveState(cid, "error", valid ?
+                        "Gravação não confirmada. O servidor mantém " + savedIssuer + ". Verifique as opções e volte a guardar." :
+                        "Resposta inválida ao confirmar o formato. Atualize o servidor e tente novamente.");
+                    return;
+                }
+                receiveContractPresentation(cid, saved);
+                m_preview = {};
+                if (!persist()) {
+                    setPresentationSaveState(cid, "warning", "Guardado no servidor: " + issuer + ". Falhou a gravação neste dispositivo; volte a atualizar o contrato.");
+                    return;
+                }
+                setPresentationSaveState(cid, "saved", "Guardado no servidor: " + issuer + ".");
+                refresh();
+            }, "application/json", [this, cid](int, QString) {
+                m_busy = false;
+                setPresentationSaveState(cid, "error", "Não foi possível confirmar a gravação no servidor. Atualize o contrato antes de exportar ou volte a guardar.");
+            });
+    };
+    request("PUT", "/api/contracts/" + cid + "/presentation",
+        json({{"issuer", issuer}, {"client_logos", logos}, {"base_revision", revision}}),
+        [confirm](QByteArray data) {
+            confirm(QJsonDocument::fromJson(data).object()["revision"].toInt(-1));
+        }, "application/json", [this, cid, confirm](int code, QString message) {
+            if (code == 0 || code == 409 || code >= 500) { confirm(-1); return; }
+            m_busy = false;
+            const auto detail = QJsonDocument::fromJson(message.toUtf8()).object()["detail"].toString();
+            setPresentationSaveState(cid, "error", "Não foi possível guardar o formato no servidor. " +
+                (detail.isEmpty() ? "Atualize o contrato e confirme a sessão e a ligação." : detail));
+        });
+}
+
+void Lem::setPresentationSaveState(const QString &cid, const QString &state, const QString &message) {
+    m_reportPresentationSave = QJsonObject{{"contract_id", cid}, {"state", state}, {"message", message}};
+    status(message);
+}
+
+QVariantList Lem::reportBrands() const {
+    QFile file(":/branding/report-logos.json");
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    return QJsonDocument::fromJson(file.readAll()).array().toVariantList();
+}
+
+void Lem::previewExcel(QString sheet, int row, QVariantMap columns, QString primary, QString secondary, QString issuer, int brandingRevision) {
+    if (m_busy || m_user["role"] != "admin" || !online() || m_contract.isEmpty() || m_excel.isEmpty())
         return;
     m_mapping = {
         {"sheet", sheet}, {"header_row", row}, {"columns", QJsonObject::fromVariantMap(columns)}};
+    QJsonArray logos;
+    if (!primary.isEmpty()) logos.append(primary);
+    if (!secondary.isEmpty()) logos.append(secondary);
+    m_mapping["report_logos"] = logos;
+    if (!issuer.isEmpty()) m_mapping["report_issuer"] = issuer;
+    if (brandingRevision >= 0) m_mapping["branding_revision"] = brandingRevision;
     m_busy = true;
     emit changed();
     multipart("POST", "/api/contracts/" + m_contract + "/import",
@@ -1720,7 +2466,7 @@ void Lem::commitExcel() {
                   m_importInfo = {};
                   m_excel.clear();
                   status("Importação concluída: " + QString::fromUtf8(data));
-                  refreshCatalogue(m_contract, true);
+                  refresh();
               });
 }
 void Lem::createUser(QString email, QString name, QString password, QString role) {
@@ -1737,6 +2483,42 @@ void Lem::createUser(QString email, QString name, QString password, QString role
                 loadUsers();
             });
 }
+bool Lem::resetTechnicianPassword(QString id, QString password) {
+    if (m_busy || m_user["role"] != "admin" || !online()) return false;
+    bool technician = false;
+    for (const auto value : m_users) {
+        const auto user = value.toObject();
+        if (user["id"].toString() == id && user["role"] == "tech") technician = true;
+    }
+    if (!technician || password.size() < 12 || password.size() > 200) {
+        status("Escolha um técnico e uma password entre 12 e 200 caracteres."); return false;
+    }
+    m_busy = true;
+    m_passwordReset = {{"state", "saving"}, {"user_id", id}, {"message", "A repor a password do técnico…"}};
+    emit changed();
+    request("PUT", "/api/users/" + id + "/password", json({{"password", password}}),
+        [this, id](QByteArray data) {
+            const auto ack = QJsonDocument::fromJson(data).object();
+            const bool saved = ack["ok"].toBool() && ack["user_id"].toString() == id;
+            m_busy = false;
+            const auto message = saved ? "Password do técnico alterada. Deve entrar novamente com a nova password."
+                                       : "Não foi possível confirmar a alteração da password.";
+            m_passwordReset = {{"state", saved ? "saved" : "error"}, {"user_id", id}, {"message", message}};
+            status(message);
+        }, "application/json", [this, id](int code, QString) {
+            // Do not reflect request/validation bodies into UI or logs: credentials
+            // are never part of the durable account list or operation result.
+            m_busy = false;
+            const auto message = code == 404 ? "Técnico inexistente ou servidor sem suporte. Atualize a lista e o servidor."
+                : code == 403 ? "Operação recusada. Apenas administradores podem repor passwords de técnicos."
+                : code == 401 ? "Sessão expirada. Entre novamente."
+                : "Não foi possível confirmar a alteração. Verifique a ligação antes de tentar novamente.";
+            m_passwordReset = {{"state", "error"}, {"user_id", id}, {"message", message}};
+            status(message);
+        });
+    return true;
+}
+
 void Lem::assignUser(QString id) {
     if (m_busy || !online() || m_contract.isEmpty())
         return;

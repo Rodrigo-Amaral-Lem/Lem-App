@@ -5,22 +5,26 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// Selection coordinates refer to the oriented image, never its letterboxed area.
-// Preview is bounded; the backend crops the full resolution original off-thread.
+// Coordinates refer to the EXIF-oriented image after the preview rotation.
+// Only Save changes the evidence; the backend rotates/crops the original once.
 Dialog {
     id: crop
     objectName: "photoCropDialog"
     property string photoId: ""
     property string reportId: ""
     property url photoSource: ""
-    signal applyCrop(string reportId, string photoId, real x, real y, real width, real height)
-    property real leftEdge: 0.1
-    property real topEdge: 0.1
-    property real rightEdge: 0.9
-    property real bottomEdge: 0.9
+    property bool canApply: true
+    property bool cropEnabled: false
+    property int quarterTurns: 0
+    readonly property bool sideways: quarterTurns % 2 !== 0
+    signal applyEdit(string reportId, string photoId, int quarterTurns, real x, real y, real width, real height)
+    property real leftEdge: 0
+    property real topEdge: 0
+    property real rightEdge: 1
+    property real bottomEdge: 1
     readonly property real handlePadding: 28
     modal: true
-    title: "Recortar fotografia"
+    title: "Editar fotografia"
     // Use the stationary window's exclusion margins; the moving popup must not
     // calculate its own margins (which would feed back into its position).
     property real safeTop: parent ? parent.SafeArea.margins.top : 0
@@ -38,14 +42,95 @@ Dialog {
     y: topMargin + Math.max(0, (parent.height - topMargin - bottomMargin - height) / 2)
     closePolicy: Popup.CloseOnEscape
     function resetSelection() { leftEdge = 0; topEdge = 0; rightEdge = 1; bottomEdge = 1 }
-    onOpened: resetSelection()
+    function resetEdit() { quarterTurns = 0; cropEnabled = false; resetSelection() }
+    function rotateRight() {
+        // Carry the selected pixels with the image instead of selecting a new area.
+        const l = leftEdge, t = topEdge, r = rightEdge, b = bottomEdge
+        leftEdge = 1 - b; topEdge = l; rightEdge = 1 - t; bottomEdge = r
+        quarterTurns = (quarterTurns + 1) % 4
+    }
+    onOpened: resetEdit()
     onClosed: photoSource = ""
+    // Match the other touch actions: drawn icons, 48 px targets and a distinct
+    // checked state. Text remains available to accessibility and tooltips only.
+    component PhotoToolButton: Button {
+        id: tool
+        required property string symbol
+        implicitWidth: 48
+        implicitHeight: 48
+        Layout.preferredWidth: 48
+        Layout.preferredHeight: 48
+        Accessible.name: text
+        ToolTip.visible: hovered || down
+        ToolTip.text: text
+        background: Rectangle {
+            radius: 8
+            color: tool.checked ? "#007f95" : tool.down ? "#e0f0f3" : "white"
+            border.color: tool.checked || tool.activeFocus ? "#007f95" : "#78909c"
+            border.width: tool.activeFocus ? 2 : 1
+            opacity: tool.enabled ? 1 : .45
+        }
+        contentItem: Item {
+            Canvas {
+                objectName: tool.symbol === "rotate" ? "rotatePhotoIcon" : "cropPhotoIcon"
+                width: 24; height: 24
+                anchors.centerIn: parent
+                property color strokeColor: tool.checked ? "white" : "#263238"
+                opacity: tool.enabled ? 1 : .45
+                onStrokeColorChanged: requestPaint()
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    ctx.strokeStyle = strokeColor
+                    ctx.lineWidth = 2
+                    ctx.lineCap = "round"
+                    ctx.lineJoin = "round"
+                    ctx.beginPath()
+                    if (tool.symbol === "rotate") {
+                        // Avoid Unicode arrows: Android font coverage varies.
+                        ctx.arc(12, 13, 8, Math.PI * .15, Math.PI * 1.75)
+                        ctx.stroke()
+                        ctx.beginPath()
+                        ctx.moveTo(12, 7.34); ctx.lineTo(17.66, 7.34); ctx.lineTo(17.66, 1.7)
+                    } else {
+                        // Same crossed-corner crop symbol used by the former crop action.
+                        ctx.moveTo(6.72, 1.2); ctx.lineTo(6.72, 18); ctx.lineTo(22.8, 18)
+                        ctx.moveTo(1.2, 6.72); ctx.lineTo(18, 6.72); ctx.lineTo(18, 22.8)
+                    }
+                    ctx.stroke()
+                }
+            }
+        }
+    }
     contentItem: ColumnLayout {
         spacing: 10
+        RowLayout {
+            Layout.fillWidth: true
+            PhotoToolButton {
+                objectName: "rotatePhotoPreview"
+                symbol: "rotate"
+                text: "Rodar 90° para a direita"
+                Accessible.name: "Rodar fotografia 90° para a direita"
+                enabled: preview.status === Image.Ready
+                onClicked: crop.rotateRight()
+            }
+            PhotoToolButton {
+                objectName: "enablePhotoCrop"
+                symbol: "crop"
+                text: "Recortar"
+                checkable: true
+                checked: crop.cropEnabled
+                enabled: preview.status === Image.Ready
+                onToggled: crop.cropEnabled = checked
+            }
+            Item { Layout.fillWidth: true }
+        }
         Label {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
-            text: "Arraste os cantos para recortar ou o centro para mover a seleção."
+            text: crop.cropEnabled
+                ? "Arraste os cantos para recortar ou o centro para mover a seleção."
+                : "Pode rodar a fotografia. Ative «Recortar» se precisar."
         }
         Item {
             id: stage
@@ -55,21 +140,25 @@ Dialog {
             Rectangle { anchors.fill: parent; color: "#18252b" }
             Image {
                 id: preview
-                anchors.fill: parent
-                anchors.margins: crop.handlePadding
+                anchors.centerIn: parent
+                // Fit the rotated bounding box, keeping the handles inside the stage.
+                width: Math.max(1, (crop.sideways ? stage.height : stage.width) - 2 * crop.handlePadding)
+                height: Math.max(1, (crop.sideways ? stage.width : stage.height) - 2 * crop.handlePadding)
+                rotation: crop.quarterTurns * 90
                 source: crop.photoSource
                 fillMode: Image.PreserveAspectFit
                 autoTransform: true
                 asynchronous: true
+                cache: false
                 sourceSize: Qt.size(1600, 1600)
             }
             Item {
                 id: imageArea
                 objectName: "cropImageArea"
-                width: preview.paintedWidth
-                height: preview.paintedHeight
+                width: crop.sideways ? preview.paintedHeight : preview.paintedWidth
+                height: crop.sideways ? preview.paintedWidth : preview.paintedHeight
                 anchors.centerIn: parent
-                visible: preview.status === Image.Ready
+                visible: crop.cropEnabled && preview.status === Image.Ready
                 Rectangle { x: 0; y: 0; width: parent.width; height: crop.topEdge * parent.height; color: "#99000000" }
                 Rectangle { x: 0; y: crop.bottomEdge * parent.height; width: parent.width; height: parent.height - y; color: "#99000000" }
                 Rectangle { x: 0; y: crop.topEdge * parent.height; width: crop.leftEdge * parent.width; height: (crop.bottomEdge - crop.topEdge) * parent.height; color: "#99000000" }
@@ -141,18 +230,24 @@ Dialog {
             Label { anchors.centerIn: parent; visible: preview.status === Image.Error; text: "Não foi possível ler a fotografia"; color: "white" }
         }
     }
-    footer: DialogButtonBox {
-        Button { objectName: "resetPhotoCrop"; implicitHeight: 48; font.pixelSize: 16; text: "Repor"; DialogButtonBox.buttonRole: DialogButtonBox.ResetRole; onClicked: crop.resetSelection() }
-        Button { objectName: "cancelPhotoCrop"; implicitHeight: 48; font.pixelSize: 16; text: "Cancelar"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole; onClicked: crop.close() }
+    footer: RowLayout {
+        // Share the available width even on 320px screens and with cutouts.
+        spacing: 6
+        Button { Layout.fillWidth: true; Layout.minimumWidth: 0; implicitWidth: 0; objectName: "resetPhotoCrop"; implicitHeight: 48; font.pixelSize: 16; text: "Repor"; DialogButtonBox.buttonRole: DialogButtonBox.ResetRole; onClicked: crop.resetEdit() }
+        Button { Layout.fillWidth: true; Layout.minimumWidth: 0; implicitWidth: 0; objectName: "cancelPhotoCrop"; implicitHeight: 48; font.pixelSize: 16; text: "Cancelar"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole; onClicked: crop.close() }
         Button {
+            Layout.fillWidth: true; Layout.minimumWidth: 0; implicitWidth: 0
             objectName: "applyPhotoCrop"; implicitHeight: 48; font.pixelSize: 16
-            text: "Recortar"; highlighted: true
-            enabled: preview.status === Image.Ready
+            text: "Guardar"; highlighted: true
+            enabled: preview.status === Image.Ready && crop.canApply
             DialogButtonBox.buttonRole: DialogButtonBox.ApplyRole
             onClicked: {
-                crop.applyCrop(crop.reportId, crop.photoId, crop.leftEdge, crop.topEdge,
-                               crop.rightEdge-crop.leftEdge, crop.bottomEdge-crop.topEdge)
-                crop.close()
+                crop.applyEdit(crop.reportId, crop.photoId, crop.quarterTurns,
+                               crop.cropEnabled ? crop.leftEdge : 0,
+                               crop.cropEnabled ? crop.topEdge : 0,
+                               crop.cropEnabled ? crop.rightEdge - crop.leftEdge : 1,
+                               crop.cropEnabled ? crop.bottomEdge - crop.topEdge : 1)
+                // The caller closes only after the backend accepts the edit.
             }
         }
     }

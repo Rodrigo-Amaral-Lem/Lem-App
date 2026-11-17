@@ -20,6 +20,8 @@
 #include <QThreadPool>
 #include <QMap>
 class QNetworkReply;
+class QFile;
+namespace NetworkSecurity { struct FileBody; }
 /**
  * Owns the active user, cached report collection, network requests and save queues.
  *
@@ -40,6 +42,8 @@ class Lem : public QObject {
     Q_PROPERTY(bool saving READ saving NOTIFY localSaveStateChanged)
     Q_PROPERTY(bool localSaveError READ localSaveError NOTIFY localSaveStateChanged)
     Q_PROPERTY(QVariantMap clientCompatibility READ clientCompatibility NOTIFY compatibilityChanged)
+    Q_PROPERTY(QVariantMap reportPresentationSave READ reportPresentationSave NOTIFY changed)
+    Q_PROPERTY(bool canSaveReportPresentation READ canSaveReportPresentation NOTIFY changed)
     Q_PROPERTY(bool authenticated READ authenticated NOTIFY changed)
     Q_PROPERTY(bool syncing READ syncing NOTIFY changed)
     Q_PROPERTY(int pendingReports READ pendingCount NOTIFY changed)
@@ -47,6 +51,7 @@ class Lem : public QObject {
     Q_PROPERTY(QString syncState READ syncState NOTIFY changed)
     Q_PROPERTY(double photoCacheMB READ photoCacheMB NOTIFY changed)
     Q_PROPERTY(bool downloadingPhotos READ downloadingPhotos NOTIFY changed)
+    Q_PROPERTY(bool currentReportDownloadingPhotos READ currentReportDownloadingPhotos NOTIFY changed)
     Q_PROPERTY(QString photoDownloadState READ photoDownloadState NOTIFY changed)
     Q_PROPERTY(QVariantMap user READ user NOTIFY changed)
     Q_PROPERTY(QVariantList users READ users NOTIFY changed)
@@ -59,9 +64,18 @@ class Lem : public QObject {
     Q_PROPERTY(QVariantMap importInfo READ importInfo NOTIFY changed)
     Q_PROPERTY(QVariantMap importPreview READ importPreview NOTIFY changed)
     Q_PROPERTY(QString storage READ storage CONSTANT)
+    Q_PROPERTY(bool desktopCorrections READ desktopCorrections CONSTANT)
+    Q_PROPERTY(bool desktopExports READ desktopCorrections CONSTANT)
+    Q_PROPERTY(QVariantMap contractExport READ contractExport NOTIFY changed)
+    Q_PROPERTY(QVariantMap passwordReset READ passwordReset NOTIFY changed)
   public:
     explicit Lem(QString root = {}, QObject *parent = nullptr);
     ~Lem() override;
+    bool desktopCorrections() const;
+    QVariantMap contractExport() const { return m_contractExportState.toVariantMap(); }
+    QVariantMap passwordReset() const { return m_passwordReset.toVariantMap(); }
+    Q_INVOKABLE void beginReportCorrection();
+    Q_INVOKABLE bool setCorrectionTimes(QString started, QString finished);
     bool saving() const {
         return !m_pendingEdits.isEmpty();
     }
@@ -88,6 +102,11 @@ class Lem : public QObject {
     bool authenticated() const {
         return !m_token.isEmpty() && !m_server.startsWith("demo:");
     }
+    QVariantMap reportPresentationSave() const { return m_reportPresentationSave.toVariantMap(); }
+    bool canSaveReportPresentation() const {
+        return authenticated() && m_user["role"] == "admin" && !m_contract.isEmpty() &&
+               !m_busy && !m_syncing && !m_refreshing;
+    }
     bool syncing() const {
         return m_syncing;
     }
@@ -97,6 +116,7 @@ class Lem : public QObject {
     bool downloadingPhotos() const {
         return !m_photoBatchReport.isEmpty();
     }
+    bool currentReportDownloadingPhotos() const;
     QString photoDownloadState() const {
         return m_photoBatchState;
     }
@@ -134,6 +154,7 @@ class Lem : public QObject {
         return m_root;
     }
     // Session/catalogue actions exposed to QML.
+    Q_INVOKABLE QString connectorText(QString text) const { return Checklist::connectorText(text); }
     Q_INVOKABLE void demo();
     Q_INVOKABLE void useDefaultServer();
     Q_INVOKABLE void login(QString email, QString password);
@@ -143,6 +164,7 @@ class Lem : public QObject {
     // Local-first report editing and synchronization.
     Q_INVOKABLE void openReport(QString chargerId, QString reportId = {});
     Q_INVOKABLE void answer(QString checkpoint, QString value, QString notes);
+    Q_INVOKABLE void beginNotesEdit(QString checkpoint);
     Q_INVOKABLE void setAssessment(QString checkpoint, QString assessment);
     Q_INVOKABLE void attach(QString checkpoint, QUrl file);
     Q_INVOKABLE void attachMany(QString checkpoint, const QList<QUrl> &files);
@@ -150,6 +172,8 @@ class Lem : public QObject {
     Q_INVOKABLE void takeVideo(QString checkpoint);
     Q_INVOKABLE void openVideo(QString photoId);
     Q_INVOKABLE void cropPhoto(QString photoId, qreal x, qreal y, qreal width, qreal height);
+    Q_INVOKABLE void rotatePhoto(QString photoId);
+    Q_INVOKABLE bool editPhoto(QString photoId, int quarterTurns, qreal x, qreal y, qreal width, qreal height);
     Q_INVOKABLE void removePhoto(QString photoId);
     Q_INVOKABLE void deleteReport(QString reportId);
     Q_INVOKABLE void sync();
@@ -182,13 +206,17 @@ class Lem : public QObject {
     Q_INVOKABLE int pendingCount() const;
     Q_INVOKABLE bool prepareExport(QString kind);
     Q_INVOKABLE void exportReport(QString kind, QUrl destination);
+    Q_INVOKABLE void exportContract(QString contractId, QString kind, QUrl directory);
+    Q_INVOKABLE void cancelContractExport();
     // Administrative Excel import and account/contract management.
     Q_INVOKABLE void createContract(QString company, int year, int semester, QString kind);
     Q_INVOKABLE void deleteContract(QString id, QString confirmation);
     Q_INVOKABLE void loadDeletedContracts();
     Q_INVOKABLE void restoreContract(QString id);
     Q_INVOKABLE void analyseExcel(QUrl file);
-    Q_INVOKABLE void previewExcel(QString sheet, int row, QVariantMap columns);
+    Q_INVOKABLE QVariantList reportBrands() const;
+    Q_INVOKABLE void previewExcel(QString sheet, int row, QVariantMap columns, QString primary = "", QString secondary = "", QString issuer = "", int brandingRevision = -1);
+    Q_INVOKABLE void saveReportPresentation(QString issuer, QString primary, QString secondary, int revision);
     Q_INVOKABLE void commitExcel();
     Q_INVOKABLE void invalidatePreview() {
         m_preview = {};
@@ -196,6 +224,7 @@ class Lem : public QObject {
     }
     Q_INVOKABLE void loadUsers();
     Q_INVOKABLE void createUser(QString email, QString name, QString password, QString role = "tech");
+    Q_INVOKABLE bool resetTechnicianPassword(QString userId, QString password);
     Q_INVOKABLE void assignUser(QString userId);
     Q_INVOKABLE QString contractId() const {
         return m_contract;
@@ -213,8 +242,33 @@ class Lem : public QObject {
     void chargersChanged();
     void currentChanged();
     void photosChanged();
+    void contractExportCancelled();
 
   private:
+    struct ContractExportJob {
+        QString contractId, contractName, kind, directory, token, server;
+        QJsonObject presentation;
+        QJsonArray queue, results, localClosures;
+        int index = 0, saved = 0, failed = 0;
+        bool cancelled = false;
+    };
+    QSharedPointer<ContractExportJob> m_contractExportJob;
+    QJsonObject m_contractExportState, m_passwordReset;
+    QThreadPool m_exportPool;
+    void nextContractExport();
+    void renderContractExport(QJsonObject report, bool localOnly);
+    void downloadContractExport(QJsonObject report);
+    void completeContractExportItem(QString id, QString identifier, QString staged, QString error, QString source);
+    void finishContractExport(QString detail = {});
+    void updateContractExportState(QString detail);
+    bool correctionAllowed(const QJsonObject &report) const;
+    bool receiveReplacement(const QString &oldId, const QString &newId);
+    QJsonObject withContractPresentation(QJsonObject report) const;
+    void applyContractPresentations();
+    void receiveContractPresentation(const QString &cid, const QJsonObject &style);
+    void setPresentationSaveState(const QString &cid, const QString &state, const QString &message);
+    QJsonObject m_reportPresentationSave;
+    void exportPreparedReport(QString kind, QUrl target);
     void applyClosedIdentity(const QJsonObject &report);
     QVariantList groupCopySources(QString scope) const;
     void copyReportGroup(QString sourceId, QString scope);
@@ -254,15 +308,20 @@ class Lem : public QObject {
     // Local tombstones prevent stale journal replay after permanent deletion.
     QSet<QString> m_deletedReports;
     bool attachToReport(QString reportId, QString checkpoint, QUrl file);
+    void removeCachedPhoto(const QJsonObject &photo);
     void checkCameraResult();
     void takeCapture(QString key, bool video);
     bool m_cameraPending = false;
     using Failure = std::function<void(int, QString)>;
     using Callback = std::function<void(QByteArray)>;
-    void request(QString method, QString path, QByteArray body, Callback cb,
+    QNetworkReply *request(QString method, QString path, QByteArray body, Callback cb,
                  QString content = "application/json", Failure error = {});
     void multipart(QString method, QString path, QList<QPair<QString, QString>> fields,
-                   QString filename, QByteArray data, Callback cb, Failure error = {});
+                   QString filename, QByteArray data, Callback cb, Failure error = {}, QFile *file = nullptr);
+    void requestPhoto(QString path, QString destination, qint64 limit,
+                      std::function<void(QSharedPointer<NetworkSecurity::FileBody>)> cb, Failure error,
+                      QString digest = {}, QSharedPointer<NetworkSecurity::FileBody> body = {},
+                      int attempt = 0, std::function<bool()> retryAllowed = {}, bool contractExport = false);
     void exportSaved(const QString &kind, const QUrl &target, bool local = false);
     void status(QString s);
     bool online();
@@ -306,9 +365,15 @@ class Lem : public QObject {
     void photoDownloadFinished(QString reportId, QString photoId, bool success);
     friend struct LemReviewTest; // Isolated native regression harness; no public QML API.
     bool switchingBlocked(bool includeGroupCopy = true) const {
-        return m_busy || m_syncing || m_refreshing || !m_downloads.isEmpty() || downloadingPhotos() ||
+        return m_busy || m_contractExportJob || m_syncing || m_refreshing || !m_downloads.isEmpty() || downloadingPhotos() ||
                attachingFiles() || (includeGroupCopy && !m_qveCopyTarget.isEmpty());
     }
+    bool reportActionBlocked(bool includeGroupCopy = true) const {
+        return m_busy || m_syncing || m_refreshing || currentReportDownloadingPhotos() ||
+               attachingFiles() || (includeGroupCopy && !m_qveCopyTarget.isEmpty());
+    }
+    void suspendContractSync(QString contractId, QString reason);
+    void reconcileContractSync();
     void syncNext(QStringList ids, int index);
     void syncPhotos(QStringList ids, int index, QJsonObject report, int photoIndex);
     void getPhotos(QJsonObject report, int index);
@@ -317,7 +382,7 @@ class Lem : public QObject {
     QString m_root, m_server = ServerSettings::defaultUrl(), m_message, m_token, m_contract;
     QString m_localOperationTitle;
     bool m_busy = false, m_syncing = false, m_refreshing = false;
-    bool m_catalogueLoading = false, m_manualSync = false;
+    bool m_catalogueLoading = false, m_manualSync = false, m_manualSyncRequested = false;
     // Transient retry backoff, separate from durable conflicts in each report JSON.
     int m_retrySeconds = 30;
     qint64 m_retryNotBefore = 0;
@@ -327,8 +392,8 @@ class Lem : public QObject {
     QSet<QString> m_syncConflicts, m_downloads;
     QJsonObject m_catalogueTimes;
     qint64 m_photoBytes = 0;
-    // One explicit report-download batch, sharing two slots with individual downloads.
-    QString m_photoBatchReport, m_photoBatchState;
+    // One explicit report-download batch, sharing four slots with individual downloads.
+    QString m_photoBatchReport, m_photoBatchState, m_photoBatchLastError;
     QStringList m_photoBatchQueue;
     QSet<QString> m_photoBatchPending;
     int m_photoBatchTotal = 0, m_photoBatchDone = 0, m_photoBatchFailures = 0;

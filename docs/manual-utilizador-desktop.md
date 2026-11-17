@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para desktop
 
-Desktop · Aplicação 0.2.0 · Edição 2.0 · 15 de novembro de 2026
+Desktop · Aplicação 0.3.0 · Edição 2.3 · 17 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-desktop.pdf](manual-utilizador-desktop.pdf).
 
@@ -20,7 +20,7 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. As ações são realizadas com o rato e o teclado. Clique nos botões e utilize a roda do rato ou a barra de deslocação para percorrer o relatório.
 
-Este manual descreve a versão 0.2.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
+Este manual descreve a versão 0.3.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
 
@@ -37,6 +37,10 @@ Instale a versão disponibilizada pela Lem. Tenha as credenciais da sua conta e 
 3. Preencha **Email** e **Password** e escolha **Entrar**. Se não tiver conta ou acesso ao contrato, contacte o administrador.
 
 4. Em **Contratos**, selecione o contrato e escolha **Atualizar** para obter a informação disponível no servidor.
+
+### Repor a password de um técnico (administrador)
+
+Em **Gestão → Contas e acessos**, selecione a conta de um técnico e escolha **Repor password do técnico…**. Introduza a nova password duas vezes (12 a 200 caracteres) e confirme. É necessária ligação e servidor atualizado. O técnico deve voltar a entrar em cada dispositivo; os seus reports e acessos mantêm-se. Esta opção não permite alterar passwords de administradores.
 
 ### Guia rápido de uma intervenção
 
@@ -93,17 +97,23 @@ Nos campos de medição, introduza o resultado do instrumento. Quando existirem 
 | --- | --- |
 | MAN.02 | Selecione OK, NOK ou N/A. NOK exige uma observação. N/A não exige observação. |
 | MAN.04 a MAN.10 | Introduza a tensão em V. Aceita vírgula ou ponto decimal, até 3 algarismos antes do separador e 2 casas decimais. |
-| MAN.11 | Indique a intensidade de disparo configurada. |
-| MAN.12 | Introduza o valor da intensidade de disparo medido com o testador ou selecione N/A. **Anexe uma fotografia quando aplicável. Em N/A, a fotografia é opcional e a observação é obrigatória.** OK/NOK é uma avaliação independente. |
+| MAN.11 | Indique o calibre configurado em **mA**, até 6 algarismos, sem casas decimais; deve ser superior a zero. |
+| MAN.12 | Introduza a intensidade medida em **mA**, até 6 algarismos, sem casas decimais, ou selecione N/A. **Anexe uma fotografia quando aplicável. Em N/A, a fotografia é opcional e a observação é obrigatória.** A avaliação é calculada quando MAN.11 contém um calibre válido. |
 | MAN.14 a MAN.17 | No campo **Valor medido (ou NA)**, introduza o resultado do isolamento. São possíveis leituras do instrumento como **>500 MΩ** ou **OL**, além de N/A. |
-| MAN.18 | Introduza a resistência de terra em Ω, até 5 algarismos inteiros e 2 casas decimais, ou selecione N/A. Ao selecionar N/A, o campo do valor mostra **NA**. Mantenha a avaliação OK/NOK separada do valor. |
+| MAN.18 | Introduza a resistência de terra em Ω, até 5 algarismos inteiros e 2 casas decimais, ou selecione N/A. Ao selecionar N/A, o campo do valor mostra **NA**. A avaliação é calculada a partir de MAN.11, sem substituir a leitura. |
 | MAN.19 | Selecione OK, NOK ou N/A. |
 
-### Exemplo de leitura e avaliação
+### Intensidade diferencial e resistência de terra
 
-Em MAN.18, introduza **12,50** e selecione **OK** se essa for a avaliação técnica adequada. O valor e a avaliação ficam registados em conjunto. Mudar para NOK conserva a leitura; nesse caso, justifique a não conformidade.
+**1 A = 1000 mA; 0,03 A = 30 mA.** MAN.11 e MAN.12 não aceitam casas decimais. Em rascunhos antigos, valores com unidade explícita são convertidos quando possível; um valor sem unidade ou ambíguo é mostrado como **Valor anterior** e deve ser confirmado em mA.
 
-Ao selecionar **N/A**, a avaliação independente é retirada. Se voltar a OK ou NOK depois de N/A, introduza novamente a leitura. Confirme sempre o resultado apresentado antes de prosseguir.
+Com MAN.11 válido, MAN.12 fica **NOK** se a leitura for menor ou igual a 50% ou maior ou igual a 105% do calibre configurado. Entre esses limites, fica OK. Exemplo: para 300 mA, 150 mA e 315 mA são NOK. A app sugere «Valor de intensidade de disparo diferencial fora do calibre configurado».
+
+Para MAN.18, a app usa por agora **R máximo = 50 / (MAN.11 / 1000)**, em Ω. Acima desse limite, marca NOK e sugere «Valor de terra de proteção elevado e acima do limite para o calibre da proteção diferencial configurada». Até ao limite, marca OK; se a leitura também for superior a 50 Ω, sugere «Valor de terra de proteção elevado mas dentro de limites para o calibre da proteção diferencial configurada». Para 300 mA, 166,66 Ω fica OK e 166,67 Ω fica NOK. A igualdade ao limite é aceite.
+
+**O critério temporário de 50 V não cobre todas as instalações.** As RTIEBT, 413.1.4.2, estabelecem RA × Ia ≤ 50 V no esquema TT. O Guia Técnico CTE64, edição 3, 5.3.2 (página 28), prevê **25 V** para postos acessíveis ao público no exterior. Consulte as referências na secção 16; confirme o caso aplicável antes de interpretar o resultado.
+
+Mudar MAN.11 recalcula MAN.12 e MAN.18. O servidor verifica o mesmo cálculo ao guardar e fechar. N/A retira a avaliação calculada; voltar a uma medição exige uma leitura válida. Uma avaliação NOK exige observação e, quando aplicável, fotografia.
 
 ### Indicações de tensão fora do intervalo
 
@@ -113,7 +123,7 @@ Ao selecionar **N/A**, a avaliação independente é retirada. Se voltar a OK ou
 | MAN.07 a MAN.09 | 207 a 253 V, inclusive |
 | MAN.10 | Valores iguais ou superiores a 50 V são assinalados fora do intervalo. |
 
-Uma tensão fora do intervalo pode ser registada e fica assinalada. A indicação ajuda a revisão e não substitui a avaliação técnica. Para MAN.18, a app não estabelece automaticamente um limite de conformidade da resistência de terra.
+Uma tensão fora do intervalo pode ser registada e fica assinalada. A indicação ajuda a revisão e não substitui a avaliação técnica.
 
 ## 06 Adicionar fotografias e vídeos
 
@@ -127,9 +137,9 @@ Uma tensão fora do intervalo pode ser registada e fica assinalada. A indicaçã
 
 ### Consultar e corrigir uma evidência
 
-Nas fotografias disponíveis no dispositivo, os três controlos permitem **ampliar**, **eliminar** e **recortar**. O recorte substitui a cópia associada ao relatório; o original da galeria permanece intacto. Se o ficheiro ainda não estiver disponível localmente, descarregue-o antes de o consultar ou recortar.
+Nas fotografias disponíveis no dispositivo, use **Editar fotografia** para abrir a pré-visualização. O botão com a **seta circular**, sem texto, roda 90° para a direita. O botão com o **símbolo de recorte**, também sem texto, ativa ou desativa o recorte; fica colorido quando ativo. O recorte é opcional: arraste os cantos da seleção apenas se precisar. Pode combinar as duas operações e confirmar em **Guardar**. **Repor** desfaz os ajustes e **Cancelar** sai sem alterar a fotografia. O original da galeria permanece intacto. Também pode ampliar ou eliminar a fotografia; se ainda não estiver disponível localmente, descarregue-a primeiro.
 
-Os vídeos têm controlos de reprodução ou descarga. Confirme o enquadramento e a duração antes de enviar. A assinatura não pode ser recortada; para a substituir, registe uma nova assinatura em FIN.02.
+Os vídeos têm controlos de reprodução ou descarga. Confirme o enquadramento e a duração antes de enviar. A assinatura não pode ser recortada nem rodada; para a substituir, registe uma nova assinatura em FIN.02.
 
 | Tipo ou limite | Utilização |
 | --- | --- |
@@ -137,15 +147,21 @@ Os vídeos têm controlos de reprodução ou descarga. Confirme o enquadramento 
 | Vídeos | MP4 ou 3GP, até 120 segundos e 60 MiB por ficheiro. |
 | Total por relatório | Até 200 evidências e 400 MiB no conjunto dos ficheiros. |
 
-**Fotografia obrigatória:** um vídeo não cumpre este requisito. Associe uma fotografia à própria pergunta que a exige. N/A dispensa a fotografia, incluindo em **MAN.12**.
+**Evidência obrigatória significa sempre fotografia:** um vídeo não cumpre este requisito. Em MAN.14 a MAN.18, anexe uma fotografia para OK e NOK; em N/A, escreva uma observação. Associe uma fotografia à própria pergunta que a exige. N/A dispensa a fotografia, incluindo em **MAN.12**.
+
+### Fotografias antes e depois da manutenção
+
+Em **EST.01**, registe o interior, exterior e estado de limpeza antes da tarefa, mostrando todos os componentes. Em **MAN.21**, registe as mesmas vistas e a limpeza depois da manutenção. **EST.10 foi retirado**. EST.13 verifica apenas o tarifário e EST.16 apenas os autocolantes da DGEG.
 
 ### Observações gerais opcionais
 
-**SEG.07**, **SITE.06**, **QVE.14**, **EST.18**, **MAN.21**, **CARG.07** e **FIN.03** permitem observações, fotografias e vídeos sem botões OK/NOK/N/A. Podem ficar vazios. Em **SEG.02 a SEG.06** não existem novos anexos nem botão de observação. A observação é obrigatória para NOK e, em **SEG.02 e SEG.04**, também para N/A.
+**SEG.07**, **SITE.06**, **QVE.14**, **EST.18**, **MAN.22**, **CARG.07** e **FIN.03** permitem observações, fotografias e vídeos sem botões OK/NOK/N/A. Podem ficar vazios. Em **SEG.02 a SEG.06** não existem novos anexos nem botão de observação. A observação é obrigatória para NOK e, em **SEG.02 e SEG.04**, também para N/A.
 
 ## 07 Registar o nome e a assinatura
 
 Em **FIN.02**, introduza o nome do técnico antes de utilizar os controlos de assinatura. Confirme o nome antes de assinar: alterá-lo invalida a assinatura anterior.
+
+Pode guardar ou substituir a assinatura durante a sincronização em segundo plano. O envio em curso não elimina a nova assinatura; confirme depois que todos os envios terminaram.
 
 Em **FIN.02**, pode escrever uma observação. Os botões gerais de fotografia e vídeo não aparecem; utilize os controlos próprios para a assinatura.
 
@@ -170,7 +186,7 @@ A app permite reutilizar dados de **outro carregador do mesmo contrato**. Confir
 | Opção | O que é copiado |
 | --- | --- |
 | Copiar QVE de outro carregador… | Todo o grupo QVE, incluindo QVE.14, com respostas, observações e fotografias/vídeos associados. |
-| Copiar Medições de outro carregador… | Apenas MAN.04 a MAN.10, com observações e evidências associadas. Os outros itens MAN e MAN.21 mantêm-se. |
+| Copiar Medições de outro carregador… | Apenas MAN.04 a MAN.10, com observações e evidências associadas. Os outros itens MAN e MAN.22 mantêm-se. |
 
 1. No relatório de destino, abra o grupo **QVE** ou **MAN** e utilize a opção de cópia correspondente.
 
@@ -202,7 +218,7 @@ Pode ser necessária Internet para descarregar evidências da origem. Se ocorrer
 
 ### Pendências que merecem atenção
 
-**NOK:** exige uma observação. **N/A:** exige motivo em SEG.01, SEG.02, SEG.04; SITE.02 a SITE.04; QVE.02, QVE.04, QVE.09 a QVE.12; EST.01, EST.16, EST.17; MAN.12, MAN.13, MAN.18, MAN.20; cada ensaio CARG.01 e CARG.05. **MAN.02:** N/A não exige observação. **MAN.12:** N/A exige motivo, mas dispensa fotografia. Em SEG.02 a SEG.06, o campo obrigatório aparece automaticamente, sem botão de observação.
+**NOK:** exige uma observação. **N/A:** exige motivo em SEG.01, SEG.02, SEG.04; SITE.02 a SITE.04; QVE.02, QVE.04, QVE.09 a QVE.12; EST.01, EST.15, EST.16, EST.17; MAN.12 a MAN.18, MAN.20, MAN.21; cada ensaio CARG.01 e CARG.05. **MAN.02:** N/A não exige observação. **MAN.12:** N/A exige motivo, mas dispensa fotografia. Em SEG.02 a SEG.06, o campo obrigatório aparece automaticamente, sem botão de observação.
 
 Uma medição com apenas OK/NOK pode continuar incompleta. Um vídeo, ou uma fotografia colocada noutra pergunta, não resolve uma fotografia obrigatória em falta.
 
@@ -210,7 +226,7 @@ As sugestões de observação para N/A estão listadas na secção 14.
 
 ### Depois do fecho
 
-O relatório fechado passa a ser consultado como registo da intervenção. O estado de fecho no dispositivo pode anteceder a confirmação pelo servidor. Antes de considerar o trabalho entregue, siga a verificação da secção 10.
+O relatório fechado passa a ser consultado como registo da intervenção. Um administrador pode criar uma correção no desktop; essa cópia passa ao formulário e regras atuais. O original mantém-se até a correção ser aceite. O estado de fecho no dispositivo pode anteceder a confirmação pelo servidor. Antes de considerar o trabalho entregue, siga a verificação da secção 10.
 
 ## 10 Confirmar a sincronização
 
@@ -281,7 +297,15 @@ A limpeza não apaga os originais da galeria nem as evidências do servidor. Tra
 | PDF | Relatório para leitura e impressão, com os resultados e as evidências apresentadas no documento. Os vídeos não são reproduzidos no PDF. |
 | ZIP | Inclui o PDF, os dados do relatório e as fotografias/vídeos originais organizados por pergunta. Utilize-o quando a entrega exigir os ficheiros originais. |
 
-**PDF sem rede:** pode ser gerado para um relatório fechado se as evidências necessárias estiverem guardadas no dispositivo. Se faltarem ficheiros, descarregue-os com rede antes de exportar. **ZIP:** exige ligação, sessão iniciada e um relatório sincronizado. Abra sempre o ficheiro exportado e confirme o conteúdo antes de o entregar.
+**PDF e ZIP sem rede:** são gerados no dispositivo se o relatório estiver fechado e tiver todas as evidências locais. Se faltarem ficheiros, a exportação usa o servidor e exige ligação, sessão iniciada e relatório sincronizado. Exportar localmente não sincroniza o relatório. Confirme o conteúdo antes de o entregar.
+
+### Exportar todos os reports fechados de um contrato
+
+Em **Contratos**, selecione o contrato e escolha **Exportar todos os PDFs…** ou **Exportar todos os ZIPs…**. Indique a pasta de destino: a app cria uma nova subpasta com um ficheiro por report, sem substituir exportações anteriores. Esta opção existe apenas no desktop Windows/Linux.
+
+É necessária ligação para obter a lista atual do servidor. Também são incluídos os seus reports fechados localmente que aguardam sincronização, desde que não estejam em conflito, suspensos ou em correção. A app aproveita evidências locais e descarrega do servidor o que falta para exportar. Exportar não sincroniza esses reports.
+
+Pode continuar noutro report e acompanhar o progresso em **Contratos**. **Cancelar exportação** conserva os ficheiros concluídos. **Abrir pasta** mostra o resultado e o resumo das falhas ou reports por exportar. Se dois reports tiverem o mesmo nome, um fica numa subpasta própria; nenhum substitui o outro.
 
 ### Consultar intervenções anteriores
 
@@ -290,6 +314,16 @@ Na lista de carregadores, abra o relatório fechado que pretende consultar. Os r
 Em **EST.04**, pode indicar vários números de série do carregador e dos dispensers no mesmo campo; a fotografia desse item é opcional.
 
 Quando existir uma correção de fabricante, modelo ou número de série nos campos EST.02 a EST.04, o fecho aceite pode atualizar a identificação do equipamento. Confirme esses dados com cuidado; não utilize um valor genérico para ultrapassar a validação.
+
+### Corrigir um relatório fechado (administrador)
+
+Esta opção está disponível apenas para administradores em Windows e Linux. Abra o relatório fechado e sincronizado, escolha **Corrigir report fechado…** e edite a cópia criada. Pode corrigir respostas, observações e evidências; use **Editar início e fim…** para alterar as datas e horas. Em **Rever report**, escolha **Guardar correção e substituir original…** e confirme. O original só é substituído quando o servidor aceitar a correção; o relatório continua a pertencer ao técnico original. Cancelar a cópia conserva o original. A cópia utiliza as novas perguntas e regras, incluindo MAN.21 após manutenção. As antigas observações MAN.21 passam para MAN.22; as observações e evidências de EST.10 passam para EST.18. Confirme valores antigos sem unidade em MAN.11/MAN.12 antes de concluir.
+
+Nos formulários muito antigos, os códigos podiam ter outros significados. A secção **ANT - Registos anteriores** conserva essas respostas, observações e evidências. Preencha e valide as perguntas atuais e assine novamente antes de guardar a correção.
+
+Se alterar fabricante/marca (EST.02), modelo (EST.03) ou número de série (EST.04), a correção aceite também atualiza a ficha desse ID de carregador no servidor e nos contratos que partilham o equipamento. Guardar apenas o rascunho não atualiza a ficha. Os outros relatórios históricos conservam os seus dados. Se outra intervenção tiver alterado o mesmo campo entretanto, surge um conflito: os dados e os dois relatórios são conservados para revisão.
+
+A correção recebe um novo identificador interno. O nome do PDF/ZIP usa a data e hora de fim; alterar apenas o início não muda esse nome. Ficheiros já exportados não são alterados.
 
 ### Criar uma nova intervenção a partir de outra
 
@@ -323,7 +357,7 @@ A eliminação permanente de um relatório no servidor não é revertida por uma
 | SITE | SITE.02 a SITE.04 |
 | QVE | QVE.01 e QVE.04 |
 | EST | EST.01, EST.05, EST.06, EST.13 e EST.16 |
-| MAN | MAN.04 a MAN.10 e MAN.12 |
+| MAN | MAN.04 a MAN.10, MAN.12, MAN.14 a MAN.18 e MAN.21 |
 | CARG | Cada ensaio CARG.01 de conector e CARG.05 |
 | FIN | FIN.01 |
 
@@ -331,7 +365,7 @@ N/A dispensa a fotografia, incluindo em **MAN.12**, mas pode exigir uma observa�
 
 ### Observações sugeridas ao selecionar N/A
 
-Ao selecionar N/A com a observação vazia, a app sugere os motivos abaixo. Confirme e adapte o texto à situação real. Ao sair de N/A, a sugestão inalterada é removida; texto diferente mantém-se. O botão de observação pede confirmação antes de apagar o texto, mesmo quando obrigatório. Nesse caso, o campo fica visível e vazio e impede a conclusão até ser preenchido. Em **QVE.03**, a observação é opcional.
+Ao selecionar N/A com a observação vazia, a app sugere os motivos abaixo. Confirme e adapte o texto à situação real. Ao mudar o estado da pergunta, a sugestão automática inalterada é removida. Ao tocar ou clicar dentro do campo para escrever, também é apagada imediatamente. Uma observação escrita ou modificada pelo utilizador mantém-se, mesmo que tenha o mesmo texto de uma sugestão. Esta regra aplica-se também às sugestões das medições. O botão de observação pede confirmação antes de apagar o texto, mesmo quando obrigatório. Nesse caso, o campo fica visível e vazio e impede a conclusão até ser preenchido. Em **QVE.03**, a observação é opcional.
 
 | Item | Sugestão editável |
 | --- | --- |
@@ -344,6 +378,7 @@ Ao selecionar N/A com a observação vazia, a app sugere os motivos abaixo. Conf
 | QVE.10 | QVE sem sinalética |
 | MAN.20 | Apertos não verificados devido a veículo em carga |
 | Cada ensaio CARG.01 de conector | Veículo usado não compatível |
+| EST.15 | Sem POS |
 
 ### Verificação antes de entregar o relatório
 
@@ -419,7 +454,7 @@ Esta referência abrange todos os campos do formulário atual. A secção 5 deta
 
 | Campo e verificação | Como preencher | Requisitos |
 | --- | --- | --- |
-| **EST.01** — Fotografias interior e exterior do carregador antes da tarefa executada (visualizar todos os componentes internos e externos) | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia obrigatória quando aplicável. |
+| **EST.01** — Fotografias do interior e exterior do carregador e sua limpeza antes da tarefa executada (visualizar todos os componentes internos e externos) | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia obrigatória quando aplicável. |
 | **EST.02** — Indique o fabricante do carregador | Escreva o fabricante. | Texto obrigatório. Fotografias e vídeos opcionais. |
 | **EST.03** — Indique o modelo completo do carregador | Escreva o modelo completo. | Texto obrigatório. Fotografias e vídeos opcionais. |
 | **EST.04** — Indique o(s) número(s) de série do carregador (e dispensers, caso aplicável) | Registe os números de série do carregador e dos dispensers aplicáveis. | Texto obrigatório. Fotografias e vídeos opcionais. |
@@ -430,17 +465,16 @@ Esta referência abrange todos os campos do formulário atual. A secção 5 deta
 | **EST.09** — Verifique a inexistência de sinais de sobreaquecimento no interior do carregador; utilizar termografia para melhor despiste | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia opcional. |
 
 
-### EST - Estado Geral — EST.10 a EST.18
+### EST - Estado Geral — EST.11 a EST.18
 
 | Campo e verificação | Como preencher | Requisitos |
 | --- | --- | --- |
-| **EST.10** — Verifique a limpeza externa e interna | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia opcional. |
 | **EST.11** — Verifique o estado dos vinis de decoração | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia opcional. |
 | **EST.12** — Verifique o estado físico dos componentes do carregador (conectores, suportes, ecrã, etc.) | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia opcional. |
-| **EST.13** — Verifique se as instruções e o tarifário estão visíveis e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia obrigatória quando aplicável. |
+| **EST.13** — Verifique se o tarifário está visível e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia obrigatória quando aplicável. |
 | **EST.14** — Verifique se o ecrã funciona corretamente | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia opcional. |
-| **EST.15** — Verifique se o terminal de pagamento (POS) está instalado e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia opcional. |
-| **EST.16** — Verifique se os autocolantes DGEG e apoio ao cliente estão visíveis e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia obrigatória quando aplicável. |
+| **EST.15** — Verifique se o terminal de pagamento (POS) está instalado e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação obrigatória; sugestão «Sem POS». Fotografia opcional. |
+| **EST.16** — Verifique se os autocolantes da DGEG estão visíveis e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia obrigatória quando aplicável. |
 | **EST.17** — Verifique se todo o hardware da estação de carregamento está a funcionar corretamente | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia opcional. |
 | **EST.18** — Observações gerais do equipamento | Observações, fotografias e vídeos opcionais. Pode ficar vazio. | Sem OK/NOK/N/A. |
 
@@ -461,26 +495,27 @@ Esta referência abrange todos os campos do formulário atual. A secção 5 deta
 | **MAN.10** — Medir valor de tensão N - T (<50 V) e registar foto | Introduza a tensão em V ou N/A. Consulte o formato na secção 5. | N/A: observação opcional. Fotografia obrigatória quando aplicável. |
 
 
-### MAN - Manutenção — MAN.11 a MAN.21
+### MAN - Manutenção — MAN.11 a MAN.22
 
 | Campo e verificação | Como preencher | Requisitos |
 | --- | --- | --- |
-| **MAN.11** — Proteção diferencial QVE e Carregador - Indicar a intensidade de disparo configurada | Indique a intensidade de disparo configurada e a unidade. | Texto obrigatório. Fotografias e vídeos opcionais. |
-| **MAN.12** — Proteção diferencial QVE e Carregador - Indique o valor da intensidade de disparo com testador | Registe a intensidade medida e a unidade, ou N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia obrigatória quando aplicável. |
+| **MAN.11** — Proteção diferencial QVE e Carregador - Indicar a intensidade de disparo configurada | Introduza o calibre em mA, de 1 a 999999, sem decimais, ou N/A. | Texto obrigatório. Fotografias e vídeos opcionais. |
+| **MAN.12** — Proteção diferencial QVE e Carregador - Indique o valor da intensidade de disparo com testador | Registe a intensidade em mA, até 6 algarismos e sem decimais, ou N/A. Avaliação calculada com MAN.11. | N/A: observação obrigatória. Fotografia obrigatória quando aplicável. |
 | **MAN.13** — Proteção diferencial QVE e Carregador - Teste manual do dispositivo | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia opcional. |
-| **MAN.14** — Teste de isolamento: Terra - L1 (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação opcional. Fotografia opcional. |
-| **MAN.15** — Teste de isolamento: Terra - L2 (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação opcional. Fotografia opcional. |
-| **MAN.16** — Teste de isolamento: Terra - L3 (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação opcional. Fotografia opcional. |
-| **MAN.17** — Teste de isolamento: Terra - N (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação opcional. Fotografia opcional. |
-| **MAN.18** — Valor da resistência da terra | Registe a resistência em Ω ou N/A. O valor mostra NA em N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia opcional. |
+| **MAN.14** — Teste de isolamento: Terra - L1 (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
+| **MAN.15** — Teste de isolamento: Terra - L2 (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
+| **MAN.16** — Teste de isolamento: Terra - L3 (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
+| **MAN.17** — Teste de isolamento: Terra - N (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
+| **MAN.18** — Valor da resistência da terra | Registe a resistência em Ω ou N/A. O valor mostra NA em N/A. Avaliação calculada com MAN.11 e o critério de 50 V. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
 | **MAN.19** — Verifique o estado dos filtros | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia opcional. |
 | **MAN.20** — Verifique todos os apertos do carregador (fontes de alimentação, disjuntores diferenciais, disjuntores, contadores, placas de hardware, etc.) | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia opcional. |
-| **MAN.21** — Observações gerais da manutenção | Observações, fotografias e vídeos opcionais. Pode ficar vazio. | Sem OK/NOK/N/A. |
+| **MAN.21** — Fotografias do interior e exterior do carregador e sua limpeza depois da tarefa executada (visualizar todos os componentes internos e externos) | Selecione OK, NOK ou N/A. | Fotografia obrigatória quando aplicável; N/A exige observação. |
+| **MAN.22** — Observações gerais da manutenção | Observações, fotografias e vídeos opcionais. Pode ficar vazio. | Sem OK/NOK/N/A. |
 
 
 ### CARG - Testes de Carga
 
-No grupo **CARG**, existe um ensaio **CARG.01.xx** por conector, mesmo quando vários conectores são do mesmo tipo. Confirme a identificação do conector e registe o resultado e a fotografia na pergunta correspondente. Se escolher **N/A**, indique o motivo nas observações.
+No grupo **CARG**, existe um ensaio **CARG.01.xx** por conector, mesmo quando vários conectores são do mesmo tipo. Os conectores de tipo 2 são apresentados como **AC Type 2**, incluindo carregadores importados anteriormente. Confirme a identificação do conector e registe o resultado e a fotografia na pergunta correspondente. Se escolher **N/A**, indique o motivo nas observações.
 
 | Campo e verificação | Como preencher | Requisitos |
 | --- | --- | --- |
@@ -498,3 +533,11 @@ No grupo **CARG**, existe um ensaio **CARG.01.xx** por conector, mesmo quando v�
 | **FIN.01** — Fotografia da Estação de Carregamento após intervenção | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia obrigatória quando aplicável. |
 | **FIN.02** — Nome e assinatura do técnico | Preencha o nome do técnico. Use o controlo próprio para assinar (secção 7). | Nome e assinatura obrigatórios para fechar. Observação opcional. Assine no controlo próprio, sem anexos gerais de fotografia ou vídeo. |
 | **FIN.03** — Observações gerais finais | Observações, fotografias e vídeos opcionais. Pode ficar vazio. | Sem OK/NOK/N/A. |
+
+## 16 Referências para o critério elétrico
+
+**RTIEBT, Portaria n.º 949-A/2006, texto consolidado, secção 413.1.4.2:** [Texto consolidado](https://diariodarepublica.pt/dr/legislacao-consolidada/portaria/2006-70055500)
+
+**Portaria n.º 252/2015, que acrescenta a secção 722 sobre alimentação de veículos elétricos:** [Diploma](https://diariodarepublica.pt/dr/detalhe/portaria/252-2015-70055493)
+
+**Guia Técnico das Instalações Elétricas para Alimentação de Veículos Elétricos, CTE64, edição 3 (2023), secção 5.3.2, página 28:** [Guia técnico em PDF](https://www.iep.pt/wp-content/uploads/2023/10/Guia-VE-Ed.3-2023.pdf)

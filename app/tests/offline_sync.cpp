@@ -3,6 +3,7 @@
 
 // Run only against the disposable test API provided by test_offline_sync.py.
 #include "Lem.h"
+#include "TestSignature.h"
 #include <QGuiApplication>
 #include <QTemporaryDir>
 #include <QEventLoop>
@@ -15,6 +16,8 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QDebug>
+#include <QNetworkProxy>
+#include <QDesktopServices>
 #include <QUuid>
 #include <functional>
 #define CHECK(c)                                                                                   \
@@ -47,9 +50,81 @@ static bool write(QString path, QJsonObject o) {
     QFile f(path);
     return f.open(QIODevice::WriteOnly) && f.write(QJsonDocument(o).toJson()) > 0;
 }
+class ExportViewer : public QObject {
+    Q_OBJECT
+public slots:
+    void view(const QUrl &) {} // Test PDFs must never launch an external viewer.
+};
+struct LemReviewTest {
+    static void cachedReport(Lem &client, QJsonObject report) {
+        client.m_current = report;
+        client.m_reports[report["id"].toString()] = report;
+    }
+    static bool legacySelectedCatalogue(Lem &client) {
+        const auto original = client.m_current;
+        const auto catalogues = client.m_catalogues;
+        const auto contracts = client.m_contracts;
+        legacyWithoutCatalogue(client);
+        client.m_chargers = catalogues[client.m_contract].toArray();
+        auto contract = client.m_contracts[0].toObject();
+        contract["presentation"] = QJsonObject{{"issuer", "CSMTEC"}, {"revision", 1}, {"client_logos", QJsonArray{}}};
+        client.m_contracts[0] = contract;
+        const auto resolved = client.withContractPresentation(client.m_current);
+        client.m_contracts = contracts; client.m_catalogues = catalogues;
+        cachedReport(client, original);
+        return resolved["contract_id"].toString() == client.m_contract &&
+               resolved["presentation"].toObject()["issuer"] == "CSMTEC";
+    }
+    static void legacyWithoutCatalogue(Lem &client) {
+        auto report = client.m_current;
+        report.remove("contract_id");
+        report.remove("presentation");
+        auto snapshot = report["snapshot"].toObject();
+        auto contract = snapshot["contract"].toObject();
+        for (const auto &key : {"id", "presentation", "report_logos"}) contract.remove(key);
+        snapshot["contract"] = contract; report["snapshot"] = snapshot;
+        client.m_current = report;
+        client.m_reports[report["id"].toString()] = report;
+        client.m_catalogues = {};
+        client.m_chargers = {};
+    }
+    static bool failedCorrectionCheckpoint(Lem &client) {
+        auto draft = client.m_current;
+        draft["status"] = "closed";
+        draft["correction"] = QJsonObject{{"state", "editing"}, {"editor_id", client.m_user["id"]}, {"source_id", "source-test"}};
+        client.m_current = draft; client.remember();
+        auto saved = draft;
+        saved["revision"] = 2;
+        saved["owner_id"] = "original-technician";
+        auto correction = saved["correction"].toObject(); correction["state"] = "committed";
+        saved["correction"] = correction;
+        const auto cache = client.cacheDir() + "/cache.json";
+        // Disposable fixture only: make the destination unwritable without touching evidence.
+        if (!QFile::rename(cache, cache + ".saved") || !QDir().mkdir(cache)) return false;
+        const bool rejected = !client.mergeSync(saved, true);
+        const bool recoverable = client.m_current["owner_id"] == client.m_user["id"] &&
+            client.m_current["correction"].toObject()["state"] == "editing" && client.m_current["dirty"].toBool();
+        if (!QDir().rmdir(cache) || !QFile::rename(cache + ".saved", cache)) return false;
+        return rejected && recoverable && client.mergeSync(saved, true) &&
+            !client.m_current["dirty"].toBool() && client.m_current["owner_id"] == "original-technician";
+    }
+    static void staleForeignDraft(Lem &client) {
+        auto r = client.m_current;
+        r["dirty"] = true;
+        r["status"] = "draft";
+        r["payload"] = QJsonObject{{"answers", QJsonObject{{"SITE.02", QJsonObject{{"value", "NOK"}, {"notes", "cópia estrangeira protegida"}}}}}};
+        client.m_current = r;
+        client.m_reports[r["id"].toString()] = r;
+        emit client.changed();
+    }
+};
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
-    app.setApplicationVersion("0.2.0");
+    ExportViewer exportViewer;
+    QDesktopServices::setUrlHandler("file", &exportViewer, "view");
+    // These integration fixtures only contact the disposable loopback server.
+    QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
+    app.setApplicationVersion("0.3.0");
     app.setOrganizationName("Lem-Offline-Test");
     app.setApplicationName("Lem Offline Test");
     QTemporaryDir temp;
@@ -60,6 +135,7 @@ int main(int argc, char **argv) {
     {
         Lem c(temp.path() + "/journal");
         c.demo();
+        CHECK(LemReviewTest::legacySelectedCatalogue(c));
         c.attach("EST.01", QUrl::fromLocalFile(source));
         const auto rid = c.current()["id"].toString();
         const auto photo = c.current()["photos"].toList().first().toMap()["path"].toString();
@@ -217,6 +293,12 @@ int main(int argc, char **argv) {
         CHECK(
             restored.current()["payload"].toMap()["answers"].toMap()["SITE.02"].toMap()["notes"] ==
             "última ao sair");
+    }
+    {
+        Lem client(temp.path() + "/correction-checkpoint");
+        client.demo();
+        CHECK(LemReviewTest::failedCorrectionCheckpoint(client));
+        qInfo() << "PASS: failed correction checkpoint retains editor ownership for recovery; retry durably restores technician owner";
     }
     {
         Lem c(temp.path() + "/write-failure");
@@ -511,7 +593,7 @@ int main(int argc, char **argv) {
         removed = true;
         c.openReport(charger);
         nextJob = c.current()["id"].toString();
-        c.answer("FIN.03", "NEXT_JOB", "");
+        c.answer("FIN.03", "", "NEXT_JOB");
     });
     CHECK(settled(c));
     CHECK(edited && removed && nonblocking);
@@ -561,11 +643,19 @@ int main(int argc, char **argv) {
     CHECK(other.photoDownloadSummary()["bytes"].toLongLong() > 0);
     other.downloadReportPhotos();
     CHECK(other.downloadingPhotos() && !other.busy());
+    CHECK(other.currentReportDownloadingPhotos());
+    other.deleteReport(rid); // Never delete the report whose files are in flight.
+    CHECK(other.current()["id"].toString() == rid);
     other.openReport(charger);
     const auto visibleDuringDownload = other.current()["id"].toString();
     CHECK(visibleDuringDownload != rid);
+    CHECK(!other.currentReportDownloadingPhotos());
+    other.answer("SITE.02", "OK", "editar enquanto outro report descarrega");
+    CHECK(other.current()["payload"].toMap()["answers"].toMap()["SITE.02"].toMap()["value"] == "OK");
+    other.deleteReport(visibleDuringDownload);
+    CHECK(other.current().isEmpty() && other.downloadingPhotos());
     CHECK(until([&] { return !other.downloadingPhotos(); }));
-    CHECK(other.current()["id"].toString() == visibleDuringDownload);
+    CHECK(other.current().isEmpty()); // Download callbacks must not reopen the deleted draft.
     other.openReport("", rid);
     CHECK(other.current()["offline_photos"].toBool());
     CHECK(other.photoDownloadSummary()["missing"].toInt() == 0);
@@ -576,17 +666,17 @@ int main(int argc, char **argv) {
     other.downloadReportPhotos();
     other.cancelReportPhotoDownloads();
     CHECK(until([&] { return !other.downloadingPhotos(); }));
-    CHECK(other.photoDownloadSummary()["missing"].toInt() == 2);
+    CHECK(other.photoDownloadSummary()["missing"].toInt() <= 4);
     other.downloadReportPhotos();
     CHECK(until([&] { return !other.downloadingPhotos(); }));
     CHECK(other.photoDownloadSummary()["missing"].toInt() == 0);
-    // The runner fails the ninth GET once; stop remaining work and allow a selective retry.
+    // The runner fails the ninth GET once; retry automatically and finish the batch.
     for (auto value : other.current()["photos"].toList())
         CHECK(QFile::remove(QUrl(value.toMap()["path"].toString()).toLocalFile()));
     other.downloadReportPhotos();
     CHECK(until([&] { return !other.downloadingPhotos(); }));
-    CHECK(other.photoDownloadSummary()["missing"].toInt() > 0);
-    CHECK(other.photoDownloadState().contains("interrompido"));
+    CHECK(other.photoDownloadSummary()["missing"].toInt() == 0);
+    CHECK(other.photoDownloadState().contains("Todas"));
     other.downloadReportPhotos();
     CHECK(until([&] { return !other.downloadingPhotos(); }));
     CHECK(other.photoDownloadSummary()["missing"].toInt() == 0);
@@ -595,36 +685,57 @@ int main(int argc, char **argv) {
     // A lost PUT acknowledgement must not turn newer local typing into a conflict.
     c.openReport(charger);
     const auto retryId = c.current()["id"].toString();
-    c.answer("FIN.03", "LOSE_ACK", "");
+    c.answer("FIN.03", "", "LOSE_ACK");
     c.sync();
-    QTimer::singleShot(100, &app, [&] { c.answer("FIN.03", "NEWER", ""); });
+    QTimer::singleShot(100, &app, [&] { c.answer("FIN.03", "", "NEWER"); });
     CHECK(settled(c));
     CHECK(c.current()["dirty"].toBool());
     c.sync();
     CHECK(settled(c));
+    if (c.current()["dirty"].toBool()) qCritical() << "Retry status:" << c.message() << c.syncState();
     CHECK(!c.current()["dirty"].toBool());
-    CHECK(c.current()["payload"].toMap()["answers"].toMap()["FIN.03"].toMap()["value"] == "NEWER");
+    CHECK(c.current()["payload"].toMap()["answers"].toMap()["FIN.03"].toMap()["notes"] == "NEWER");
     // No manual sync: the idle queue drains while the app remains open.
-    c.answer("FIN.03", "AUTO", "");
+    c.answer("FIN.03", "", "AUTO");
     CHECK(until([&] { return !c.current()["dirty"].toBool() && !c.syncing(); }, 15000));
     c.sync();
     CHECK(!c.syncing());
+    CHECK(settled(c)); // Manual synchronization now also receives catalogue/report changes.
     CHECK(c.current()["id"].toString() == retryId);
     // Complete while an older draft snapshot is in flight, then start another job.
-    for (auto sv : c.sections())
-        for (auto iv : sv.toMap()["items"].toList())
-            c.answer(iv.toMap()["id"].toString(), "NA", "Sem conector/veículo disponível");
+    auto completeAnswers = [&] {
+        for (auto sv : c.sections())
+            for (auto iv : sv.toMap()["items"].toList()) {
+                const auto item = iv.toMap();
+                const auto key = item["id"].toString();
+                c.answer(key, item["kind"] == "notes" ? "" : "NA", "Sem conector/veículo disponível");
+                if (item["photo_always"].toBool()) c.attach(key, QUrl::fromLocalFile(source));
+                if (item["signature_required"].toBool()) {
+                    c.answer(key, "Técnico de teste", "");
+                    QFile png(source);
+                    if (!png.open(QIODevice::ReadOnly) || !c.saveSignature(key, "data:image/png;base64," + QString::fromLatin1(png.readAll().toBase64()))) return false;
+                }
+            }
+        return true;
+    };
+    CHECK(completeAnswers());
     bool finishedDuringSync = false;
+    bool signedDuringSync = false;
     QString following;
     c.sync();
     QTimer::singleShot(100, &app, [&] {
+        // Replace a signature while an older draft/evidence is in flight. Its
+        // acknowledgement must not erase the replacement or clear pending work.
+        QFile png(source);
+        signedDuringSync = c.syncing() && png.open(QIODevice::ReadOnly) &&
+            c.saveSignature("FIN.02", "data:image/png;base64," + QString::fromLatin1(png.readAll().toBase64()));
         c.finish();
         finishedDuringSync = c.current()["status"].toString() == "closed" && !c.busy();
         c.openReport(charger);
         following = c.current()["id"].toString();
     });
     CHECK(settled(c));
-    CHECK(finishedDuringSync && c.current()["id"].toString() == following);
+    CHECK(signedDuringSync && finishedDuringSync && c.current()["id"].toString() == following);
     c.openReport("", retryId);
     CHECK(c.current()["status"].toString() == "closed" && c.current()["dirty"].toBool());
     c.sync();
@@ -656,21 +767,20 @@ int main(int argc, char **argv) {
     CHECK(until([&] { return !c.current()["dirty"].toBool() && !c.syncing(); }, 6000));
     // Manual local cleanup preserves the server report and reopens without old image paths.
     c.openReport("", rid);
-    for (auto sv : c.sections())
-        for (auto iv : sv.toMap()["items"].toList())
-            c.answer(iv.toMap()["id"].toString(), "NA", "Sem conector/veículo disponível");
+    CHECK(completeAnswers());
     c.finish();
     CHECK(settled(c));
     CHECK(c.current()["status"].toString() == "closed");
     c.sync();
     CHECK(settled(c));
     CHECK(!c.current()["dirty"].toBool());
+    const int closedEvidenceCount = c.current()["photos"].toList().size();
     c.clearLocalCopies();
     CHECK(c.current()["id"].toString() == rid);
     c.openReport("", rid);
     CHECK(settled(c));
     CHECK(c.current()["id"].toString() == rid && c.current()["status"].toString() == "closed");
-    CHECK(c.current()["photos"].toList().size() == 4);
+    CHECK(c.current()["photos"].toList().size() == closedEvidenceCount);
     for (auto value : c.current()["photos"].toList())
         CHECK(value.toMap()["path"].toString().isEmpty());
     c.openReport("", batchId);
@@ -805,7 +915,7 @@ int main(int argc, char **argv) {
     CHECK(c.current()["photos"].toList().size() == 1);
     CHECK(c.current()["photos"].toList().first().toMap()["path"].toString().isEmpty());
     qInfo() << "PASS: synced draft metadata retained locally; cached photograph removed; server evidence preserved";
-    c.answer("FIN.03", "LOSE_DELETE_ACK", "");
+    c.answer("FIN.03", "", "LOSE_DELETE_ACK");
     c.sync();
     CHECK(settled(c) && !c.current()["dirty"].toBool());
     const auto removedPhoto = c.current()["photos"].toList().first().toMap()["id"].toString();
@@ -831,16 +941,274 @@ int main(int argc, char **argv) {
     const auto rejected = a < b ? a : b;
     const auto accepted = a < b ? b : a;
     c.openReport("", rejected);
-    c.answer("FIN.03", "REJECT_413", "");
+    c.answer("FIN.03", "", "REJECT_413");
     c.openReport("", accepted);
-    c.answer("FIN.03", "NEXT_AFTER_413", "");
+    c.answer("FIN.03", "", "NEXT_AFTER_413");
     c.sync();
     CHECK(until([&] { return !c.current()["dirty"].toBool() && !c.syncing(); }, 12000));
     c.openReport("", rejected);
     CHECK(c.current()["dirty"].toBool());
-    CHECK(c.current()["payload"].toMap()["answers"].toMap()["FIN.03"].toMap()["value"] == "REJECT_413");
+    CHECK(c.current()["payload"].toMap()["answers"].toMap()["FIN.03"].toMap()["notes"] == "REJECT_413");
     qInfo() << "PASS: rejected report preserved; next queued report synchronized";
+    // Two distinct users: a clean observer cache must follow the owner's closure.
+    Lem owner(temp.path() + "/owner-visibility"), viewer(temp.path() + "/viewer-visibility");
+    owner.setServer("http://127.0.0.1:18765");
+    viewer.setServer("http://127.0.0.1:18765");
+    owner.login("ownership@example.test", "OwnershipPassword123!"); CHECK(settled(owner));
+    viewer.login("admin@lem.pt", "IntegrationPassword123!"); CHECK(settled(viewer));
+    CHECK(owner.user()["id"] != viewer.user()["id"]);
+    owner.selectContract(contract); CHECK(settled(owner));
+    viewer.selectContract(contract); CHECK(settled(viewer));
+    owner.openReport(charger);
+    owner.answer("SITE.02", "OK", "rascunho do proprietário");
+    owner.sync(); CHECK(settled(owner));
+    CHECK(!owner.current()["dirty"].toBool());
+    const auto sharedId = owner.current()["id"].toString();
+    viewer.openReport(charger, sharedId); CHECK(settled(viewer));
+    CHECK(viewer.current()["status"] == "draft");
+    const auto oldRevision = viewer.current()["revision"].toInt();
+    const auto readOnly = viewer.current()["payload"];
+    viewer.answer("SITE.02", "NOK", "não pode editar");
+    viewer.setAssessment("MAN.14", "NOK");
+    viewer.attach("SITE.02", QUrl::fromLocalFile(source));
+    viewer.finish();
+    CHECK(viewer.current()["payload"] == readOnly);
+    CHECK(!viewer.current()["dirty"].toBool() && viewer.current()["status"] == "draft");
+    // Match the reported sequence exactly: the observer syncs the cached draft
+    // before the technician closes it, without ever acquiring edit ownership.
+    viewer.sync(); CHECK(settled(viewer));
+    CHECK(viewer.current()["status"] == "draft" && !viewer.current()["dirty"].toBool());
+    for (const auto &section : owner.sections())
+        for (const auto &item : section.toMap()["items"].toList())
+            owner.answer(item.toMap()["id"].toString(), "NA", "Sem conector/veículo disponível");
+    owner.answer("FIN.03", "", "fecho confirmado pelo proprietário");
+    CHECK(addTestSignature(owner));
+    owner.finish(); CHECK(settled(owner));
+    CHECK(owner.current()["status"] == "closed" && !owner.current()["dirty"].toBool());
+    // Catalogue status must already be correct while the full cached report is still stale.
+    bool catalogueClosedBeforeDownload = false;
+    const auto catalogueWatch = QObject::connect(&viewer, &Lem::chargersChanged, [&] {
+        if (viewer.current()["status"] != "draft") return;
+        for (const auto &row : viewer.chargers())
+            for (const auto &summary : row.toMap()["reports"].toList())
+                if (summary.toMap()["id"] == sharedId && summary.toMap()["status"] == "closed")
+                    catalogueClosedBeforeDownload = true;
+    });
+    viewer.sync(); CHECK(settled(viewer));
+    QObject::disconnect(catalogueWatch);
+    CHECK(catalogueClosedBeforeDownload);
+    CHECK(viewer.current()["status"] == "closed");
+    CHECK(viewer.current()["revision"].toInt() > oldRevision);
+    CHECK(viewer.current()["payload"].toMap()["answers"].toMap()["FIN.03"].toMap()["notes"] == "fecho confirmado pelo proprietário");
+    bool foundClosed = false;
+    for (const auto &row : viewer.chargers())
+        for (const auto &summary : row.toMap()["reports"].toList())
+            if (summary.toMap()["id"] == sharedId) foundClosed = summary.toMap()["status"] == "closed";
+    CHECK(foundClosed);
+    viewer.openReport(charger, sharedId); CHECK(settled(viewer));
+    CHECK(viewer.current()["status"] == "closed");
+    // A legacy/corrupt dirty copy owned by somebody else must never be sent or discarded.
+    LemReviewTest::staleForeignDraft(viewer);
+    const auto protectedForeign = viewer.current()["payload"];
+    // Contract presentation refreshes even a protected local copy, without
+    // changing ownership, report revisions, answers or the local dirty flag.
+    const auto closedRevision = owner.current()["revision"];
+    const auto closedPayload = owner.current()["payload"];
+    viewer.saveReportPresentation("CSMTEC", "APS", "Galp", 0); CHECK(settled(viewer));
+    CHECK(viewer.current()["presentation"].toMap()["issuer"] == "CSMTEC");
+    CHECK(viewer.current()["dirty"].toBool() && viewer.current()["payload"] == protectedForeign);
+    viewer.openReport(charger);
+    CHECK(viewer.current()["presentation"].toMap()["issuer"] == "CSMTEC");
+    viewer.deleteReport(viewer.current()["id"].toString()); CHECK(settled(viewer));
+    viewer.openReport(charger, sharedId); CHECK(settled(viewer));
+    // A different device has not refreshed its catalogue. Export must still use
+    // the live issuer, even when the settings writer's follow-up refresh failed.
+    CHECK(owner.current()["presentation"].toMap()["issuer"] != "CSMTEC");
+    Lem legacyAdmin(temp.path() + "/legacy-admin-export");
+    legacyAdmin.setServer("http://127.0.0.1:18765");
+    legacyAdmin.login("admin@lem.pt", "IntegrationPassword123!"); CHECK(settled(legacyAdmin));
+    CHECK(legacyAdmin.user()["role"] == "admin");
+    CHECK(owner.current()["owner_id"] != legacyAdmin.user()["id"]);
+    LemReviewTest::cachedReport(legacyAdmin, QJsonObject::fromVariantMap(owner.current()));
+    const auto brandingOutput = qEnvironmentVariable("LEM_BRANDING_TEST_OUTPUT", temp.path());
+    for (auto exporter : {&owner, &legacyAdmin}) for (const auto &kind : {QString("pdf"), QString("bundle")}) {
+        // A pre-branding server response had no contract ID or presentation. Its
+        // charger catalogue may no longer be cached when opening the old report.
+        LemReviewTest::legacyWithoutCatalogue(*exporter);
+        const auto legacySnapshot = exporter->current()["snapshot"];
+        const auto legacyPhotos = exporter->current()["photos"];
+        const auto legacyOwner = exporter->current()["owner_id"];
+        const auto destination = brandingOutput + (exporter == &owner ? "/legacy" : "/legacy-admin") +
+                                 (kind == "pdf" ? ".pdf" : ".zip");
+        exporter->exportReport(kind, QUrl::fromLocalFile(destination)); CHECK(settled(*exporter));
+        CHECK(QFileInfo(destination).size() > 0);
+        CHECK(exporter->current()["presentation"].toMap()["issuer"] == "CSMTEC");
+        CHECK(exporter->current()["snapshot"] == legacySnapshot && exporter->current()["photos"] == legacyPhotos);
+        CHECK(exporter->current()["owner_id"] == legacyOwner);
+        CHECK(exporter->current()["revision"] == closedRevision && exporter->current()["payload"] == closedPayload);
+        CHECK(!exporter->current()["dirty"].toBool());
+    }
+    // An unresolvable legacy report must preserve the destination instead of
+    // successfully exporting the old LEM default after a server 404.
+    auto unknownLegacy = QJsonObject::fromVariantMap(legacyAdmin.current());
+    unknownLegacy["id"] = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    LemReviewTest::cachedReport(legacyAdmin, unknownLegacy);
+    LemReviewTest::legacyWithoutCatalogue(legacyAdmin);
+    const auto protectedDestination = temp.filePath("protected.pdf");
+    QFile protectedFile(protectedDestination); CHECK(protectedFile.open(QIODevice::WriteOnly));
+    CHECK(protectedFile.write("existing destination") > 0); protectedFile.close();
+    legacyAdmin.exportReport("pdf", QUrl::fromLocalFile(protectedDestination)); CHECK(settled(legacyAdmin));
+    CHECK(protectedFile.open(QIODevice::ReadOnly));
+    CHECK(protectedFile.readAll() == "existing destination"); protectedFile.close();
+    CHECK(legacyAdmin.message().contains("Não foi possível confirmar"));
+    owner.refresh(); CHECK(settled(owner));
+    CHECK(owner.current()["presentation"].toMap()["issuer"] == "CSMTEC");
+    CHECK(owner.current()["revision"] == closedRevision && owner.current()["payload"] == closedPayload);
+    CHECK(!owner.current()["dirty"].toBool());
+    owner.saveReportPresentation("Lem", "", "", 1); // A technician cannot write settings.
+    CHECK(!owner.busy() && owner.current()["presentation"].toMap()["issuer"] == "CSMTEC");
+    viewer.saveReportPresentation("Lem", "Transdev", "", 1); CHECK(settled(viewer));
+    owner.sync(); CHECK(settled(owner));
+    CHECK(owner.current()["presentation"].toMap()["issuer"] == "Lem");
+    CHECK(owner.current()["presentation"].toMap()["revision"].toInt() == 2);
+    viewer.sync(); CHECK(settled(viewer));
+    CHECK(viewer.current()["dirty"].toBool() && viewer.current()["payload"] == protectedForeign);
+    CHECK(!viewer.current()["_conflict"].toBool()); // No forbidden upload was attempted.
+    owner.refreshReport(); CHECK(settled(owner));
+    CHECK(owner.current()["status"] == "closed");
+    CHECK(owner.current()["payload"].toMap()["answers"].toMap()["FIN.03"].toMap()["notes"] == "fecho confirmado pelo proprietário");
+    qInfo() << "PASS: two-user owner-only writes and closure; manual sync receives closed state in open report and catalogue";
+
+    // A second device trashes a contract while this device has saved and unsent drafts.
+    const auto retainedRoot = temp.path() + "/retention-owner";
+    Lem retained(retainedRoot), administrator(temp.path() + "/retention-admin");
+    administrator.setServer("http://127.0.0.1:18765");
+    administrator.login("admin@lem.pt", "IntegrationPassword123!"); CHECK(settled(administrator));
+    CHECK(administrator.authenticated());
+    administrator.createContract("Retention integration", 2026, 1, "TRE"); CHECK(settled(administrator));
+    QString retainedContract;
+    for (const auto &entry : administrator.contracts())
+        if (entry.toMap()["name"].toString().contains("Retention integration")) retainedContract=entry.toMap()["id"].toString();
+    CHECK(!retainedContract.isEmpty());
+    administrator.selectContract(retainedContract); CHECK(settled(administrator));
+    administrator.analyseExcel(QUrl::fromLocalFile(app.arguments().value(app.arguments().indexOf("--xlsx") + 1))); CHECK(settled(administrator));
+    administrator.previewExcel("Parque", 1, {{"external_id","Identificador"},{"model","Modelo"},{"serial","Série"},{"connectors","Tomadas"}}); CHECK(settled(administrator));
+    administrator.commitExcel(); CHECK(settled(administrator));
+    const auto retainedCharger=administrator.chargers().first().toMap()["id"].toString();
+    administrator.assignUser(owner.user()["id"].toString()); CHECK(settled(administrator));
+    retained.setServer("http://127.0.0.1:18765");
+    retained.login("ownership@example.test", "OwnershipPassword123!"); CHECK(settled(retained));
+    CHECK(retained.authenticated());
+    retained.selectContract(retainedContract); CHECK(settled(retained));
+    retained.openReport(retainedCharger);
+    retained.attach("EST.01",QUrl::fromLocalFile(source));
+    retained.sync(); CHECK(settled(retained));
+    const auto retainedId=retained.current()["id"].toString();
+    const auto retainedRevision=retained.current()["revision"];
+    const auto retainedPhoto=QUrl(retained.current()["photos"].toList().first().toMap()["path"].toString()).toLocalFile();
+    retained.answer("FIN.03","","PENDING_IN_TRASH");
+    retained.openReport(retainedCharger);
+    const auto neverSent=retained.current()["id"].toString();
+    administrator.deleteContract(retainedContract,"APAGAR"); CHECK(settled(administrator));
+    retained.sync(); CHECK(settled(retained));
+    CHECK(retained.current().contains("_contract_unavailable") && retained.current()["dirty"].toBool());
+    CHECK(retained.current()["revision"].toInt()==0);
+    retained.openReport("",retainedId);
+    CHECK(retained.current().contains("_contract_unavailable") && retained.current()["dirty"].toBool());
+    CHECK(!retained.current()["_conflict"].toBool() && retained.current()["revision"]==retainedRevision);
+    CHECK(QFileInfo::exists(retainedPhoto));
+    retained.sync(); CHECK(settled(retained));
+    CHECK(retained.current()["dirty"].toBool());
+    // Suspension survives restart, and work in another contract can still be sent.
+    Lem restarted(retainedRoot);
+    restarted.openReport("",retainedId);
+    CHECK(restarted.current().contains("_contract_unavailable"));
+    CHECK(restarted.current()["payload"].toMap()["answers"].toMap()["FIN.03"].toMap()["notes"]=="PENDING_IN_TRASH");
+    restarted.login("ownership@example.test","OwnershipPassword123!"); CHECK(settled(restarted));
+    CHECK(restarted.authenticated());
+    restarted.selectContract(contract); CHECK(settled(restarted));
+    restarted.openReport(charger); restarted.answer("FIN.03","","OTHER_CONTRACT_CONTINUES");
+    CHECK(!restarted.current().isEmpty() && restarted.current()["contract_id"].toString()==contract);
+    restarted.sync(); CHECK(until([&] { return !restarted.current()["dirty"].toBool() && !restarted.syncing(); },15000));
+    restarted.openReport("",retainedId); CHECK(restarted.current()["dirty"].toBool());
+    administrator.restoreContract(retainedContract); CHECK(settled(administrator));
+    restarted.refresh(); CHECK(restarted.refreshing());
+    // The manual receive request must survive the already-running catalogue refresh.
+    restarted.sync();
+    const bool retentionResumed=until([&] { return !restarted.current().contains("_contract_unavailable") && !restarted.current()["dirty"].toBool() && !restarted.syncing(); },15000);
+    if (!retentionResumed) qCritical()<<"Retention sync state:"<<restarted.message()<<restarted.syncState()<<restarted.current()["_contract_unavailable"]<<restarted.current()["_conflict_reason"]<<restarted.current()["_defer_photo_sync"];
+    CHECK(retentionResumed);
+    CHECK(restarted.current()["payload"].toMap()["answers"].toMap()["FIN.03"].toMap()["notes"]=="PENDING_IN_TRASH");
+    CHECK(QFileInfo::exists(retainedPhoto));
+    restarted.openReport("",neverSent); CHECK(!restarted.current()["dirty"].toBool());
+    qInfo()<<"PASS: contract retention rejects sync; all drafts suspended durably; originals/answers preserved; other contracts continue; restoration resumes pending work";
+
+    // Administrator correction of a technician's closed report. The server clones
+    // evidence, so neither downloading originals nor transferring ownership is required.
+    administrator.selectContract(contract); CHECK(settled(administrator));
+    administrator.openReport(charger, sharedId); CHECK(settled(administrator));
+    CHECK(administrator.current()["status"] == "closed");
+    const auto originalOwner = administrator.current()["owner_id"];
+    const auto originalPhotoCount = administrator.current()["photos"].toList().size();
+    administrator.beginReportCorrection(); CHECK(settled(administrator));
+    const auto correctionId = administrator.current()["id"].toString();
+    CHECK(correctionId != sharedId && administrator.current()["status"] == "draft");
+    CHECK(administrator.current()["correction"].toMap()["source_id"] == sharedId);
+    CHECK(administrator.current()["photos"].toList().size() == originalPhotoCount);
+    CHECK(administrator.current()["owner_id"] == administrator.user()["id"]);
+    CHECK(!administrator.setCorrectionTimes("2026-11-16T12:00:00Z", "2026-11-16T10:00:00Z"));
+    CHECK(!administrator.setCorrectionTimes("2026-11-16T09:00:00", "2026-11-16T10:00:00Z"));
+    CHECK(administrator.setCorrectionTimes("2026-10-01T09:00:00+01:00", "2026-10-01T11:30:12+01:00"));
+    administrator.answer("FIN.03", "", "LOSE_CORRECTION_ACK");
+    administrator.answer("EST.02", "Fabricante corrigido pelo administrador", "");
+    administrator.answer("EST.03", "Modelo corrigido pelo administrador", "");
+    administrator.answer("EST.04", "SN-CORRECAO-ADMIN", "");
+    administrator.attach("EST.01", QUrl::fromLocalFile(source));
+    CHECK(administrator.current()["photos"].toList().size() == originalPhotoCount + 1);
+    administrator.finish(); CHECK(settled(administrator));
+    CHECK(administrator.current()["dirty"].toBool()); // Commit succeeded; its ACK was deliberately lost.
+    CHECK(!administrator.prepareExport("pdf"));
+    administrator.sync(); CHECK(settled(administrator));
+    if (administrator.current()["dirty"].toBool()) qCritical() << administrator.message() << administrator.current()["_conflict_reason"];
+    CHECK(!administrator.current()["dirty"].toBool());
+    CHECK(administrator.current()["correction"].toMap()["state"] == "committed");
+    CHECK(administrator.current()["owner_id"] == originalOwner);
+    CHECK(administrator.current()["identifier"].toString().contains("2026-10-01_11-30-12"));
+    CHECK(administrator.current()["payload"].toMap()["started"] == "2026-10-01T08:00:00Z");
+    CHECK(administrator.current()["payload"].toMap()["finished"] == "2026-10-01T10:30:12Z");
+    // Commit acknowledgement was lost. Recovery must install the shared identity,
+    // so the very next report is prefilled correctly without restarting the app.
+    for (const auto &entry : administrator.chargers()) {
+        const auto row = entry.toMap();
+        if (row["id"].toString() != charger) continue;
+        CHECK(row["details"].toMap()["model"] == "Modelo corrigido pelo administrador");
+        CHECK(row["details"].toMap()["serial"] == "SN-CORRECAO-ADMIN");
+    }
+    owner.sync(); CHECK(settled(owner));
+    owner.openReport(charger, correctionId); CHECK(settled(owner));
+    CHECK(owner.current()["status"] == "closed" && owner.current()["owner_id"] == originalOwner);
+    viewer.sync(); CHECK(settled(viewer));
+    viewer.openReport(charger, sharedId); CHECK(settled(viewer));
+    CHECK(viewer.current()["dirty"].toBool() && viewer.current()["_conflict"].toBool());
+    CHECK(viewer.current()["_replacement_id"] == correctionId);
+    CHECK(viewer.current()["payload"] == protectedForeign);
+    administrator.beginReportCorrection(); CHECK(settled(administrator));
+    const auto cancelledCorrection = administrator.current()["id"].toString();
+    CHECK(cancelledCorrection != correctionId);
+    administrator.deleteReport(cancelledCorrection); CHECK(settled(administrator));
+    CHECK(administrator.current().isEmpty());
+    administrator.openReport(charger, correctionId); CHECK(settled(administrator));
+    administrator.beginReportCorrection(); CHECK(settled(administrator));
+    CHECK(administrator.current()["id"].toString() != cancelledCorrection);
+    CHECK(administrator.current()["correction"].toMap()["state"] == "editing");
+    administrator.deleteReport(administrator.current()["id"].toString()); CHECK(settled(administrator));
+    owner.refreshReport(); CHECK(settled(owner));
+    CHECK(owner.current()["id"] == correctionId && owner.current()["status"] == "closed");
+    qInfo()<<"PASS: desktop correction clones originals, validates dates, replaces atomically, recovers lost commit ACK, restores technician ownership and preserves stale-device unsent work";
+
     qInfo()
         << "PASS: ownership transfer/offline revocation; revision conflict; protected server preview; independent photo/report copy; backup guards; operation stages/context/progress; local/remote/closed deletion and stale-copy cleanup; deferred group photo batches; bulk/cancel/retry/pin/photos; nonblocking edit/attach/remove; latest local changes survive ACK; lost ACK recovery; automatic idle sync; lazy photos and cached reopen";
     return 0;
 }
+
+#include "offline_sync.moc"

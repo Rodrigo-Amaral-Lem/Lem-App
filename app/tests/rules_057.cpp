@@ -52,7 +52,13 @@ struct LemReviewTest {
   // Photos selected while a draft PUT is in flight must survive its acknowledgement.
   const auto beforeAttachment=c.m_current;
   const auto beforeCount=beforeAttachment["photos"].toArray().size();
+  c.m_busy=true;
+  c.attachMany("SITE.06",{QUrl::fromLocalFile(evidencePath)});
+  CHECK(!c.attachingFiles());
+  c.m_busy=false;
   c.m_syncing=true;
+  c.m_refreshing=true;
+  c.m_downloads.insert("background-photo");
   c.attachMany("SITE.06",{QUrl::fromLocalFile(evidencePath),QUrl::fromLocalFile(evidencePath)});
   CHECK(c.attachingFiles());
   QElapsedTimer attachTimer;attachTimer.start();
@@ -70,6 +76,8 @@ struct LemReviewTest {
     CHECK(QFileInfo::exists(QUrl(photo["path"].toString()).toLocalFile()));
   }
   c.m_syncing=false;
+  c.m_refreshing=false;
+  c.m_downloads.clear();
   c.answer("MAN.18","120 Ω","");c.setAssessment("MAN.18","OK");
   c.setAssessment("MAN.18","NOK");
   CHECK(c.m_current["payload"].toObject()["answers"].toObject()["MAN.18"].toObject()["value"]=="120 Ω");
@@ -100,9 +108,15 @@ struct LemReviewTest {
   c.finish();CHECK(c.m_current["status"]=="draft");
   CHECK(c.importSignature("FIN.02",QUrl::fromLocalFile(evidencePath)));
   // Leaving optional notes untouched must not serialize null answers on closure.
+  // MAN.14–18 require photographs for both outcomes; a video cannot satisfy it.
+  for(int n=14;n<=18;++n){
+   const auto key=QString("MAN.%1").arg(n);
+   c.finish();CHECK(c.m_current["status"]=="draft");
+   c.attach(key,QUrl::fromLocalFile(evidencePath));
+  }
   auto optionalPayload=c.m_current["payload"].toObject();
   auto optionalAnswers=optionalPayload["answers"].toObject();
-  for (const auto &key : {"SEG.07","SITE.06","QVE.14","EST.18","MAN.21","CARG.07","FIN.03"}) optionalAnswers.remove(key);
+  for (const auto &key : {"SEG.07","SITE.06","QVE.14","EST.18","MAN.22","CARG.07","FIN.03"}) optionalAnswers.remove(key);
   optionalPayload["answers"]=optionalAnswers;c.m_current["payload"]=optionalPayload;
   c.finish();CHECK(c.m_current["status"]=="closed");
   for (auto answer:c.m_current["payload"].toObject()["answers"].toObject()) CHECK(answer.isObject());
@@ -136,4 +150,4 @@ struct LemReviewTest {
   qInfo()<<"PASS: independent mandatory readings, NOK notes, NA reset, optional serial photo, closed/pending cleanup and restart";return true;
  }
 };
-int main(int argc,char**argv){QGuiApplication app(argc,argv);app.setApplicationVersion("0.2.0");QTemporaryDir dir;Lem c(dir.path());return LemReviewTest::run(c,dir.path())?0:1;}
+int main(int argc,char**argv){QGuiApplication app(argc,argv);app.setApplicationVersion("0.3.0");QTemporaryDir dir;Lem c(dir.path());return LemReviewTest::run(c,dir.path())?0:1;}

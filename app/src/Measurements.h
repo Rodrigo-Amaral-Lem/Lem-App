@@ -13,13 +13,15 @@ inline QString canonical(QString id) {
     }
     return id;
 }
+inline bool milliamp(const QString &key) { return key == "MAN.11" || key == "MAN.12"; }
 inline int digits(const QString &key) {
+    if (milliamp(key)) return 6;
     const auto id = canonical(key);
     if (id == "PC02.19") return 5;
     return QRegularExpression("^PC02\\.(0[5-9]|10|11)$").match(id).hasMatch() ? 3 : 0;
 }
 inline QString unit(const QString &id) {
-    return digits(id) == 5 ? QStringLiteral("Ω") : digits(id) ? QStringLiteral("V") : QString();
+    return milliamp(id) ? QStringLiteral("mA") : digits(id) == 5 ? QStringLiteral("Ω") : digits(id) ? QStringLiteral("V") : QString();
 }
 inline bool notApplicable(QString value) {
     value = value.simplified().toUpper();
@@ -31,8 +33,8 @@ inline QString format(const QString &id, QString value, bool *valid = nullptr) {
     if (id == "MAN.18" && (value.toUpper() == "OK" || value.toUpper() == "NOK")) { if (valid) *valid = true; return value.toUpper(); }
     if (!digits(id)) { if (valid) *valid = true; return value; }
     if (notApplicable(value)) { if (valid) *valid = true; return QStringLiteral("Não Aplicável"); }
-    const auto pattern = QString("^([0-9]{1,%1}(?:[.,][0-9]{1,2})?)(?:\\s*%2)?$")
-        .arg(digits(id)).arg(unit(id));
+    const auto pattern = QString("^([0-9]{1,%1}%2)(?:\\s*%3)?$")
+        .arg(digits(id)).arg(milliamp(id) ? QString() : QString("(?:[.,][0-9]{1,2})?"), unit(id));
     const auto match = QRegularExpression(pattern, QRegularExpression::CaseInsensitiveOption).match(value);
     if (valid) *valid = match.hasMatch();
     if (!match.hasMatch()) return {};

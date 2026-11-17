@@ -14,7 +14,7 @@ copy is not a durable edit.
 | [LemOffline.cpp](../app/src/LemOffline.cpp) | Journals, synchronization, acknowledgements, conflicts and independent copies |
 | [LemReportGroups.cpp](../app/src/LemReportGroups.cpp) | Scoped QVE/measurement copying, signature drawing/photo import and multi-file evidence |
 | [Main.qml](../app/qml/Main.qml) | Pages, controls, group tabs, review dialogs and evidence actions |
-| [ReportPdf.cpp](../app/src/ReportPdf.cpp) | Local PDF rendering from a report snapshot and available local evidence |
+| [ReportPdf.cpp](../app/src/ReportPdf.cpp) | Native Qt painting bridge for the common PDF layout and local evidence |
 | [Checklist.h](../app/src/Checklist.h), [Measurements.h](../app/src/Measurements.h) | Connector questions, editable-v6 corrections, measurement formatting and validation |
 | [AppStorage.h](../app/src/AppStorage.h), [SafeStorage.h](../app/src/SafeStorage.h) | Storage migration, scoped paths and private-file safeguards |
 | [NetworkSecurity.h](../app/src/NetworkSecurity.h), [EvidenceMedia.h](../app/src/EvidenceMedia.h) | Reply limits/redirects and bounded native evidence handling |
@@ -90,6 +90,12 @@ The queue is derived from report state, not a separate queue database. Important
   refreshes after 15 minutes.
 - A locally closed report is uploaded as a draft until its evidence is reconciled; closure is sent
   last.
+- Upload selection includes only reports owned by the logged-in user. Read-only copies are never
+  uploaded. The server independently checks the current owner for answers, closure and evidence.
+- Manual synchronization also refreshes the selected catalogue and the open report when it has no
+  local edits. Catalogue summaries carry server revisions; a stale clean copy cannot mask a newer
+  server status/owner. Opening another owner's clean cached report checks the server again.
+- Dirty reports are retained for conflict handling rather than replaced by a background download.
 - Before a PUT, a durable in-flight fingerprint allows recognition of an accepted request whose
   acknowledgement was lost.
 - `mergeSync()` reads the latest local report and merges acknowledgement facts. An older response
@@ -108,16 +114,41 @@ confirmed **410** is different: permanent server deletion removes the correspond
 private evidence rather than reviving it.
 
 Explicit refresh refuses to overwrite dirty local work. Opening cached metadata does not download
-every original. Offline download pins a report and fetches missing files; the download pump bounds
-concurrency. Local evidence cleanup retains report metadata and only removes eligible synchronized
+every original. Offline download pins a report and fetches missing files with four concurrent requests.
+`requestPhoto()` streams to a private `QSaveFile`, retries transient failures at most three times,
+and resumes evidence using `Range`/`If-Range` with its SHA-256 digest. A full 200 response safely
+restarts the file for compatibility with older servers. Only validated, complete files are published.
+Batch metadata is checkpointed every eight successes and at completion; startup reconciles atomic
+files committed between checkpoints. Authentication/access failures stop the batch; other failed
+items preserve the rest of the queue. Local evidence cleanup retains report metadata and only removes eligible synchronized
 private files. Unsaved, unacknowledged, dirty or conflicted work remains protected. Automatic eviction also
 requires a confirmed server revision and no pending evidence deletions.
+
+`currentReportDownloadingPhotos` includes the selected report's bulk and individual evidence
+requests. Report actions use this scope, while session changes and global cleanup retain the global
+transfer guard. Download callbacks always retain their original report ID, so deleting a different
+draft cannot redirect bytes or restore that draft. The QML menu and confirmation use the same scope.
+
+HTTP 423 during sync marks all locally known reports in that contract with private
+`_contract_unavailable` metadata. It does not clear dirty state, advance revisions or create an
+ownership conflict. Checkpoints preserve the suspension across restart; the sync queue skips it
+and processes other contracts. Only a successful active-contract refresh clears this marker after
+restoration. The API independently enforces retention for reads, new/existing reports and evidence.
+Manual synchronization requested during an active operation retains its receive/refresh intent
+until the scheduler can run it; it must not degrade into an upload-only automatic attempt.
 
 ## Copying and signatures
 
 An independent report backup remaps signature references to its new evidence IDs, preserving the
 signer, timestamp and image bytes. An invalid/missing source signature reference blocks that backup
 rather than marking an incomplete copy as safe for discarding the original.
+This includes `legacy_signatures`: their old question keys can point to evidence migrated into
+ANT, so validate the referenced PNG rather than requiring a current-question checkpoint match.
+Independent copies remove the source UUID's `frozen_upload` transfer marker before migration.
+Rejected historical closures also remove this marker when reopening locally; otherwise the guard
+would leave the recovered draft permanently uneditable. The current-draft PUT migrates it atomically.
+Sync skips an unchanged payload PUT only if the form version and historical-upload marker also
+match. Identical answers must not leave a recovered draft stranded in the old server form.
 
 A group copy stages fresh evidence IDs/files, verifies source metadata/digests and commits only
 after all files are durable. Unrelated fields remain editable and are read from the latest target at
@@ -131,3 +162,30 @@ old reference. Android uses drawn signatures in the current UI.
 
 See the [shared report contract](../../Common/docs/report-contract.md) for exact field rules and
 [Field workflow](field-workflow.md) for user actions.
+
+## Shared PDF presentation
+
+`ReportPdf.cpp` runs `shared/report/layout.js` through QJSEngine and supplies Qt drawing
+primitives. The server's `pdf_worker.py` uses the same model, bundled fonts and artwork.
+New Qt or font versions must pass the cross-renderer checks in the test guide.
+`withContractPresentation()` overlays only live contract presentation on cached report
+metadata. Refresh/load reconciles that field independently of dirty flags, edit sequence,
+owner, answers and report revision. Export applies the newest received presentation;
+old snapshots still default to Lem when no presentation is available.
+
+`ReportBundle.h` streams a standard stored ZIP with CRC32, UTF-8 names and data descriptors.
+Closed reports with all originals use local PDF/ZIP generation on the worker pool, including offline
+pending work. The ZIP includes sanitized public JSON and hashes originals while writing; it excludes
+local paths and synchronization internals. Desktop output is atomic. Android stages the archive
+before copying to the selected content URI. Missing local evidence selects the existing server
+fallback for synchronized reports. Network PDF/ZIP output is staged on disk and copied in bounded
+blocks, avoiding a report-sized response buffer; regenerated archives restart on retry.
+
+Administrator correction starts with a server-cloned draft and preserves the source until the
+commit acknowledgement. `correction` records source/editor/state; ordinary edit controls apply
+only to the editor on compiled Windows/Linux desktop targets. Final sync uses the replacement
+endpoint, then restores the original technician owner. Lost acknowledgements are recovered before
+ordinary owner mismatch handling. Replacement tombstones preserve dirty local copies as conflicts;
+independent draft copies strip correction metadata. A failed local checkpoint keeps the editor
+eligible to retry, rather than stranding a dirty report under another owner. Local copies of cloned
+evidence use independent files; deleting the source cannot invalidate replacement paths.

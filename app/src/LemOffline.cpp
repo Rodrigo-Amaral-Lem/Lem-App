@@ -10,6 +10,7 @@
 #include "Lem.h"
 #include "Checklist.h"
 #include "SafeStorage.h"
+#include "NetworkSecurity.h"
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
@@ -145,7 +146,7 @@ bool Lem::saveEdits(QJsonObject report) {
 
 // Schedule only when a token and dirty work exist; respect any transient-error backoff.
 void Lem::scheduleSync(int delay) {
-    if (m_token.isEmpty() || m_server.startsWith("demo:") || pendingCount() == 0)
+    if (m_token.isEmpty() || m_server.startsWith("demo:") || (pendingCount() == 0 && !m_manualSyncRequested))
         return;
     const auto remaining = m_retryNotBefore - QDateTime::currentMSecsSinceEpoch();
     m_autoSync.start(int(qMax(qint64(delay), remaining)));
@@ -158,7 +159,7 @@ bool Lem::releasePhotoSync(QString reportId) {
     if (reportId.isEmpty() || !m_reports.contains(reportId))
         return true;
     auto report = m_reports.value(reportId).toObject();
-    if (!report["_defer_photo_sync"].toBool())
+    if (report["owner_id"] != m_user["id"] || !report["_defer_photo_sync"].toBool())
         return true;
     report.remove("_defer_photo_sync");
     report["_edit_seq"] = report["_edit_seq"].toDouble() + 1;
@@ -179,14 +180,50 @@ void Lem::sync() {
     startSync(true);
 }
 
+// A contract in retention is unavailable, not an ownership conflict or an acknowledged upload.
+// Persist suspension for all its local reports; only a fresh active-contract list lifts it.
+void Lem::suspendContractSync(QString contractId, QString reason) {
+    for (const auto &id : m_reports.keys()) {
+        auto report = withContractPresentation(m_reports.value(id).toObject());
+        if (contractId.isEmpty() || report["contract_id"].toString() != contractId) continue;
+        report["_contract_unavailable"] = reason;
+        m_reports[id] = report;
+        m_syncConflicts.insert(id);
+        if (m_current["id"].toString() == id) m_current = report;
+    }
+    persist();
+    emit changed();
+}
+
+void Lem::reconcileContractSync() {
+    QSet<QString> available;
+    for (const auto &entry : m_contracts) available.insert(entry.toObject()["id"].toString());
+    bool resumed = false;
+    for (const auto &id : m_reports.keys()) {
+        auto report = m_reports.value(id).toObject();
+        if (!report.contains("_contract_unavailable") || !available.contains(report["contract_id"].toString())) continue;
+        report.remove("_contract_unavailable");
+        m_reports[id] = report;
+        if (!report["_conflict"].toBool()) m_syncConflicts.remove(id);
+        if (m_current["id"].toString() == id) m_current = report;
+        resumed = true;
+    }
+    if (resumed) scheduleSync(1500);
+}
+
 // Select eligible dirty reports. Manual send releases photograph holds but does not
 // override a durable ownership/revision conflict requiring a user decision.
 void Lem::startSync(bool manual) {
     if (!storageWritable()) return;
+    manual = manual || m_manualSyncRequested;
     if (m_busy || !m_qveCopyTarget.isEmpty() || attachingFiles() || m_syncing || m_refreshing || m_catalogueLoading) {
+        // Keep the user's receive/refresh request when a catalogue or another operation is active.
+        // A plain automatic retry would skip suspended reports without discovering their restoration.
+        m_manualSyncRequested = manual;
         scheduleSync(3000);
         return;
     }
+    m_manualSyncRequested = false;
     if (m_token.isEmpty()) {
         if (manual)
             online();
@@ -208,11 +245,14 @@ void Lem::startSync(bool manual) {
         m_retryNotBefore = 0;
     }
     for (auto i = m_reports.begin(); i != m_reports.end(); ++i)
-        if (i.value().toObject()["_conflict"].toBool())
+        if (i.value().toObject()["_conflict"].toBool() || i.value().toObject().contains("_contract_unavailable") ||
+            (i.value().toObject()["dirty"].toBool() && i.value().toObject()["owner_id"] != m_user["id"]))
             m_syncConflicts.insert(i.key());
     QStringList ids;
     for (auto i = m_reports.begin(); i != m_reports.end(); ++i)
-        if (i.value().toObject()["dirty"].toBool() && !i.value().toObject()["_conflict"].toBool() &&
+        if (i.value().toObject()["owner_id"] == m_user["id"] &&
+            correctionAllowed(i.value().toObject()) &&
+            i.value().toObject()["dirty"].toBool() && !i.value().toObject()["_conflict"].toBool() &&
             !m_syncConflicts.contains(i.key()) &&
             (manual || !i.value().toObject()["_defer_photo_sync"].toBool()))
             ids << i.key();
@@ -224,6 +264,8 @@ void Lem::startSync(bool manual) {
                        : "Existem reports que precisam de atenção")
                 : "Sem envios pendentes";
         emit changed();
+        // Manual synchronization also receives current server state for observers.
+        if (manual) refresh();
         return;
     }
     m_syncTotal = ids.size();
@@ -239,7 +281,8 @@ void Lem::startSync(bool manual) {
 // Classify failure before choosing recovery: 410 removes a deleted report; 403/409
 // protect conflicting work; 422 needs attention; 401 needs login; other failures retry.
 void Lem::syncFailed(int code, QString message) {
-    const auto detail = QJsonDocument::fromJson(message.toUtf8()).object()["detail"];
+    // Own the JSON value: operator[] on a temporary object leaves a dangling ref.
+    const auto detail = QJsonDocument::fromJson(message.toUtf8()).object().value("detail");
     if (detail.isString())
         message = detail.toString();
     else if (detail.isObject() && detail.toObject()["message"].isString())
@@ -247,8 +290,9 @@ void Lem::syncFailed(int code, QString message) {
     m_syncing = false;
     if (code == 410) {
         const auto id = m_syncReport;
-        if (forgetReport(id)) {
-            status("Este report foi apagado no servidor; cópia local removida.");
+        const auto replacement = detail.toObject()["replacement_id"].toString();
+        if (!replacement.isEmpty() ? receiveReplacement(id, replacement) : forgetReport(id)) {
+            status(replacement.isEmpty() ? "Este report foi apagado no servidor; cópia local removida." : "Report substituído; alterações locais pendentes conservadas.");
             scheduleSync(1500);
         }
         return;
@@ -265,6 +309,28 @@ void Lem::syncFailed(int code, QString message) {
         status(m_syncState);
         scheduleSync(1500);
     } else if (rejected) {
+        if (code == 422 && m_reports.value(m_syncReport).toObject()["status"] == "closed") {
+            // A rejected closure is still a draft on the server. Restore editing
+            // with current rules, preserving answers/media from older offline apps.
+            auto report = m_reports.value(m_syncReport).toObject();
+            report["status"] = "draft";
+            // A rejected historical closure is editable again. Keeping this
+            // transfer-only marker would disable editing and migration forever.
+            auto schema = report["template"].toObject();
+            schema.remove("frozen_upload");
+            report["template"] = schema;
+            report = Checklist::correctedDraft(report);
+            m_reports[m_syncReport] = report;
+            if (m_current["id"] == m_syncReport) {
+                m_current = report;
+                m_template = report["template"].toObject();
+            }
+            saveEdits(report); persist();
+        }
+        if (code == 423) {
+            const auto report = withContractPresentation(m_reports.value(m_syncReport).toObject());
+            suspendContractSync(report["contract_id"].toString(), message);
+        }
         if (code == 409 || code == 403) {
             auto r = m_reports.value(m_syncReport).toObject();
             r["_conflict"] = true;
@@ -307,6 +373,8 @@ bool Lem::mergeSync(QJsonObject sent, bool complete) {
         return false;
     }
     auto latest = m_reports[id].toObject();
+    const auto previousOwner = latest.value("owner_id");
+    const auto previousCorrection = latest.value("correction");
     for (const auto &key : {"revision", "snapshot", "template", "started"})
         if (sent.contains(key))
             latest[key] = sent[key];
@@ -349,12 +417,29 @@ bool Lem::mergeSync(QJsonObject sent, bool complete) {
             latest.remove("_inflight_revision");
         }
     }
-    if (sent["status"] == "closed") applyClosedIdentity(sent);
+    const auto correction = sent["correction"].toObject();
+    if (complete && correction["state"] == "committed") {
+        for (const auto &key : {"owner_id", "technician", "correction", "finished", "updated"})
+            if (sent.contains(key)) latest[key] = sent[key];
+    }
+    // A correction must never change the catalogue while it is only staged.
+    // Apply the server's live identity after commit (including lost-ACK recovery),
+    // not the historical answers, which may precede another intervention.
+    if (sent["status"] == "closed" && (correction.isEmpty() ||
+        (complete && correction["state"] == "committed" && sent.contains("station_update"))))
+        applyClosedIdentity(sent);
     m_reports[id] = latest;
     if (m_current.value("id").toString() == id)
         m_current = latest;
     if (!persist()) {
         latest["dirty"] = true;
+        if (correction["state"] == "committed") {
+            // Keep the editor eligible to retry the lost durable acknowledgement.
+            // Restoring the technician owner in memory now would remove this work
+            // from the administrator's sync queue before it reached disk.
+            latest["owner_id"] = previousOwner;
+            latest["correction"] = previousCorrection;
+        }
         m_reports[id] = latest;
         if (m_current.value("id").toString() == id)
             m_current = latest;
@@ -386,21 +471,28 @@ void Lem::syncNext(QStringList ids, int index) {
         cleanPhotoCache();
         status(m_syncState);
         scheduleSync(1500);
+        if (m_manualSync) refresh();
         return;
     }
     const auto id = ids[index];
     auto r = m_reports.value(id).toObject();
     m_syncReport = id;
-    if (r.isEmpty() || !r["dirty"].toBool() || (!m_manualSync && r["_defer_photo_sync"].toBool())) {
+    if (r.isEmpty() || r.contains("_contract_unavailable") || r["owner_id"] != m_user["id"] || !r["dirty"].toBool() || (!m_manualSync && r["_defer_photo_sync"].toBool())) {
         syncNext(ids, index + 1);
         return;
     }
-    const auto repaired = Checklist::withoutNullOptionalAnswers(r);
+    if (!correctionAllowed(r)) { syncNext(ids, index + 1); return; }
+    // Background sync can run before a cached draft is ever opened. Apply the
+    // same migration here, including its in-flight snapshot, before GET/PUT.
+    const auto repaired = Checklist::withoutNullOptionalAnswers(Checklist::correctedDraft(r));
     if (repaired != r) {
         r = repaired;
         r["_edit_seq"] = r["_edit_seq"].toDouble() + 1;
         m_reports[id] = r;
-        if (m_current["id"] == id) m_current = r;
+        if (m_current.value("id") == id) {
+            m_current = r;
+            m_template = r["template"].toObject();
+        }
         if (!persist()) { m_syncing = false; emit changed(); return; }
         emit changed();
     }
@@ -433,6 +525,7 @@ void Lem::syncNext(QStringList ids, int index) {
                     compact({{"charger_id", local["charger_id"]},
                              {"base_revision", local["revision"]},
                              {"checklist_version", local["template"].toObject()["version"]},
+                             {"frozen_history", local["status"] == "closed" && local["template"].toObject()["version"].toInt() == 6 && local["correction"].toObject()["state"] != "editing"},
                              {"load_test_connectors", local["template"].toObject()["load_test_connectors"]},
                              {"status", "draft"},
                              {"payload", local["payload"]}}),
@@ -464,7 +557,10 @@ void Lem::syncNext(QStringList ids, int index) {
             syncFailed(409, "O carregador do report no servidor é diferente.");
             return;
         }
-        if (remote["owner_id"] != r["owner_id"]) {
+        const bool committedCorrection = remote["correction"].toObject()["state"] == "committed" &&
+            remote["correction"].toObject()["editor_id"] == m_user["id"] &&
+            remote["correction"].toObject()["source_id"] == r["correction"].toObject()["source_id"];
+        if (!committedCorrection && (remote["owner_id"] != m_user["id"] || remote["owner_id"] != r["owner_id"])) {
             syncFailed(409, "A propriedade do rascunho mudou no servidor. Proprietário atual: " +
                                 remote["technician"].toString() +
                                 ". A cópia local foi conservada.");
@@ -500,8 +596,15 @@ void Lem::syncNext(QStringList ids, int index) {
             }
             r["photos"] = photos;
             r["revision"] = remote["revision"];
+            if (remote.contains("station_update")) r["station_update"] = remote["station_update"];
+            if (committedCorrection)
+                for (const auto &key : {"owner_id", "technician", "correction", "started", "finished", "updated", "snapshot"})
+                    r[key] = remote[key];
             if (mergeSync(r, true))
+            {
+                if (committedCorrection) receiveReplacement(remote["correction"].toObject()["source_id"].toString(), r["id"].toString());
                 syncNext(ids, index + 1);
+            }
             return;
         }
         if (remote["revision"] != r["revision"]) {
@@ -530,7 +633,14 @@ void Lem::syncNext(QStringList ids, int index) {
             }
         }
         r["revision"] = remote["revision"];
-        if (samePayload) {
+        // Equal answers alone cannot acknowledge a form migration. In particular,
+        // reopening a rejected historical closure must send the current version
+        // and clear the server's frozen-upload marker before evidence is sent.
+        const auto remoteTemplate = remote["template"].toObject();
+        const auto localTemplate = r["template"].toObject();
+        const bool sameForm = remoteTemplate["version"] == localTemplate["version"] &&
+            remoteTemplate["frozen_upload"].toBool() == localTemplate["frozen_upload"].toBool();
+        if (samePayload && sameForm) {
             if (mergeSync(r))
                 syncPhotos(ids, index, r, 0);
         } else
@@ -579,27 +689,41 @@ void Lem::syncPhotos(QStringList ids, int index, QJsonObject r, int photoIndex) 
         return;
     }
     auto photos = r["photos"].toArray();
+    // The user can remove queued evidence while another upload awaits its reply.
+    // Consult the latest metadata before opening a file from the batch snapshot.
+    QSet<QString> retained;
+    for (const auto &value : m_reports.value(id).toObject()["photos"].toArray())
+        retained.insert(value.toObject()["id"].toString());
+    while (photoIndex < photos.size() &&
+           (photos[photoIndex].toObject()["uploaded"].toBool() ||
+            !retained.contains(photos[photoIndex].toObject()["id"].toString())))
+        ++photoIndex;
     if (photoIndex < photos.size()) {
         auto p = photos[photoIndex].toObject();
-        if (p["uploaded"].toBool()) {
-            syncPhotos(ids, index, r, photoIndex + 1);
-            return;
-        }
         m_syncState = "Report " + QString::number(index + 1) + " / " + QString::number(ids.size()) +
                       " · enviar fotografia " + QString::number(photoIndex + 1) + " / " +
                       QString::number(photos.size()) + " · " + p["checkpoint"].toString();
         emit operationChanged();
-        QFile file(localPath(QUrl(p["path"].toString())));
-        if (!file.open(QIODevice::ReadOnly)) {
+        auto file = new QFile(localPath(QUrl(p["path"].toString())));
+        if (!file->open(QIODevice::ReadOnly)) {
+            delete file;
             syncFailed(422, "Fotografia local em falta; report conservado.");
             return;
         }
+        // Windows cannot unlink the streamed QFile while it is open. multipart
+        // closes it before either callback, so retry a durably requested removal.
+        const auto cleanup = [this, id, p] {
+            const auto latest = m_reports.value(id).toObject();
+            if (latest.isEmpty() || latest["deleted_photos"].toArray().contains(p["id"]))
+                removeCachedPhoto(p);
+        };
         multipart(
             "PUT", "/api/reports/" + id + "/photos/" + p["id"].toString(),
             {{"checkpoint", p["checkpoint"].toString()},
              {"base_revision", QString::number(r["revision"].toInt())}},
-            p["filename"].toString(), file.readAll(),
-            [this, ids, index, r, photos, p, photoIndex](QByteArray data) mutable {
+            p["filename"].toString(), {},
+            [this, ids, index, r, photos, p, photoIndex, cleanup](QByteArray data) mutable {
+                cleanup();
                 const auto ack = QJsonDocument::fromJson(data).object();
                 if (ack["id"] != p["id"] || ack["digest"].toString().isEmpty()) {
                     syncFailed(0, "Confirmação de fotografia inválida; envio pendente conservado.");
@@ -612,14 +736,16 @@ void Lem::syncPhotos(QStringList ids, int index, QJsonObject r, int photoIndex) 
                 if (mergeSync(r))
                     syncPhotos(ids, index, r, photoIndex + 1);
             },
-            [this](int code, QString message) { syncFailed(code, message); });
+            [this, cleanup](int code, QString message) { cleanup(); syncFailed(code, message); }, file);
         return;
     }
     if (r["status"].toString() == "closed") {
-        syncRequest("PUT", "/api/reports/" + id,
+        const bool correction = r["correction"].toObject()["state"] == "editing";
+        syncRequest(correction ? "POST" : "PUT", "/api/reports/" + id + (correction ? "/correction/commit" : ""),
                     compact({{"charger_id", r["charger_id"]},
                              {"base_revision", r["revision"]},
                              {"checklist_version", r["template"].toObject()["version"]},
+                             {"frozen_history", !correction && r["template"].toObject()["version"].toInt() == 6},
                              {"load_test_connectors", r["template"].toObject()["load_test_connectors"]},
                              {"status", "closed"},
                              {"payload", r["payload"]}}),
@@ -629,9 +755,17 @@ void Lem::syncPhotos(QStringList ids, int index, QJsonObject r, int photoIndex) 
                             syncFailed(0, "Resposta inválida ao concluir.");
                             return;
                         }
-                        r["revision"] = saved["revision"];
+                        for (const auto &key : {"revision", "snapshot", "template", "started", "finished", "updated"})
+                            if (saved.contains(key)) r[key] = saved[key];
+                        if (saved.contains("station_update")) r["station_update"] = saved["station_update"];
+                        if (saved["correction"].toObject()["state"] == "committed")
+                            for (const auto &key : {"owner_id", "technician", "correction"}) r[key] = saved[key];
                         if (mergeSync(r, true))
+                        {
+                            if (saved["correction"].toObject()["state"] == "committed")
+                                receiveReplacement(saved["correction"].toObject()["source_id"].toString(), r["id"].toString());
                             syncNext(ids, index + 1);
+                        }
                     });
     } else if (mergeSync(r, true))
         syncNext(ids, index + 1);
@@ -655,7 +789,9 @@ void Lem::refreshCatalogue(QString id, bool force) {
             for (auto row : rows)
                 for (auto removed : row.toObject()["deleted_reports"].toArray())
                     if (m_reports.contains(removed.toString()))
-                        if (!forgetReport(removed.toString())) {
+                        if (!(row.toObject()["report_replacements"].toObject().contains(removed.toString()) ?
+                              receiveReplacement(removed.toString(), row.toObject()["report_replacements"].toObject()[removed.toString()].toString()) :
+                              forgetReport(removed.toString()))) {
                             m_catalogueLoading = false;
                             m_refreshing = false;
                             emit changed();
@@ -665,12 +801,16 @@ void Lem::refreshCatalogue(QString id, bool force) {
             m_catalogueTimes[id] = double(QDateTime::currentSecsSinceEpoch());
             if (m_contract == id)
                 m_chargers = rows;
+            applyContractPresentations();
             m_catalogueLoading = false;
             m_refreshing = false;
             persist();
             status("Catálogo atualizado. Pode trabalhar sem rede.");
             if (m_contract != id)
                 refreshCatalogue(m_contract);
+            else if (!m_current.isEmpty() && !m_current["dirty"].toBool() &&
+                     m_current["revision"].toInt() > 0 && !m_syncing)
+                refreshReport();
             scheduleSync(1500);
         },
         "application/json",
@@ -686,7 +826,7 @@ void Lem::refreshCatalogue(QString id, bool force) {
 
 // Explicit refresh never replaces dirty local work. Conflicts have a separate preview/copy flow.
 void Lem::refreshReport() {
-    if (m_busy || m_current.isEmpty() || !online())
+    if (m_busy || !m_qveCopyTarget.isEmpty() || attachingFiles() || m_current.isEmpty() || !online())
         return;
     if (m_current["dirty"].toBool()) {
         status("Este report tem alterações locais. Envie-as antes de atualizar do servidor.");
@@ -710,8 +850,9 @@ void Lem::refreshReport() {
         [this, id](int code, QString message) {
             m_busy = false;
             if (code == 410) {
-                if (forgetReport(id))
-                    status("Report apagado no servidor; cópia local removida.");
+                const auto replacement = QJsonDocument::fromJson(message.toUtf8()).object()["detail"].toObject()["replacement_id"].toString();
+                if (!replacement.isEmpty() ? receiveReplacement(id, replacement) : forgetReport(id))
+                    status(replacement.isEmpty() ? "Report apagado no servidor; cópia local removida." : "Report substituído por uma correção do administrador.");
             } else
                 status("Não foi possível atualizar: " + message);
         });
@@ -741,6 +882,15 @@ QVariantMap Lem::photoDownloadSummary() const {
             {"bytes", bytes},
             {"unknown", unknown},
             {"unavailable", unavailable}};
+}
+
+bool Lem::currentReportDownloadingPhotos() const {
+    const auto id = m_current["id"].toString();
+    if (id.isEmpty()) return false;
+    if (m_photoBatchReport == id) return true;
+    for (const auto &entry : m_current["photos"].toArray())
+        if (m_downloads.contains(entry.toObject()["id"].toString())) return true;
+    return false;
 }
 
 // Pin the report for offline use and queue only missing acknowledged photographs.
@@ -789,6 +939,7 @@ void Lem::downloadReportPhotos() {
     m_photoBatchTotal = m_photoBatchQueue.size();
     m_photoBatchDone = 0;
     m_photoBatchFailures = 0;
+    m_photoBatchLastError.clear();
     m_photoBatchStopped = false;
     pumpPhotoBatch();
 }
@@ -823,11 +974,11 @@ void Lem::releaseReportPhotos() {
         "Report incluído novamente na limpeza automática de cópias locais. Rascunhos e envios pendentes continuam protegidos.");
 }
 
-// Share the two-request limit with individual image downloads; do not bypass m_downloads.
+// Share a bounded four-request limit with individual evidence downloads.
 void Lem::pumpPhotoBatch() {
     if (!downloadingPhotos())
         return;
-    while (!m_photoBatchStopped && !m_photoBatchQueue.isEmpty() && m_downloads.size() < 2) {
+    while (!m_photoBatchStopped && !m_photoBatchQueue.isEmpty() && m_downloads.size() < NetworkSecurity::EvidenceConcurrency) {
         const auto id = m_photoBatchQueue.takeFirst();
         if (!m_photoBatchPending.contains(id) || m_downloads.contains(id))
             continue;
@@ -839,6 +990,7 @@ void Lem::pumpPhotoBatch() {
                                  .toObject()["external_id"]
                                  .toString(m_photoBatchReport.left(8));
     if (m_photoBatchPending.isEmpty()) {
+        const bool saved = persist(); // Final checkpoint includes every completed file.
         bool complete = true;
         for (auto value : m_reports.value(m_photoBatchReport).toObject()["photos"].toArray())
             if (QFileInfo(localPath(QUrl(value.toObject()["path"].toString()))).size() <= 0)
@@ -849,7 +1001,10 @@ void Lem::pumpPhotoBatch() {
                       QString::number(m_photoBatchTotal) + ". Pode repetir para obter as restantes."
                 : "Todas as fotografias descarregadas; report mantido offline.";
         m_photoBatchState += " · " + reportLabel;
+        if (!complete && !m_photoBatchLastError.isEmpty()) m_photoBatchState += " · " + m_photoBatchLastError;
+        if (!saved) m_photoBatchState += " · Não foi possível guardar o catálogo local.";
         m_photoBatchReport.clear();
+        cleanPhotoCache();
         status(m_photoBatchState);
         return;
     }
@@ -867,10 +1022,8 @@ void Lem::photoDownloadFinished(QString reportId, QString photoId, bool success)
             ++m_photoBatchDone;
         else {
             ++m_photoBatchFailures;
-            m_photoBatchStopped = true;
-            for (const auto &id : m_photoBatchQueue)
-                m_photoBatchPending.remove(id);
-            m_photoBatchQueue.clear();
+            m_photoBatchLastError = m_message;
+            // A permanently failed item must not discard the rest of the queue.
         }
     }
     // Queue advancement is deferred so error callbacks cannot recurse through an entire batch.
@@ -904,23 +1057,26 @@ void Lem::fetchPhotoForReport(QString reportId, QString photoId) {
         photoDownloadFinished(reportId, photoId, false);
         return;
     }
-    if (m_downloads.size() >= 2) {
-        status("Já existem duas fotografias a descarregar. Aguarde antes de pedir outra.");
+    if (m_downloads.size() >= NetworkSecurity::EvidenceConcurrency) {
+        status("Já existem quatro evidências a descarregar. Aguarde antes de pedir outra.");
         return;
     }
     const QString path = SafeStorage::photoPath(cacheDir(), photoId, photo["mime"].toString());
     QDir().mkpath(cacheDir() + "/photos");
     m_downloads.insert(photoId);
     emit changed();
-    request(
-        "GET", "/api/reports/" + reportId + "/photos/" + photoId, {},
-        [this, photoId, reportId, path, photo](QByteArray bytes) {
+    requestPhoto(
+        "/api/reports/" + reportId + "/photos/" + photoId, path,
+        (photo["mime"].toString().startsWith("video/") ? 60LL : 20LL) * 1024 * 1024,
+        [this, photoId, reportId, path, photo](QSharedPointer<NetworkSecurity::FileBody> body) {
             m_downloads.remove(photoId);
-            if (bytes.size() > (photo["mime"].toString().startsWith("video/") ? 60 : 20) * 1024 * 1024 ||
-                (!photo["digest"].toString().isEmpty() &&
-                 QString::fromLatin1(
-                     QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex()) !=
-                     photo["digest"].toString())) {
+            if (body->writeFailed) {
+                status("Não foi possível guardar a fotografia.");
+                photoDownloadFinished(reportId, photoId, false);
+                return;
+            }
+            if (body->received <= 0 || (photo["size"].toDouble() > 0 && body->received != qint64(photo["size"].toDouble())) ||
+                !body->matches(photo["digest"].toString())) {
                 status("Fotografia inválida; tente descarregar novamente.");
                 photoDownloadFinished(reportId, photoId, false);
                 return;
@@ -935,9 +1091,7 @@ void Lem::fetchPhotoForReport(QString reportId, QString photoId) {
                 photoDownloadFinished(reportId, photoId, false);
                 return;
             }
-            QSaveFile file(path);
-            if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() ||
-                !file.commit()) {
+            if (!body->commit()) {
                 status("Não foi possível guardar a fotografia.");
                 photoDownloadFinished(reportId, photoId, false);
                 return;
@@ -950,7 +1104,9 @@ void Lem::fetchPhotoForReport(QString reportId, QString photoId) {
             m_reports[reportId] = report;
             if (m_current.value("id").toString() == reportId)
                 m_current = report;
-            if (!persist()) {
+            // Avoid rewriting the entire catalogue for every file in a large batch.
+            // Files are already atomic; checkpoint each eight successes and at finish.
+            if ((m_photoBatchReport != reportId || (m_photoBatchDone + 1) % 8 == 0) && !persist()) {
                 photoDownloadFinished(reportId, photoId, false);
                 return;
             }
@@ -959,11 +1115,14 @@ void Lem::fetchPhotoForReport(QString reportId, QString photoId) {
                 status("Fotografia disponível no dispositivo.");
             photoDownloadFinished(reportId, photoId, true);
         },
-        "application/json",
-        [this, photoId, reportId](int, QString) {
+        [this, photoId, reportId](int code, QString detail) {
             m_downloads.remove(photoId);
-            status("Sem ligação para descarregar a fotografia. O report continua disponível.");
+            if (code == 401 || code == 403 || code == 423 || code == 426) cancelReportPhotoDownloads();
+            status("Não foi possível descarregar a evidência: " + detail);
             photoDownloadFinished(reportId, photoId, false);
+        }, photo["digest"].toString(), {}, 0,
+        [this, reportId, batch = m_photoBatchReport == reportId] {
+            return !batch || (m_photoBatchReport == reportId && !m_photoBatchStopped);
         });
 }
 
@@ -1051,7 +1210,7 @@ void Lem::clearLocalCopies() {
 // Automatic image eviction: oldest eligible images first, using a 256 MiB budget/7-day age.
 // Dirty, draft, active and explicitly pinned reports are excluded from automatic eviction.
 void Lem::cleanPhotoCache() {
-    if (m_localReadError || m_user.isEmpty() || !m_qveCopyTarget.isEmpty() || attachingFiles() || m_syncing || !m_downloads.isEmpty())
+    if (m_localReadError || m_user.isEmpty() || !m_qveCopyTarget.isEmpty() || attachingFiles() || m_syncing || !m_downloads.isEmpty() || downloadingPhotos())
         return;
     constexpr qint64 budget = 256LL * 1024 * 1024, age = 7 * 24 * 60 * 60;
     const auto now = QDateTime::currentSecsSinceEpoch();
@@ -1116,7 +1275,7 @@ void Lem::cleanPhotoCache() {
 // Store the server response under _conflict_remote for a read-only comparison.
 // The original local payload, photo queue and ownership stay intact.
 void Lem::viewServerReport() {
-    if (switchingBlocked() || m_current.isEmpty() || !online())
+    if (reportActionBlocked() || m_current.isEmpty() || !online())
         return;
     const auto id = m_current.value("id").toString();
     m_busy = true;
@@ -1140,7 +1299,7 @@ void Lem::viewServerReport() {
 
 // Ask the server for users eligible for this report, rather than trusting a local user list.
 void Lem::loadReportOwners() {
-    if (switchingBlocked() || m_current.isEmpty() || m_user["role"].toString() != "admin" ||
+    if (reportActionBlocked() || m_current.isEmpty() || m_user["role"].toString() != "admin" ||
         !online())
         return;
     const auto id = m_current.value("id").toString();
@@ -1156,7 +1315,7 @@ void Lem::loadReportOwners() {
 
 // Require a clean server-backed draft and submit the exact revision being transferred.
 void Lem::transferReport(QString ownerId) {
-    if (switchingBlocked() || m_current.isEmpty() || m_user["role"].toString() != "admin" ||
+    if (reportActionBlocked() || m_current.isEmpty() || m_user["role"].toString() != "admin" ||
         m_current["status"].toString() != "draft" || !online())
         return;
     if (m_current["dirty"].toBool() || m_current["_conflict"].toBool()) {
@@ -1188,7 +1347,7 @@ void Lem::transferReport(QString ownerId) {
 // Copy files off the UI thread, assign fresh report/photo UUIDs, then checkpoint both
 // the new report and the original report reference; roll back memory/files on failure.
 void Lem::copyLocalReport() {
-    if (switchingBlocked() || m_current.isEmpty() || m_user.isEmpty())
+    if (reportActionBlocked() || m_current.isEmpty() || m_user.isEmpty())
         return;
     const auto source = m_current;
     const auto sourceId = source.value("id").toString();
@@ -1213,11 +1372,17 @@ void Lem::copyLocalReport() {
     copy.remove("last_sync");
     copy.remove("updated");
     copy.remove("deleted_photos");
+    copy.remove("correction");
     copy["id"] = id;
     copy["owner_id"] = m_user["id"];
     copy["technician"] = m_user["name"];
     copy["revision"] = 0;
     copy["status"] = "draft";
+    // The marker belongs to the old UUID's unfinished historical upload, never
+    // to a new independent draft created to preserve work after a conflict.
+    auto copySchema = copy["template"].toObject();
+    copySchema.remove("frozen_upload");
+    copy["template"] = copySchema;
     copy["dirty"] = true;
     copy["started"] = date;
     copy["last_access"] = double(QDateTime::currentSecsSinceEpoch());
@@ -1227,10 +1392,11 @@ void Lem::copyLocalReport() {
     payload["source_report_id"] = sourceId;
     copy["payload"] = payload;
     copy = Checklist::correctedDraft(copy);
+    payload = copy["payload"].toObject();
     QJsonArray photos;
     QJsonObject copiedPhotoIds;
     QList<QPair<QString, QString>> files;
-    for (auto value : source["photos"].toArray()) {
+    for (auto value : copy["photos"].toArray()) {
         auto p = value.toObject();
         const auto pid = QUuid::createUuid().toString(QUuid::WithoutBraces);
         auto mime = p["mime"].toString();
@@ -1247,24 +1413,29 @@ void Lem::copyLocalReport() {
         p.remove("digest");
         photos.append(p);
     }
-    auto signatures = payload["signatures"].toObject();
-    for (const auto &key : signatures.keys()) {
-        auto signature = signatures[key].toObject();
-        const auto oldId = signature["photo_id"].toString();
-        bool validSource = false;
-        for (auto value : source["photos"].toArray()) {
-            const auto photo = value.toObject();
-            if (photo["id"] == oldId && photo["checkpoint"] == key && photo["mime"] == "image/png")
-                validSource = true;
+    for (const auto &field : {"signatures", "legacy_signatures"}) {
+        auto signatures = payload.value(field).toObject();
+        for (const auto &key : signatures.keys()) {
+            auto signature = signatures[key].toObject();
+            const auto oldId = signature["photo_id"].toString();
+            bool validSource = false;
+            for (auto value : source["photos"].toArray()) {
+                const auto photo = value.toObject();
+                // Historical signatures moved to ANT checkpoints during migration;
+                // their old question key no longer identifies the evidence group.
+                if (photo["id"] == oldId && photo["mime"] == "image/png" &&
+                    (QString(field) == "legacy_signatures" || photo["checkpoint"] == key))
+                    validSource = true;
+            }
+            if (!validSource || !copiedPhotoIds.contains(oldId)) {
+                status("A assinatura referencia uma fotografia em falta ou inválida. A cópia não foi criada; o original foi conservado.");
+                return;
+            }
+            signature["photo_id"] = copiedPhotoIds[oldId];
+            signatures[key] = signature;
         }
-        if (!validSource || !copiedPhotoIds.contains(oldId)) {
-            status("A assinatura referencia uma fotografia em falta ou inválida. A cópia não foi criada; o original foi conservado.");
-            return;
-        }
-        signature["photo_id"] = copiedPhotoIds[oldId];
-        signatures[key] = signature;
+        if (payload.contains(field)) payload[field] = signatures;
     }
-    if (payload.contains("signatures")) payload["signatures"] = signatures;
     copy["payload"] = payload;
     copy["photos"] = photos;
     m_busy = true;
@@ -1314,7 +1485,7 @@ void Lem::copyLocalReport() {
 // Replace the local view only after checking an independent, complete, unedited backup.
 // Fetch the current server version again instead of trusting an older comparison snapshot.
 void Lem::useServerReport() {
-    if (switchingBlocked() || m_current.isEmpty() || !online())
+    if (reportActionBlocked() || m_current.isEmpty() || !online())
         return;
     const auto copyId = m_current["_conflict_copy_id"].toString();
     if (copyId.isEmpty() || !m_reports.contains(copyId)) {

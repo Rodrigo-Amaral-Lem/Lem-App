@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -122,7 +123,7 @@ get_target_property(opts Lem LINK_OPTIONS)
 get_target_property(crt Lem MSVC_RUNTIME_LIBRARY)
 file(WRITE "${{CMAKE_BINARY_DIR}}/properties.txt" "${{opts}};${{crt}}")
 ''')
-            result = subprocess.run(["cmake", "-S", str(root), "-B", str(root/"build")], capture_output=True, text=True)
+            result = subprocess.run(["cmake", "-S", str(root), "-B", str(root/"build"), f"-DPython3_EXECUTABLE={sys.executable}"], capture_output=True, text=True)
             props = root/"build/properties.txt"
             return result.returncode, result.stdout+result.stderr, props.read_text() if props.exists() else ""
 

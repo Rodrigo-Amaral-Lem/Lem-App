@@ -12,6 +12,7 @@
 #include <QJsonDocument>
 #include <QDebug>
 #include "Lem.h"
+#include "TestSignature.h"
 static bool wait(Lem &lem, int timeout = 15000) {
     QEventLoop loop;
     QTimer timer, poll;
@@ -101,15 +102,16 @@ int main(int argc, char **argv) {
     for (auto sv : afterRemoval.sections())
         for (auto iv : sv.toMap().value("items").toList())
             afterRemoval.answer(iv.toMap().value("id").toString(), "NA", "Sem conector/veículo disponível");
+    CHECK(addTestSignature(afterRemoval));
     afterRemoval.answer("EST.01", "OK", "");
     afterRemoval.finish();
     CHECK(afterRemoval.current().value("status").toString() == "draft");
     CHECK(afterRemoval.message().contains("fotografia"));
-    afterRemoval.answer("EST.01", "NA", "");
-    afterRemoval.attach("MAN.12", QUrl::fromLocalFile(photo));
+    afterRemoval.answer("EST.01", "NA", "Sem intervenção neste ponto");
     auto closedPhoto =
         afterRemoval.current().value("photos").toList().first().toMap().value("id").toString();
     afterRemoval.finish();
+    if (afterRemoval.current().value("status").toString() != "closed") qWarning() << afterRemoval.message();
     CHECK(afterRemoval.current().value("status").toString() == "closed");
     afterRemoval.removePhoto(closedPhoto);
     CHECK(afterRemoval.current().value("photos").toList().size() == 1);
@@ -162,6 +164,7 @@ int main(int argc, char **argv) {
     CHECK(net.current().value("deleted_photos").toList().isEmpty());
     CHECK(net.current().value("revision").toInt() == 2);
     net.attach("SITE.02", QUrl::fromLocalFile(photo));
+    CHECK(addTestSignature(net));
     net.finish();
     CHECK(wait(net));
     CHECK(net.current().value("status").toString() == "closed");
@@ -178,7 +181,7 @@ int main(int argc, char **argv) {
     other.openReport("", rid);
     CHECK(wait(other));
     CHECK(other.current().value("status").toString() == "closed");
-    CHECK(other.current().value("photos").toList().size() == 1);
+    CHECK(other.current().value("photos").toList().size() == 2);
     auto photoId = other.current().value("photos").toList().first().toMap().value("id").toString();
     CHECK(other.current()
               .value("photos")

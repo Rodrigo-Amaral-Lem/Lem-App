@@ -4,15 +4,17 @@
 .pragma library
 
 function canonical(id) { return /^MAN\.\d{2}$/.test(id) ? "PC02." + ("0" + (Number(id.slice(4)) + 1)).slice(-2) : id; }
-function digits(id) { id = canonical(id); return id === "PC02.19" ? 5 : /^PC02\.(0[5-9]|10|11)$/.test(id) ? 3 : 0; }
-function unit(id) { return digits(id) === 5 ? "Ω" : digits(id) ? "V" : ""; }
+function milliamp(id) { return id === "MAN.11" || id === "MAN.12"; }
+function decimals(id) { return milliamp(id) ? "" : "(?:[.,][0-9]{1,2})?"; }
+function digits(id) { if (milliamp(id)) return 6; id = canonical(id); return id === "PC02.19" ? 5 : /^PC02\.(0[5-9]|10|11)$/.test(id) ? 3 : 0; }
+function unit(id) { return milliamp(id) ? "mA" : digits(id) === 5 ? "Ω" : digits(id) ? "V" : ""; }
 function notApplicable(value) {
     const text = String(value || "").trim().replace(/\s+/g, " ").toUpperCase().replace(/Ã/g, "A").replace(/Á/g, "A");
     return text === "NA" || text === "N/A" || text === "NAO APLICAVEL";
 }
 function pattern(id) {
     if (!digits(id)) return /[\s\S]*/;
-    return new RegExp("(?:[0-9]{1," + digits(id) + "}(?:[.,][0-9]{1,2})?(?:\\s*" + unit(id) + ")?|NA|N/A|N[ãa]o Aplic[áa]vel)", "i");
+    return new RegExp("(?:[0-9]{1," + digits(id) + "}" + decimals(id) + "(?:\\s*" + unit(id) + ")?|NA|N/A|N[ãa]o Aplic[áa]vel)", "i");
 }
 // Keep units and the NA marker out of the editable text. They are presentation,
 // while the stored answer retains the canonical value for sync and PDF export.
@@ -22,14 +24,14 @@ function editorText(id, value) {
     return String(value || "").replace(new RegExp("\\s*" + unit(id) + "$", "i"), "");
 }
 function editorPattern(id) {
-    return digits(id) ? new RegExp("[0-9]{1," + digits(id) + "}(?:[.,][0-9]{1,2})?") : /[\s\S]*/;
+    return digits(id) ? new RegExp("[0-9]{1," + digits(id) + "}" + decimals(id) + "") : /[\s\S]*/;
 }
 function format(id, value) {
     const text = String(value || "").trim();
     if (id === "MAN.18" && /^(OK|NOK)$/i.test(text)) return text.toUpperCase();
     if (!digits(id)) return text;
     if (notApplicable(text)) return "Não Aplicável";
-    const match = new RegExp("^([0-9]{1," + digits(id) + "}(?:[.,][0-9]{1,2})?)(?:\\s*" + unit(id) + ")?$", "i").exec(text);
+    const match = new RegExp("^([0-9]{1," + digits(id) + "}" + decimals(id) + ")(?:\\s*" + unit(id) + ")?$", "i").exec(text);
     return match ? match[1].replace(".", ",") + " " + unit(id) : null;
 }
 function outside(id, value) {

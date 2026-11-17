@@ -8,9 +8,15 @@
 #include <QStringList>
 #include <QRegularExpression>
 #include <QMap>
+#include "MaintenanceMigration.h"
 
 // Correct the six voltage labels for display/export without rewriting frozen reports.
 namespace Checklist {
+// Display-only wording for imported/frozen metadata; never rewrite user answers.
+inline QString connectorText(QString value) {
+    return value.replace(QRegularExpression("\\bMennekes\\s+(?:Type|Tipo)\\s*2\\b",
+                         QRegularExpression::CaseInsensitiveOption), "AC Type 2");
+}
 // Legacy closure read missing optional answers through operator[], inserting null.
 // Remove only those placeholders; retain real answers and every required field.
 inline QJsonObject withoutNullOptionalAnswers(QJsonObject report) {
@@ -43,17 +49,23 @@ inline QString naNotesDefault(const QJsonObject &schema, const QString &key) {
 // Normalize current v6 draft fields/order and optional notes; never reinterpret closed history.
 inline QJsonObject correctedDraft(QJsonObject report) {
     auto schema = report["template"].toObject();
-    if (report["status"] != "draft" || schema["version"].toInt() != 6) return report;
-    // Preserve text entered before FIN.03 became a general-notes field.
-    auto payload = report["payload"].toObject();
-    auto answers = payload["answers"].toObject();
-    auto finalNotes = answers["FIN.03"].toObject();
-    const auto previousText = finalNotes["value"].toString();
-    if (!previousText.isEmpty()) {
-        const auto notes = finalNotes["notes"].toString();
-        finalNotes["notes"] = notes.isEmpty() || notes == previousText ? previousText : previousText + "\n" + notes;
-        finalNotes["value"] = "";
-        answers["FIN.03"] = finalNotes; payload["answers"] = answers; report["payload"] = payload;
+    if (report["status"] != "draft" || schema.value("frozen_upload").toBool() || (schema["version"].toInt() != 6 && schema["version"].toInt() != 7)) return report;
+    // A lost-ACK comparison must use exactly the same projection as the visible
+    // draft and server GET. Repair both payloads, including saved v7 drafts.
+    for (const auto &payloadKey : {"payload", "_inflight_payload"}) {
+        if (!report.value(payloadKey).isObject()) continue;
+        auto payload = report.value(payloadKey).toObject();
+        auto answers = payload["answers"].toObject();
+        auto finalNotes = answers.value("FIN.03").toObject();
+        const auto previousText = finalNotes.value("value").toString();
+        if (!previousText.isEmpty()) {
+            const auto notes = finalNotes["notes"].toString();
+            finalNotes["notes"] = notes.isEmpty() || notes == previousText ? previousText : previousText + "\n" + notes;
+            finalNotes["value"] = "";
+            answers["FIN.03"] = finalNotes;
+            payload["answers"] = answers;
+            report[payloadKey] = payload;
+        }
     }
     auto sections = schema["sections"].toArray();
     for (int s = 0; s < sections.size(); ++s) {
@@ -61,7 +73,16 @@ inline QJsonObject correctedDraft(QJsonObject report) {
         for (int i = 0; i < items.size(); ++i) {
             auto item = items[i].toObject(); const auto id = item["id"].toString();
             if (id == "MAN.12" || id == "MAN.18") item["reading_required"] = true;
+            // Saved v7 drafts may still contain the removed earth-criterion hint.
+            if (id == "MAN.18") item.remove("help");
             if (id == "MAN.12") { item["photo_required"] = true; item["photo_always"] = false; }
+            // Current drafts require proof of the isolation/earth measurements.
+            // N/A exempts media but requires the technician's explanation.
+            if (id >= "MAN.14" && id <= "MAN.18") {
+                item["photo_required"] = true;
+                item["photo_always"] = false;
+                item["na_notes_required"] = true;
+            }
             if (id == "SEG.01") item["na_notes_required"] = true;
             if (id == "MAN.02") { item["kind"] = "status"; item["na_notes_required"] = false; }
             if (id == "MAN.19") item["kind"] = "status";
@@ -176,7 +197,7 @@ inline QJsonObject correctedDraft(QJsonObject report) {
         }
         if (section["id"] == "QVE" || section["id"] == "MAN") {
             const bool qve = section["id"] == "QVE";
-            const QString key = qve ? "QVE.14" : "MAN.21";
+            const QString key = qve ? "QVE.14" : schema["version"].toInt() >= 7 ? "MAN.22" : "MAN.21";
             bool found = false; for (auto i : items) if (i.toObject()["id"] == key) found = true;
             if (!found) items.append(QJsonObject{{"id",key},{"label",qve ? QStringLiteral("QVE - Observações gerais") : QStringLiteral("Observações gerais da manutenção")},
                 {"kind","notes"},{"photo_required",false},{"optional",true}});
@@ -188,7 +209,8 @@ inline QJsonObject correctedDraft(QJsonObject report) {
     for (const auto &id : order) for (auto section : sections) if (section.toObject()["id"] == id) ordered.append(section);
     for (auto section : sections) if (!order.contains(section.toObject()["id"].toString())) ordered.append(section);
     sections = ordered;
-    schema["sections"] = sections; report["template"] = schema; return report;
+    schema["sections"] = sections; report["template"] = schema;
+    return MaintenanceMigration::report(report);
 }
 
 // Canonical connector names and order are shared with server/app/checklist.py.
@@ -196,12 +218,14 @@ inline QJsonObject correctedDraft(QJsonObject report) {
 inline QStringList connectorNames(QJsonValue value, QString *error) {
     QStringList result;
     const QMap<QString, QString> aliases = {{"AC", "AC (tipo não indicado)"},
-                                            {"T2", "Mennekes Type 2"},
-                                            {"TYPE2", "Mennekes Type 2"},
-                                            {"TIPO2", "Mennekes Type 2"},
-                                            {"MENNEKES", "Mennekes Type 2"},
-                                            {"MENNEKESTYPE2", "Mennekes Type 2"},
-                                            {"MENNEKESTIPO2", "Mennekes Type 2"},
+                                            {"T2", "AC Type 2"},
+                                            {"ACTYPE2", "AC Type 2"},
+                                            {"ACTIPO2", "AC Type 2"},
+                                            {"TYPE2", "AC Type 2"},
+                                            {"TIPO2", "AC Type 2"},
+                                            {"MENNEKES", "AC Type 2"},
+                                            {"MENNEKESTYPE2", "AC Type 2"},
+                                            {"MENNEKESTIPO2", "AC Type 2"},
                                             {"CCS", "CCS"},
                                             {"CCS2", "CCS2"},
                                             {"CCSTYPE2", "CCS2"},
@@ -277,12 +301,16 @@ inline QJsonObject forCharger(QJsonObject source, QJsonObject details, QString *
         const auto name = displayed[i];
         const auto suffix =
             names.count(name) > 1 ? " #" + QString::number(++seen[name]) : QString();
-        generated.append(QJsonObject{{"id", QString(prefix + ".01.%1").arg(i + 1, 2, 10, QChar('0'))},
-                                     {"label", "Teste de carga do conector " + name + suffix},
-                                     {"kind", "status"},
-                                     {"photo_required", prototype["photo_required"].toBool()},
-                                     {"na_notes_required", prototype["na_notes_required"].toBool()},
-                                     {"na_notes_default", prototype["na_notes_default"].toString()}});
+        // Expand identity/label only. An allowlist here silently discarded new
+        // form rules, such as photo_always or help, on each physical connector.
+        auto item = prototype;
+        item["id"] = QString(prefix + ".01.%1").arg(i + 1, 2, 10, QChar('0'));
+        item["label"] = "Teste de carga do conector " + name + suffix;
+        if (!item.contains("kind")) item["kind"] = "status";
+        if (!item.contains("photo_required")) item["photo_required"] = false;
+        if (!item.contains("na_notes_required")) item["na_notes_required"] = false;
+        if (!item.contains("na_notes_default")) item["na_notes_default"] = "";
+        generated.append(item);
     }
     auto sections = source["sections"].toArray();
     for (int i = 0; i < sections.size(); ++i) {
@@ -308,7 +336,7 @@ inline QString label(QJsonObject item) {
         value.replace("380-420 V", "360-440 V");
     if (id == "MAN.07" || id == "MAN.08" || id == "MAN.09" || id == "PC02.08" || id == "PC02.09" || id == "PC02.10")
         value.replace("200-250 V", "207-253 V");
-    return value;
+    return connectorText(value);
 }
 inline QJsonObject displayTemplate(QJsonObject source) {
     auto sections = source["sections"].toArray();

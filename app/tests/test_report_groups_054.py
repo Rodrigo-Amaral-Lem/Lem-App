@@ -23,6 +23,9 @@ def checks():
         assert qve_copy_calls==['other-report']
         js('selectSection(6)');QTest.qWait(30)
         lem.answer('FIN.02','Técnico de teste','')
+        values['syncing']=True;lem.changed.emit();QTest.qWait(30)
+        assert find_visual(w.contentItem(),'sign_FIN.02').isEnabled()
+        assert find_visual(w.contentItem(),'importSignature_FIN.02').isEnabled()
         trigger('sign_FIN.02');QTest.qWait(80)
         assert js('signatureDialog.visible')
         canvas=find_visual(w.contentItem(),'signatureCanvas')
@@ -40,6 +43,7 @@ def checks():
         dark=sum(image.pixelColor(x,y).lightness()<150 for y in range(image.height()) for x in range(image.width()))
         assert dark>30
         assert not js('signatureDialog.visible')
+        values['syncing']=False;lem.changed.emit()
         assert not errors, errors
         print('PASS: seven groups, QVE copy confirmation, FIN.02 signature PNG (mobile)')
         from shiboken6 import delete

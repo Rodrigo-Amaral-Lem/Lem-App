@@ -12,7 +12,10 @@ int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
     app.setOrganizationName("Lem-Compatibility-Test");
     app.setApplicationName("Lem-Compatibility-Test");
-    app.setApplicationVersion("0.1.32");
+    // The runner derives its policy scenarios from the current project version.
+    // A hard-coded historical version is rejected by the server's protocol floor.
+    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION"));
+    if (app.applicationVersion().isEmpty()) return 2;
     if (argc != 3)
         return 2;
     QTemporaryDir directory;

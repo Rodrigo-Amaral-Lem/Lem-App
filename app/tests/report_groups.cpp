@@ -16,7 +16,7 @@
 struct LemReviewTest {
     static bool run(Lem &c, const QString &root, const QString &pdfPath) {
         c.demo();
-        CHECK(c.m_template["version"].toInt() == 6);
+        CHECK(c.m_template["version"].toInt() == 7);
         const auto sourceId = c.m_current["id"].toString();
         c.answer("QVE.01", "OK", "Botoneira comum");
         c.answer("QVE.02", "NOK", "Substituir contacto");

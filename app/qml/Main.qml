@@ -152,7 +152,10 @@ ApplicationWindow {
         loginDialog.open();
     }
     property bool splashActive: true
+    readonly property var reportBrandCatalogue: lem.reportBrands()
     property url logoSource: "qrc:/branding/lem-logo.png"
+    // Same visible bounds as shared/branding/lem-logo-tight.svg.
+    readonly property rect logoBounds: Qt.rect(247, 171, 764, 890)
     // One random draw per process: mutually exclusive 5% / 5% / 1% / 89%.
     // Keep the draw separate so boundary cases can be exercised deterministically.
     property real startupDraw: Math.random()
@@ -195,9 +198,12 @@ ApplicationWindow {
         Image {
             id: startupLogo
             objectName: "startupLogo"
-            anchors.fill: parent
+            anchors.centerIn: parent
+            width: parent.width * 0.8
+            height: parent.height * 0.8
             visible: !win.startupUsesAnimation
             source: visible ? win.logoSource : ""
+            sourceClipRect: win.logoBounds
             fillMode: Image.PreserveAspectFit
             asynchronous: false
             cache: true
@@ -307,6 +313,7 @@ ApplicationWindow {
     // Photo delegates depend only on photo changes, never answer/status notifications.
     property var reportPhotos: lem.photosByCheckpoint
     property bool networkActivity: lem.busy || lem.syncing || lem.refreshing || lem.downloadingPhotos
+    property bool reportNetworkActivity: lem.busy || lem.syncing || lem.refreshing || !!lem.currentReportDownloadingPhotos
 
     property bool compact: width <= 640 || (androidCamera && height <= 480)
     property real touchHeight: (androidCamera || compact) ? 48 : 44
@@ -645,9 +652,25 @@ ApplicationWindow {
             } else if (kind === "video") {
                 c.strokeRect(width*.08, height*.22, width*.57, height*.56);
                 c.beginPath(); c.moveTo(width*.65,height*.35); c.lineTo(width*.95,height*.18); c.lineTo(width*.95,height*.82); c.lineTo(width*.65,height*.65); c.stroke();
+            } else if (kind === "photoEdit") {
+                // Photograph frame plus pencil: this action edits more than crop.
+                c.beginPath();
+                c.moveTo(width*.43,height*.86); c.lineTo(width*.1,height*.86);
+                c.lineTo(width*.1,height*.14); c.lineTo(width*.85,height*.14);
+                c.lineTo(width*.85,height*.39); c.stroke();
+                c.beginPath(); c.arc(width*.31,height*.34,width*.065,0,Math.PI*2); c.stroke();
+                c.beginPath(); c.moveTo(width*.16,height*.72); c.lineTo(width*.38,height*.5);
+                c.lineTo(width*.51,height*.63); c.stroke();
+                c.beginPath(); c.moveTo(width*.49,height*.91); c.lineTo(width*.54,height*.7);
+                c.lineTo(width*.84,height*.4); c.lineTo(width*.97,height*.53);
+                c.lineTo(width*.67,height*.83); c.closePath(); c.stroke();
+                c.beginPath(); c.moveTo(width*.78,height*.46); c.lineTo(width*.91,height*.59); c.stroke();
             } else if (kind === "crop") {
                 c.beginPath(); c.moveTo(width*.28,height*.05); c.lineTo(width*.28,height*.75); c.lineTo(width*.95,height*.75);
                 c.moveTo(width*.05,height*.28); c.lineTo(width*.75,height*.28); c.lineTo(width*.75,height*.95); c.stroke();
+            } else if (kind === "rotate") {
+                c.beginPath(); c.arc(width*.5,height*.55,width*.32,0,Math.PI*1.7); c.stroke();
+                c.beginPath(); c.moveTo(width*.65,height*.08); c.lineTo(width*.78,height*.3); c.lineTo(width*.52,height*.3); c.stroke();
             } else if (kind === "gallery") {
                 c.strokeRect(width * .2, height * .15, width * .68, height * .65);
                 c.beginPath();
@@ -755,6 +778,8 @@ ApplicationWindow {
         }
     }
     component UiLabel: Base.Label {
+        // UI values are literal text, including names and notes supplied by users.
+        textFormat: Text.PlainText
         color: enabled ? win.ink : win.mutedInk
     }
     component UiButton: Base.Button {
@@ -1003,7 +1028,8 @@ ApplicationWindow {
             } else if (value !== null && value !== undefined)
                 parts.push(String(value));
         }
-        return parts.join("\n").toLowerCase().includes(needle);
+        // Search new terminology even in a catalogue cached by an older app.
+        return lem.connectorText(parts.join("\n")).toLowerCase().includes(lem.connectorText(needle).toLowerCase());
     }
     function refreshCatalog(restore) {
         if (page !== "catalog" || openingCatalogReport)
@@ -1128,16 +1154,15 @@ ApplicationWindow {
             return itemIssues(item).length > 0;
         }).length;
     }
-    function totalAnswered() {
-        return lem.sections.reduce(function (n, s) {
+    // Shared bindings avoid traversing the checklist for each progress label.
+    readonly property int answeredItemCount: lem.sections.reduce(function (n, s) {
             return n + sectionAnswered(s);
-        }, 0);
-    }
-    function totalItems() {
-        return lem.sections.reduce(function (n, s) {
+        }, 0)
+    readonly property int checklistItemCount: lem.sections.reduce(function (n, s) {
             return n + s.items.length;
-        }, 0);
-    }
+        }, 0)
+    function totalAnswered() { return answeredItemCount; }
+    function totalItems() { return checklistItemCount; }
     function jumpTo(section, id) {
         Qt.inputMethod.hide();
         reportScroll.cancelFlick();
@@ -1221,7 +1246,9 @@ ApplicationWindow {
     property string exportKind: "pdf"
     property bool canDeleteReport: !!win.reportData.id && (lem.user.role === "admin" || (win.reportData.status === "draft" && win.reportData.owner_id === lem.user.id))
     // Presentation guard for protected/closed/other-owned reports. Server checks are authoritative.
-    property bool editing: !win.reportData._conflict && win.reportData.id !== undefined && win.reportData.status !== "closed" && win.reportData.owner_id === lem.user.id
+    readonly property bool correctingReport: !!win.reportData.correction && win.reportData.correction.state === "editing"
+    readonly property bool correctionPermitted: !correctingReport || (!!lem.desktopCorrections && lem.user.role === "admin" && win.reportData.correction.editor_id === lem.user.id)
+    property bool editing: !(win.reportData.template || {}).frozen_upload && correctionPermitted && !win.reportData._conflict && win.reportData.id !== undefined && win.reportData.status !== "closed" && win.reportData.owner_id === lem.user.id
     property var fields: [
         {
             key: "external_id",
@@ -1292,8 +1319,8 @@ ApplicationWindow {
         const details = record.details || {};
         const source = details.source || {};
         if (Object.keys(source).length)
-            return Object.keys(source).filter(k => k !== "Station ID").map(k => ({label: k, value: String(source[k] === null ? "" : source[k])}));
-        return Object.keys(details).filter(k => k !== "source").map(k => ({label: (fields.find(f => f.key === k) || {}).label || k, value: String(details[k] === null ? "" : details[k])}));
+            return Object.keys(source).filter(k => k !== "Station ID").map(k => ({label: k, value: lem.connectorText(String(source[k] === null ? "" : source[k]))}));
+        return Object.keys(details).filter(k => k !== "source").map(k => ({label: (fields.find(f => f.key === k) || {}).label || k, value: lem.connectorText(String(details[k] === null ? "" : details[k]))}));
     }
     // Resolve answers from the active report projection; do not persist delegate-local copies.
     function answerFor(id) {
@@ -1345,11 +1372,10 @@ ApplicationWindow {
                 Image {
                     objectName: "headerLogo"
                     source: win.logoSource
-                    Layout.preferredWidth: 44
+                    sourceClipRect: win.logoBounds
+                    Layout.preferredWidth: 44 * win.logoBounds.width / win.logoBounds.height
                     Layout.preferredHeight: 44
                     Layout.leftMargin: 4
-                    sourceSize.width: 96
-                    sourceSize.height: 96
                     fillMode: Image.PreserveAspectFit
                     Accessible.name: "Logótipo Lem"
                 }
@@ -1446,7 +1472,7 @@ ApplicationWindow {
                         Base.MenuItem {
                             implicitHeight: win.touchHeight
                             text: "Atualizar report do servidor"
-                            enabled: !win.networkActivity
+                            enabled: !win.reportNetworkActivity
                             onTriggered: lem.refreshReport()
                         }
                         Base.MenuItem {
@@ -1468,16 +1494,36 @@ ApplicationWindow {
                             text: "Permitir limpeza destas fotografias"
                             visible: !!win.reportData.offline_photos
                             height: visible ? implicitHeight : 0
-                            enabled: !lem.downloadingPhotos
+                            enabled: !lem.currentReportDownloadingPhotos
                             onTriggered: lem.releaseReportPhotos()
+                        }
+                        Base.MenuItem {
+                            objectName: "correctClosedReportAction"
+                            text: "Corrigir report fechado…"
+                            visible: !!lem.desktopCorrections && lem.user.role === "admin" && win.reportData.status === "closed" && !win.correctingReport
+                            height: visible ? implicitHeight : 0
+                            enabled: !win.reportNetworkActivity && lem.authenticated && !win.reportData.dirty && win.reportData.revision > 0
+                            onTriggered: beginCorrectionDialog.open()
+                        }
+                        Base.MenuItem {
+                            objectName: "correctionDatesAction"
+                            text: "Editar início e fim…"
+                            visible: win.correctingReport && win.editing
+                            height: visible ? implicitHeight : 0
+                            enabled: !lem.busy
+                            onTriggered: {
+                                correctionStart.text = (win.reportData.payload || {}).started || win.reportData.started || "";
+                                correctionEnd.text = (win.reportData.payload || {}).finished || win.reportData.finished || "";
+                                correctionDatesDialog.open();
+                            }
                         }
                         Base.MenuItem {
                             objectName: "transferReportAction"
                             implicitHeight: win.touchHeight
                             text: "Transferir propriedade"
-                            visible: lem.user.role === "admin" && win.reportData.status === "draft"
+                            visible: lem.user.role === "admin" && win.reportData.status === "draft" && !win.correctingReport
                             height: visible ? implicitHeight : 0
-                            enabled: !win.networkActivity && win.reportData.revision > 0 && !win.reportData.dirty && !win.reportData._conflict
+                            enabled: !win.reportNetworkActivity && win.reportData.revision > 0 && !win.reportData.dirty && !win.reportData._conflict
                             onTriggered: {
                                 transferDialog.reportId = lem.current.id;
                                 lem.loadReportOwners();
@@ -1487,7 +1533,7 @@ ApplicationWindow {
                         Base.MenuItem {
                             implicitHeight: win.touchHeight
                             text: "Criar rascunho como cópia"
-                            enabled: !!win.reportData.id && !win.networkActivity
+                            enabled: !!win.reportData.id && !win.reportNetworkActivity
                             onTriggered: copyReportDialog.open()
                         }
                         Base.MenuItem {
@@ -1503,12 +1549,13 @@ ApplicationWindow {
                         Base.MenuItem {
                             objectName: "deleteReportAction"
                             implicitHeight: win.touchHeight
-                            visible: win.canDeleteReport
+                            visible: win.canDeleteReport && win.correctionPermitted
                             height: visible ? implicitHeight : 0
-                            text: win.reportData.status === "closed" ? "Apagar report fechado…" : "Apagar rascunho…"
-                            enabled: !win.networkActivity
+                            text: win.correctingReport ? "Cancelar e apagar cópia de correção…" : win.reportData.status === "closed" ? "Apagar report fechado…" : "Apagar rascunho…"
+                            enabled: !win.reportNetworkActivity
                             onTriggered: {
                                 deleteReportDialog.reportId = lem.current.id;
+                                deleteReportDialog.reportIdentifier = lem.current.identifier || "";
                                 deleteReportDialog.closedReport = lem.current.status === "closed";
                                 deleteReportDialog.open();
                             }
@@ -2081,13 +2128,14 @@ ApplicationWindow {
             }
             UiButton {
                 objectName: "finishReportButton"
-                text: "Concluir report"
+                text: win.correctingReport ? "Guardar correção e substituir original…" : "Concluir report"
                 primary: true
                 visible: win.editing
                 enabled: !lem.busy && !lem.copyingGroup && !lem.attachingFiles && win.pendingItems().length === 0
                 Layout.fillWidth: true
                 onClicked: {
-                    lem.finish();
+                    if (win.correctingReport) saveCorrectionDialog.open();
+                    else lem.finish();
                     reviewDialog.close();
                 }
             }
@@ -2096,6 +2144,77 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 onClicked: reviewDialog.close()
             }
+        }
+    }
+    Dialog {
+        id: beginCorrectionDialog
+        objectName: "beginCorrectionDialog"
+        title: "Corrigir report fechado"
+        modal: true
+        width: Math.min(560, win.width - 32)
+        anchors.centerIn: parent
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: lem.beginReportCorrection()
+        contentItem: ColumnLayout {
+            UiLabel {
+                Layout.fillWidth: true
+                text: "Será criada uma cópia para editar respostas, observações, evidências e datas. O original continua disponível até guardar a correção completa. A correção conserva o proprietário original."
+                wrapMode: Text.Wrap
+            }
+        }
+    }
+    Dialog {
+        id: saveCorrectionDialog
+        objectName: "saveCorrectionDialog"
+        title: "Substituir o report original"
+        modal: true
+        width: Math.min(560, win.width - 32)
+        anchors.centerIn: parent
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: { if (win.correctingReport && win.editing) lem.finish(); }
+        contentItem: ColumnLayout {
+            UiLabel {
+                Layout.fillWidth: true
+                text: "Após a validação no servidor, esta correção substitui o original. Será usado um novo identificador interno; o nome do PDF/ZIP utiliza a data e hora de fim. Se a ligação falhar, o envio fica pendente e o original é conservado até confirmação."
+                wrapMode: Text.Wrap
+            }
+        }
+    }
+    Dialog {
+        id: correctionDatesDialog
+        objectName: "correctionDatesDialog"
+        title: "Data e hora da intervenção"
+        modal: true
+        width: Math.min(580, win.width - 32)
+        anchors.centerIn: parent
+        contentItem: ColumnLayout {
+            spacing: 12
+            UiLabel { text: "Início da intervenção"; Layout.fillWidth: true }
+            UiTextField {
+                id: correctionStart
+                objectName: "correctionStart"
+                Layout.fillWidth: true
+                placeholderText: "2026-11-16T09:30:00+00:00"
+            }
+            UiLabel { text: "Fim da intervenção"; Layout.fillWidth: true }
+            UiTextField {
+                id: correctionEnd
+                objectName: "correctionEnd"
+                Layout.fillWidth: true
+                placeholderText: "2026-11-16T11:00:00+00:00"
+            }
+            UiLabel {
+                text: "Formato: AAAA-MM-DDTHH:mm:ss+00:00. O fuso é +00:00 no inverno e +01:00 no verão em Portugal continental. Z significa +00:00. Alterar apenas o início mantém o nome do PDF/ZIP."
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            UiButton {
+                objectName: "saveCorrectionDates"
+                text: "Guardar datas"
+                Layout.fillWidth: true
+                onClicked: { if (lem.setCorrectionTimes(correctionStart.text, correctionEnd.text)) correctionDatesDialog.close(); }
+            }
+            UiButton { text: "Cancelar"; Layout.fillWidth: true; onClicked: correctionDatesDialog.close() }
         }
     }
     Dialog {
@@ -2131,7 +2250,7 @@ ApplicationWindow {
                         model: win.fields
                         UiLabel {
                             required property var modelData
-                            text: modelData.label + ": " + (win.reportData.snapshot ? (win.reportData.snapshot.charger[modelData.key] || "—") + ((modelData.key === "power" && win.reportData.snapshot.charger.power_unit) ? " " + win.reportData.snapshot.charger.power_unit : "") : "")
+                            text: modelData.label + ": " + (win.reportData.snapshot ? lem.connectorText(String(win.reportData.snapshot.charger[modelData.key] || "—")) + ((modelData.key === "power" && win.reportData.snapshot.charger.power_unit) ? " " + win.reportData.snapshot.charger.power_unit : "") : "")
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
                         }
@@ -2140,7 +2259,7 @@ ApplicationWindow {
                         model: win.reportData.snapshot ? Object.keys(win.reportData.snapshot.charger.source || {}) : []
                         UiLabel {
                             required property string modelData
-                            text: modelData + ": " + win.reportData.snapshot.charger.source[modelData]
+                            text: modelData + ": " + lem.connectorText(String(win.reportData.snapshot.charger.source[modelData]))
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
                         }
@@ -2327,6 +2446,7 @@ ApplicationWindow {
         title: closedReport ? "Apagar report fechado?" : "Apagar rascunho?"
         property string reportId: ""
         property bool closedReport: false
+        property string reportIdentifier: ""
         modal: true
         parent: Overlay.overlay
         anchors.centerIn: parent
@@ -2340,8 +2460,9 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             spacing: 12
             UiLabel {
-                text: "Report " + deleteReportDialog.reportId.substring(0, 8)
+                text: "Report " + deleteReportDialog.reportIdentifier
                 font.bold: true
+                wrapMode: Text.WrapAnywhere
                 Layout.fillWidth: true
             }
             UiLabel {
@@ -2365,7 +2486,7 @@ ApplicationWindow {
                 text: "Apagar definitivamente"
                 destructive: true
                 Layout.fillWidth: true
-                enabled: win.canDeleteReport && win.reportData.id === deleteReportDialog.reportId && !win.networkActivity
+                enabled: win.canDeleteReport && win.reportData.id === deleteReportDialog.reportId && !win.reportNetworkActivity
                 onClicked: {
                     const id = deleteReportDialog.reportId;
                     deleteReportDialog.close();
@@ -2408,7 +2529,7 @@ ApplicationWindow {
                 text: "Confirmar transferência"
                 primary: true
                 Layout.fillWidth: true
-                enabled: !win.networkActivity && win.reportData.id === transferDialog.reportId && ownerBox.currentIndex >= 0 && lem.users[ownerBox.currentIndex].id !== win.reportData.owner_id
+                enabled: !win.reportNetworkActivity && win.reportData.id === transferDialog.reportId && ownerBox.currentIndex >= 0 && lem.users[ownerBox.currentIndex].id !== win.reportData.owner_id
                 onClicked: {
                     const owner = lem.users[ownerBox.currentIndex].id;
                     transferDialog.close();
@@ -2443,7 +2564,7 @@ ApplicationWindow {
                 text: "Criar cópia local"
                 primary: true
                 Layout.fillWidth: true
-                enabled: !win.networkActivity && lem.current.id === copyReportDialog.reportId
+                enabled: !win.reportNetworkActivity && lem.current.id === copyReportDialog.reportId
                 onClicked: {
                     copyReportDialog.close();
                     lem.copyLocalReport();
@@ -2560,6 +2681,7 @@ ApplicationWindow {
     }
     Dialog {
         id: photoPreview
+        onClosed: photoSource = ""
         title: "Evidência fotográfica"
         modal: true
         parent: Overlay.overlay
@@ -2576,6 +2698,8 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             Image {
                 source: photoPreview.photoSource
+                // Large previews are transient; thumbnails keep their own cache.
+                cache: false
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 fillMode: Image.PreserveAspectFit
@@ -2973,9 +3097,11 @@ ApplicationWindow {
         safeLeft: win.SafeArea.margins.left
         safeRight: win.SafeArea.margins.right
         parent: Overlay.overlay
-        onApplyCrop: (reportId, photoId, x, y, width, height) => {
-            if (lem.current.id === reportId && win.editing)
-                lem.cropPhoto(photoId, x, y, width, height);
+        canApply: lem.current.id === reportId && win.editing && !lem.busy && !lem.syncing
+                  && !lem.refreshing && !lem.attachingFiles && !lem.currentReportDownloadingPhotos
+        onApplyEdit: (reportId, photoId, quarterTurns, x, y, width, height) => {
+            if (canApply && lem.editPhoto(photoId, quarterTurns, x, y, width, height))
+                cropDialog.close();
         }
     }
     FileDialog {
@@ -3012,6 +3138,84 @@ ApplicationWindow {
         fileMode: FileDialog.SaveFile
         nameFilters: win.exportKind === "pdf" ? ["PDF (*.pdf)"] : ["Report e evidências (*.zip)"]
         onAccepted: lem.exportReport(win.exportKind, selectedFile)
+    }
+    FolderDialog {
+        id: contractExportFolder
+        property string contractId: ""
+        property string kind: "pdf"
+        title: contractExportFolder.kind === "pdf" ? "Pasta para todos os PDFs do contrato" : "Pasta para todos os ZIPs do contrato"
+        onAccepted: lem.exportContract(contractExportFolder.contractId, contractExportFolder.kind, contractExportFolder.selectedFolder)
+    }
+    Dialog {
+        id: resetPasswordDialog
+        objectName: "resetPasswordDialog"
+        property string userId: ""
+        property string userLabel: ""
+        title: "Repor password do técnico"
+        modal: true
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(win.width - 24, 480)
+        palette: lightPalette
+        onOpened: { resetPassword.clear(); repeatPassword.clear(); }
+        onClosed: { resetPassword.clear(); repeatPassword.clear(); }
+        contentItem: ColumnLayout {
+            spacing: 10
+            UiLabel {
+                text: resetPasswordDialog.userLabel
+                font.bold: true
+                wrapMode: Text.WrapAnywhere
+                Layout.fillWidth: true
+            }
+            UiLabel {
+                text: "As sessões atuais deste técnico serão terminadas. Os reports guardados nos dispositivos permanecem disponíveis."
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            UiTextField {
+                id: resetPassword
+                objectName: "resetTechnicianNewPassword"
+                placeholderText: "Nova password (12 a 200 caracteres)"
+                Accessible.name: "Nova password do técnico"
+                echoMode: TextInput.Password
+                maximumLength: 200
+                Layout.fillWidth: true
+            }
+            UiTextField {
+                id: repeatPassword
+                objectName: "resetTechnicianRepeatPassword"
+                placeholderText: "Repetir nova password"
+                Accessible.name: "Repetir nova password do técnico"
+                echoMode: TextInput.Password
+                maximumLength: 200
+                Layout.fillWidth: true
+            }
+            UiLabel {
+                text: "As passwords não coincidem."
+                visible: repeatPassword.text.length > 0 && resetPassword.text !== repeatPassword.text
+                color: win.danger
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            UiButton {
+                text: "Cancelar"
+                Layout.fillWidth: true
+                onClicked: resetPasswordDialog.close()
+            }
+            UiButton {
+                objectName: "confirmResetTechnicianPassword"
+                text: "Confirmar nova password"
+                primary: true
+                Layout.fillWidth: true
+                enabled: lem.authenticated && lem.user.role === "admin" && !lem.busy
+                         && resetPassword.text.length >= 12 && resetPassword.text === repeatPassword.text
+                         && lem.users.some(u => u.id === resetPasswordDialog.userId && u.role === "tech")
+                onClicked: {
+                    if (lem.resetTechnicianPassword(resetPasswordDialog.userId, resetPassword.text))
+                        resetPasswordDialog.close();
+                }
+            }
+        }
     }
     Item {
         id: pageViewport
@@ -3078,6 +3282,63 @@ ApplicationWindow {
                     font.pixelSize: 23
                     font.bold: true
                 }
+                Flow {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: childrenRect.height
+                    spacing: 6
+                    visible: !!lem.desktopExports
+                    UiButton {
+                        objectName: "exportContractPdfs"
+                        text: "Exportar todos os PDFs…"
+                        width: Math.min(implicitWidth, parent.width)
+                        enabled: lem.authenticated && contractBox.currentIndex >= 0 && !lem.contractExport.active
+                        onClicked: {
+                            contractExportFolder.contractId = lem.contractId();
+                            contractExportFolder.kind = "pdf";
+                            contractExportFolder.open();
+                        }
+                    }
+                    UiButton {
+                        objectName: "exportContractZips"
+                        text: "Exportar todos os ZIPs…"
+                        width: Math.min(implicitWidth, parent.width)
+                        enabled: lem.authenticated && contractBox.currentIndex >= 0 && !lem.contractExport.active
+                        onClicked: {
+                            contractExportFolder.contractId = lem.contractId();
+                            contractExportFolder.kind = "bundle";
+                            contractExportFolder.open();
+                        }
+                    }
+                }
+                UiLabel {
+                    visible: !!lem.desktopExports
+                    text: "Só reports fechados. É criada uma nova pasta; ficheiros existentes são conservados."
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                UiLabel {
+                    objectName: "contractExportStatus"
+                    visible: !!lem.desktopExports && !!lem.contractExport.message
+                    text: (lem.contractExport.contract_name ? lem.contractExport.contract_name + " · " : "") + (lem.contractExport.message || "")
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+                RowLayout {
+                    visible: !!lem.desktopExports && !!lem.contractExport.directory
+                    Layout.fillWidth: true
+                    UiButton {
+                        objectName: "cancelContractExport"
+                        text: "Cancelar exportação"
+                        visible: !!lem.contractExport.active
+                        enabled: !lem.contractExport.cancelling
+                        onClicked: lem.cancelContractExport()
+                    }
+                    UiButton {
+                        objectName: "openContractExportFolder"
+                        text: "Abrir pasta"
+                        onClicked: Qt.openUrlExternally(lem.contractExport.directory_url)
+                    }
+                }
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 6
@@ -3135,6 +3396,8 @@ ApplicationWindow {
                 }
                 clip: true
                 spacing: 10
+                // Cards have no editable local state; bindings follow the reused row.
+                reuseItems: true
                 model: win.catalogRows
                 delegate: Rectangle {
                     id: chargerTile
@@ -3206,9 +3469,13 @@ ApplicationWindow {
                             visible: !win.androidCamera
                             text: modelData.reports.length ? modelData.reports.length + " report(s) existente(s)" : "Sem report"
                             color: modelData.reports.length ? win.brandPrimary : "#775e2d"
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            wrapMode: Text.Wrap
                         }
                         Flow {
                             Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             spacing: 8
                             UiButton {
                                 primary: true
@@ -3224,7 +3491,11 @@ ApplicationWindow {
                                 UiButton {
                                     implicitHeight: win.touchHeight
                                     required property var modelData
-                                    text: (modelData.status === "closed" ? "Fechado" : "Rascunho") + " • " + modelData.id.substring(0, 8) + (modelData.dirty ? " · por enviar" : "")
+                                    objectName: "catalogReport_" + modelData.id
+                                    width: Math.min(implicitWidth, parent.width)
+                                    text: (modelData.status === "closed" ? "Fechado" : "Rascunho") + " • " + (modelData.identifier || "") + (modelData.dirty ? " · por enviar" : "")
+                                    ToolTip.visible: hovered
+                                    ToolTip.text: modelData.identifier || ""
                                     enabled: !lem.busy
                                     onClicked: {
                                         win.openCatalogReport("", modelData.id);
@@ -3255,11 +3526,35 @@ ApplicationWindow {
                         Layout.fillWidth: true
                     }
                     UiLabel {
+                        objectName: "reportIdentifier"
+                        text: win.reportData.identifier || ""
+                        visible: text.length > 0
+                        wrapMode: Text.WrapAnywhere
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                    }
+                    UiLabel {
                         objectName: "reportSaveState"
-                        text: (win.reportData.status === "closed" ? "Concluído" : "Rascunho") + " • " + (lem.localSaveError ? "Erro ao guardar · mantenha a app aberta" : lem.saving ? "A guardar no dispositivo…" : win.reportData.dirty ? "Guardado no dispositivo · por sincronizar" : "Sincronizado") + " • " + win.totalAnswered() + "/" + win.totalItems() + " respostas"
+                        text: (win.reportData.status === "closed" ? "Concluído" : "Rascunho") + " • " + (lem.localSaveError ? "Erro ao guardar · mantenha a app aberta" : lem.saving ? "A guardar no dispositivo…" : win.reportData._contract_unavailable ? "Sincronização suspensa · contrato em eliminação" : win.reportData.dirty ? "Guardado no dispositivo · por sincronizar" : "Sincronizado") + " • " + win.totalAnswered() + "/" + win.totalItems() + " respostas"
                         font.pixelSize: 14
                         color: win.mutedInk
                         wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                    }
+                    UiLabel {
+                        objectName: "correctionNotice"
+                        visible: win.correctingReport
+                        text: win.reportData.status === "closed" ? "Correção por confirmar no servidor. O original continua disponível até à substituição." : "Cópia de correção: pode editar respostas, observações e evidências. Para alterar as datas, use «Editar início e fim» no menu do report. O original mantém-se disponível."
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        color: win.mutedInk
+                    }
+                    UiLabel {
+                        objectName: "contractSyncNotice"
+                        visible: !!win.reportData._contract_unavailable
+                        text: win.reportData._contract_unavailable || ""
+                        wrapMode: Text.Wrap
+                        color: "#9a5900"
                         Layout.fillWidth: true
                     }
                 }
@@ -3495,7 +3790,7 @@ ApplicationWindow {
                                 objectName: "viewConflictServer"
                                 Layout.fillWidth: true
                                 text: "Consultar versão do servidor"
-                                enabled: !win.networkActivity
+                                enabled: !win.reportNetworkActivity
                                 onClicked: {
                                     lem.viewServerReport();
                                     serverVersionDialog.open();
@@ -3506,7 +3801,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 text: "Abrir versão atual após criar cópia"
                                 visible: !!win.reportData._conflict_copy_id
-                                enabled: !win.networkActivity
+                                enabled: !win.reportNetworkActivity
                                 onClicked: lem.useServerReport()
                             }
                             UiButton {
@@ -3514,7 +3809,7 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 text: "Criar novo rascunho desta cópia"
                                 primary: true
-                                enabled: !win.networkActivity
+                                enabled: !win.reportNetworkActivity
                                 onClicked: copyReportDialog.open()
                             }
                         }
@@ -3601,6 +3896,7 @@ ApplicationWindow {
                                             property bool notesRequired: !modelData.notes_disabled && (win.answerFor(modelData.id).assessment === "NOK" || answerValue === "NOK" || (!!modelData.na_notes_required && Measurements.notApplicable(answerValue)))
                                             enabled: !(lem.copyingGroup === "QVE" && modelData.id.indexOf("QVE.") === 0) && !(lem.copyingGroup === "MAN" && /^MAN\.(0[4-9]|10)$/.test(modelData.id))
                                             property string answerValue: win.answerFor(modelData.id).value || ""
+                                            readonly property string measurementId: Number((lem.current.template || {}).version || 7) < 7 && Measurements.milliamp(modelData.id) ? Measurements.canonical(modelData.id) : modelData.id
                                             property bool needsPhoto: modelData.photo_required && (modelData.photo_always || !Measurements.notApplicable(answerValue)) && win.photographsFor(modelData.id).length === 0
                                             objectName: "checkpoint_" + modelData.id
                                             Layout.fillWidth: true
@@ -3627,6 +3923,23 @@ ApplicationWindow {
                                                     wrapMode: Text.Wrap
                                                     Layout.fillWidth: true
                                                     font.bold: true
+                                                }
+                                                UiLabel {
+                                                    objectName: "measurementHelp_" + itemCard.modelData.id
+                                                    // Frozen/offline templates can retain the retired MAN.18 hint.
+                                                    visible: text.length > 0
+                                                    text: itemCard.modelData.id === "MAN.18" ? "" : itemCard.modelData.help || ""
+                                                    wrapMode: Text.Wrap
+                                                    Layout.fillWidth: true
+                                                    color: win.mutedInk
+                                                }
+                                                UiLabel {
+                                                    objectName: "previousValue_" + itemCard.modelData.id
+                                                    visible: !!win.answerFor(itemCard.modelData.id).previous_value
+                                                    text: "Valor anterior: " + (win.answerFor(itemCard.modelData.id).previous_value || "") + ". Confirme e introduza o valor em mA."
+                                                    wrapMode: Text.Wrap
+                                                    Layout.fillWidth: true
+                                                    color: win.danger
                                                 }
                                                 RowLayout {
                                                     visible: win.editing && (itemCard.modelData.kind === "status" || !!itemCard.modelData.allow_status)
@@ -3673,28 +3986,28 @@ ApplicationWindow {
                                                     visible: win.editing && itemCard.modelData.kind === "text"
                                                     Layout.fillWidth: true
                                                     // NA is a selected state, never partially editable text.
-                                                    placeholderText: itemCard.modelData.id === "FIN.02" ? "Nome" : /^MAN\.(14|15|16|17)$/.test(itemCard.modelData.id) ? "Valor medido (ou NA)" : itemCard.modelData.reading_required ? (Measurements.unit(itemCard.modelData.id) === "Ω" ? "Valor medido em Ω (ou NA)" : itemCard.modelData.id === "MAN.12" ? "Intensidade de disparo medida (ou NA)" : "Valor medido em MΩ (ou NA)") : itemCard.modelData.allow_status && (itemCard.answerValue === "OK" || (itemCard.answerValue === "NOK" || win.answerFor(itemCard.modelData.id).assessment === "NOK")) ? itemCard.answerValue + " selecionado" : Measurements.notApplicable(itemCard.answerValue) && Measurements.digits(itemCard.modelData.id) ? "NA" : Measurements.digits(itemCard.modelData.id) ? (Measurements.unit(itemCard.modelData.id) === "V" ? "Ex.: 238,3" : "Ex.: 4564,4") : "Valor / resultado (ou NA)"
-                                                    rightPadding: Measurements.digits(itemCard.modelData.id) ? 38 : 12
+                                                    placeholderText: Measurements.milliamp(itemCard.measurementId) ? "Valor em mA (até 6 algarismos)" : itemCard.modelData.id === "FIN.02" ? "Nome" : /^MAN\.(14|15|16|17)$/.test(itemCard.modelData.id) ? "Valor medido (ou NA)" : itemCard.modelData.reading_required ? (Measurements.unit(itemCard.measurementId) === "Ω" ? "Valor medido em Ω (ou NA)" : itemCard.modelData.id === "MAN.12" ? "Intensidade de disparo medida (ou NA)" : "Valor medido em MΩ (ou NA)") : itemCard.modelData.allow_status && (itemCard.answerValue === "OK" || (itemCard.answerValue === "NOK" || win.answerFor(itemCard.modelData.id).assessment === "NOK")) ? itemCard.answerValue + " selecionado" : Measurements.notApplicable(itemCard.answerValue) && Measurements.digits(itemCard.measurementId) ? "NA" : Measurements.digits(itemCard.measurementId) ? (Measurements.unit(itemCard.measurementId) === "V" ? "Ex.: 238,3" : "Ex.: 4564,4") : "Valor / resultado (ou NA)"
+                                                    rightPadding: Measurements.digits(itemCard.measurementId) ? 38 : 12
                                                     UiLabel {
                                                         anchors.right: parent.right
                                                         anchors.rightMargin: 12
                                                         anchors.verticalCenter: parent.verticalCenter
-                                                        text: Measurements.unit(itemCard.modelData.id)
+                                                        text: Measurements.unit(itemCard.measurementId)
                                                         color: win.mutedInk
-                                                        visible: Measurements.digits(itemCard.modelData.id) > 0 && !Measurements.notApplicable(itemCard.answerValue) && itemCard.answerValue !== "OK" && itemCard.answerValue !== "NOK"
+                                                        visible: Measurements.digits(itemCard.measurementId) > 0 && !Measurements.notApplicable(itemCard.answerValue) && itemCard.answerValue !== "OK" && itemCard.answerValue !== "NOK"
                                                     }
                                                     validator: RegularExpressionValidator {
-                                                        regularExpression: Measurements.editorPattern(itemCard.modelData.id)
+                                                        regularExpression: Measurements.editorPattern(itemCard.measurementId)
                                                     }
-                                                    inputMethodHints: Measurements.digits(itemCard.modelData.id) ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
-                                                    text: itemCard.modelData.id === "MAN.18" && Measurements.notApplicable(itemCard.answerValue) ? "NA" : Measurements.editorText(itemCard.modelData.id, win.answerFor(itemCard.modelData.id).value)
+                                                    inputMethodHints: Measurements.milliamp(itemCard.measurementId) ? Qt.ImhDigitsOnly : Measurements.digits(itemCard.measurementId) ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
+                                                    text: itemCard.modelData.id === "MAN.18" && Measurements.notApplicable(itemCard.answerValue) ? "NA" : Measurements.editorText(itemCard.measurementId, win.answerFor(itemCard.modelData.id).value)
                                                     enabled: !lem.busy
                                                     selectByMouse: true
                                                     Accessible.name: itemCard.modelData.label
                                                     onTextEdited: lem.answer(itemCard.modelData.id, text, notes.text)
                                                     onEditingFinished: {
-                                                        if (Measurements.digits(itemCard.modelData.id)) {
-                                                            const formatted = Measurements.format(itemCard.modelData.id, text);
+                                                        if (Measurements.digits(itemCard.measurementId)) {
+                                                            const formatted = Measurements.format(itemCard.measurementId, text);
                                                             if (formatted !== null && formatted !== text)
                                                                 lem.answer(itemCard.modelData.id, formatted, notes.text);
                                                         }
@@ -3704,7 +4017,7 @@ ApplicationWindow {
                                                     objectName: "sign_" + itemCard.modelData.id
                                                     visible: win.editing && !!itemCard.modelData.supports_signature
                                                     text: (((lem.current.payload || {}).signatures || {})[itemCard.modelData.id]) ? "Assinar novamente" : "Assinar"
-                                                    enabled: !lem.busy && !lem.syncing && itemCard.answerValue.trim().length > 0
+                                                    enabled: !lem.busy && itemCard.answerValue.trim().length > 0
                                                     Layout.fillWidth: true
                                                     onClicked: {
                                                         valueField.focus = false;
@@ -3718,7 +4031,7 @@ ApplicationWindow {
                                                     visible: win.editing && !win.androidCamera && !!itemCard.modelData.supports_signature
                                                     text: "Anexar fotografia da assinatura"
                                                     Layout.fillWidth: true
-                                                    enabled: !lem.busy && !lem.syncing && itemCard.answerValue.trim().length > 0
+                                                    enabled: !lem.busy && itemCard.answerValue.trim().length > 0
                                                     onClicked: {
                                                         valueField.focus = false;
                                                         signaturePhotoDialog.checkpoint = itemCard.modelData.id;
@@ -3735,7 +4048,7 @@ ApplicationWindow {
                                                     wrapMode: Text.Wrap
                                                 }
                                                 RowLayout {
-                                                    visible: win.editing && Measurements.digits(itemCard.modelData.id) > 0 && !itemCard.modelData.allow_status
+                                                    visible: win.editing && Measurements.digits(itemCard.measurementId) > 0 && !itemCard.modelData.allow_status
                                                     Layout.fillWidth: true
                                                     UiButton {
                                                         objectName: "notApplicable_" + itemCard.modelData.id
@@ -3770,7 +4083,7 @@ ApplicationWindow {
                                                 }
                                                 UiLabel {
                                                     visible: !win.editing
-                                                    text: "Resposta: " + (Measurements.format(itemCard.modelData.id, itemCard.answerValue) || itemCard.answerValue || (itemCard.modelData.optional ? "Opcional" : "Por preencher")) + (win.answerFor(itemCard.modelData.id).assessment ? " · " + win.answerFor(itemCard.modelData.id).assessment : "")
+                                                    text: "Resposta: " + (Measurements.format(itemCard.measurementId, itemCard.answerValue) || itemCard.answerValue || (itemCard.modelData.optional ? "Opcional" : "Por preencher")) + (win.answerFor(itemCard.modelData.id).assessment ? " · " + win.answerFor(itemCard.modelData.id).assessment : "")
                                                     font.bold: true
                                                     color: (itemCard.answerValue === "NOK" || win.answerFor(itemCard.modelData.id).assessment === "NOK") ? win.danger : itemCard.answerValue === "OK" ? win.success : win.mutedInk
                                                     wrapMode: Text.Wrap
@@ -3795,12 +4108,15 @@ ApplicationWindow {
                                                     Accessible.name: itemCard.modelData.id + ", observações"
                                                     onTextChanged: if (activeFocus)
                                                         lem.answer(itemCard.modelData.id, win.answerFor(itemCard.modelData.id).value || "", text)
-                                                    onActiveFocusChanged: if (activeFocus)
+                                                    onActiveFocusChanged: if (activeFocus) {
+                                                        // Replace only a still-generated suggestion on intentional editing.
+                                                        lem.beginNotesEdit(itemCard.modelData.id);
                                                         Qt.callLater(function () {
                                                             const y = notes.mapToItem(reportBody, 0, 0).y;
                                                             if (y + notes.height > reportScroll.contentY + reportScroll.height)
                                                                 reportScroll.contentY = Math.max(0, y - 24);
                                                         })
+                                                    }
                                                 }
                                                 UiLabel {
                                                     visible: !win.editing && !!win.answerFor(itemCard.modelData.id).notes
@@ -3978,11 +4294,11 @@ ApplicationWindow {
                                                                 enabled: !!photoCard.modelData.path
                                                                 onClicked: lem.openVideo(photoCard.modelData.id)
                                                             }
-                                                            Row {
+                                                            Flow {
                                                                 width: 140
-                                                                spacing: 6
+                                                                spacing: 4
                                                                 UiIconButton {
-                                                                    width: 42; height: 42
+                                                                    width: 44; height: 44
                                                                     objectName: "enlargePhoto_" + photoCard.modelData.id
                                                                     symbol: "zoom"
                                                                     text: "Ampliar fotografia"
@@ -3994,7 +4310,7 @@ ApplicationWindow {
                                                                     }
                                                                 }
                                                                 UiIconButton {
-                                                                    width: 42; height: 42
+                                                                    width: 44; height: 44
                                                                     objectName: "downloadPhoto_" + photoCard.modelData.id
                                                                     symbol: "download"
                                                                     text: "Descarregar evidência"
@@ -4004,7 +4320,7 @@ ApplicationWindow {
                                                                     onClicked: lem.fetchPhoto(photoCard.modelData.id)
                                                                 }
                                                                 UiIconButton {
-                                                                    width: 42; height: 42
+                                                                    width: 44; height: 44
                                                                     objectName: "removePhoto_" + photoCard.modelData.id
                                                                     symbol: "trash"
                                                                     text: "Remover evidência"
@@ -4020,10 +4336,11 @@ ApplicationWindow {
                                                                     }
                                                                 }
                                                                 UiIconButton {
-                                                                    width: 42; height: 42
-                                                                    objectName: "cropPhoto_" + photoCard.modelData.id
-                                                                    symbol: "crop"
-                                                                    text: "Recortar fotografia"
+                                                                    width: 44; height: 44
+                                                                    objectName: "editPhoto_" + photoCard.modelData.id
+                                                                    symbol: "photoEdit"
+                                                                    text: "Editar fotografia"
+                                                                    Accessible.name: text + " do item " + itemCard.modelData.id
                                                                     visible: win.editing && !photoCard.isVideo && !!photoCard.modelData.path
                                                                     enabled: !lem.busy
                                                                     onClicked: {
@@ -4060,7 +4377,7 @@ ApplicationWindow {
         Item {
             id: adminPage
             anchors.fill: parent
-            visible: win.page === "admin"
+            visible: win.page === "admin" && lem.user.role === "admin"
             ChromeBackdrop {}
             Flickable {
                 id: adminScroll
@@ -4092,7 +4409,7 @@ ApplicationWindow {
                         objectName: "adminArea"
                         Layout.fillWidth: true
                         implicitHeight: win.touchHeight
-                        model: ["Contratos", "Importar carregadores", "Contas e acessos"]
+                        model: ["Contratos", "Importar / formato dos reports", "Contas e acessos"]
                         Accessible.name: "Área de gestão"
                         onActivated: {
                             adminScroll.cancelFlick();
@@ -4197,7 +4514,7 @@ ApplicationWindow {
                         spacing: 12
                         visible: adminArea.currentIndex === 1
                         UiLabel {
-                            text: "Importar carregadores para o contrato selecionado"
+                            text: "Formato dos reports e importação"
                             font.pixelSize: 19
                             font.bold: true
                             wrapMode: Text.Wrap
@@ -4209,6 +4526,107 @@ ApplicationWindow {
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
+                        }
+                        UiLabel {
+                            text: "Escolha a entidade que emite os reports e até dois logótipos do cliente. Pode guardar estas opções sem importar um Excel. As novas exportações dos reports deste contrato usarão o formato escolhido."
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                        }
+                        UiLabel { text: "Reports emitidos em nome de"; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                        UiComboBox {
+                            id: reportIssuer
+                            objectName: "reportIssuer"
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            model: ["Lem", "CSMTEC"]
+                            readonly property var saveState: {
+                                const state = lem.reportPresentationSave || {};
+                                return state.contract_id === lem.contractId() ? state : {};
+                            }
+                            enabled: saveState.state !== "saving"
+                            property string confirmedIssuer: "Lem"
+                            property string loadedKey: ""
+                            property int presentationRevision: 0
+                            property string savedSelection: ""
+                            readonly property bool hasUnsavedChanges: savedSelection !== "" && savedSelection !== JSON.stringify([currentText, primaryLogo.currentIndex > 0 ? primaryLogo.currentText : "", secondaryLogo.currentIndex > 0 ? secondaryLogo.currentText : ""])
+                            function loadContract() {
+                                const contract = lem.contracts.find(c => c.id === lem.contractId());
+                                const style = contract ? (contract.presentation || {issuer: "Lem", revision: 0, client_logos: contract.report_logos || []}) : {issuer: "Lem", revision: 0, client_logos: []};
+                                confirmedIssuer = style.issuer;
+                                const key = (contract ? contract.id : "") + ":" + style.revision;
+                                if (key === loadedKey) return;
+                                loadedKey = key;
+                                presentationRevision = style.revision;
+                                currentIndex = style.issuer === "CSMTEC" ? 1 : 0;
+                                const logos = (style.client_logos || []).filter(b => b.id !== "Lem" && b.id !== "CSMTEC");
+                                primaryLogo.currentIndex = logos.length ? Math.max(0, primaryLogo.model.indexOf(logos[0].id)) : 0;
+                                secondaryLogo.currentIndex = logos.length > 1 ? Math.max(0, secondaryLogo.model.indexOf(logos[1].id)) : 0;
+                                savedSelection = JSON.stringify([currentText, primaryLogo.currentIndex > 0 ? primaryLogo.currentText : "", secondaryLogo.currentIndex > 0 ? secondaryLogo.currentText : ""]);
+                            }
+                            onActivated: lem.invalidatePreview()
+                            Component.onCompleted: Qt.callLater(loadContract)
+                            Connections {
+                                target: lem
+                                function onChanged() { reportIssuer.loadContract(); }
+                            }
+                        }
+                        UiLabel {
+                            objectName: "reportPresentationSaveStatus"
+                            text: reportIssuer.saveState.state === "saved" ? "Guardado no servidor: " + reportIssuer.confirmedIssuer + "." :
+                                  reportIssuer.saveState.message || "Formato guardado: " + reportIssuer.confirmedIssuer + "."
+                            textFormat: Text.PlainText
+                            color: reportIssuer.saveState.state === "error" ? win.danger :
+                                   reportIssuer.saveState.state === "warning" ? "#9a5900" : win.ink
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                        }
+                        UiLabel { text: "Logótipo do cliente principal (opcional)"; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                        UiComboBox {
+                            id: primaryLogo
+                            objectName: "primaryReportLogo"
+                            enabled: reportIssuer.saveState.state !== "saving"
+                            Layout.fillWidth: true
+                            model: ["Nenhum"].concat(win.reportBrandCatalogue.filter(b => b.id !== "Lem" && b.id !== "CSMTEC").map(b => b.id))
+                            currentIndex: 0
+                            onActivated: lem.invalidatePreview()
+                        }
+                        UiLabel { text: "Logótipo do cliente secundário (opcional)"; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                        UiComboBox {
+                            id: secondaryLogo
+                            objectName: "secondaryReportLogo"
+                            Layout.fillWidth: true
+                            enabled: primaryLogo.currentIndex > 0 && reportIssuer.saveState.state !== "saving"
+                            model: ["Nenhum"].concat(win.reportBrandCatalogue.map(b => b.id).filter(id => id !== "Lem" && id !== "CSMTEC" && id !== primaryLogo.currentText))
+                            onModelChanged: { currentIndex = 0; lem.invalidatePreview(); }
+                            onActivated: lem.invalidatePreview()
+                        }
+                        Row {
+                            Layout.alignment: Qt.AlignRight
+                            spacing: 12
+                            Repeater {
+                                model: win.reportBrandCatalogue.filter(b => b.id === primaryLogo.currentText || (secondaryLogo.currentIndex > 0 && b.id === secondaryLogo.currentText)).sort((a, b) => a.id === primaryLogo.currentText ? -1 : 1)
+                                Image {
+                                    required property var modelData
+                                    width: 120; height: 70
+                                    fillMode: Image.PreserveAspectFit
+                                    source: "data:image/png;base64," + modelData.png
+                                }
+                            }
+                        }
+                        UiButton {
+                            objectName: "saveReportPresentation"
+                            Layout.fillWidth: true
+                            text: reportIssuer.saveState.state === "saving" ? "A guardar e confirmar…" : "Guardar formato dos reports"
+                            enabled: lem.canSaveReportPresentation
+                            onClicked: lem.saveReportPresentation(reportIssuer.currentText, primaryLogo.currentIndex > 0 ? primaryLogo.currentText : "", secondaryLogo.currentIndex > 0 ? secondaryLogo.currentText : "", reportIssuer.presentationRevision)
+                        }
+                        UiLabel {
+                            objectName: "unsavedReportPresentation"
+                            visible: reportIssuer.hasUnsavedChanges
+                            text: "Alterações por guardar. Prima «Guardar formato dos reports» para aplicar a entidade e os logótipos aos reports deste contrato."
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            color: "#9a5900"
                         }
                         UiButton {
                             implicitHeight: win.touchHeight
@@ -4236,7 +4654,7 @@ ApplicationWindow {
                                 text: "Pré-visualizar importação"
                                 enabled: !lem.busy && !!win.selectedSheet().name
                                 objectName: "previewImportButton"
-                                onClicked: lem.previewExcel(win.selectedSheet().name, 1, {})
+                                onClicked: lem.previewExcel(win.selectedSheet().name, 1, {}, primaryLogo.currentIndex === 0 ? "" : primaryLogo.currentText, secondaryLogo.currentIndex === 0 ? "" : secondaryLogo.currentText, reportIssuer.currentText, reportIssuer.presentationRevision)
                             }
                             UiLabel {
                                 text: lem.importPreview.count !== undefined ? lem.importPreview.count + " IDs válidos • " + (lem.importPreview.errors || []).length + " erros" : ""
@@ -4349,6 +4767,9 @@ ApplicationWindow {
                             font.pixelSize: 19
                             font.bold: true
                             Layout.topMargin: 16
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            wrapMode: Text.Wrap
                         }
                         UiLabel {
                             text: "Nome"
@@ -4374,6 +4795,9 @@ ApplicationWindow {
                         }
                         UiLabel {
                             text: "Password inicial"
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            wrapMode: Text.Wrap
                         }
                         UiTextField {
                             id: newPassword
@@ -4386,6 +4810,9 @@ ApplicationWindow {
                         }
                         UiLabel {
                             text: "Perfil da nova conta"
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            wrapMode: Text.Wrap
                         }
                         UiComboBox {
                             id: newUserRole
@@ -4405,6 +4832,8 @@ ApplicationWindow {
                         UiButton {
                             objectName: "createUserButton"
                             implicitHeight: win.touchHeight
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             text: newUserRole.currentIndex === 1 ? "Criar administrador" : "Criar técnico"
                             enabled: lem.authenticated && lem.user.role === "admin" && !lem.busy && newName.text.trim().length > 0 && newEmail.text.indexOf("@") > 0 && newPassword.text.length >= 12
                             onClicked: {
@@ -4415,11 +4844,14 @@ ApplicationWindow {
                         UiButton {
                             implicitHeight: win.touchHeight
                             text: "Atualizar utilizadores"
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
                             enabled: !lem.busy
                             onClicked: lem.loadUsers()
                         }
                         UiComboBox {
                             id: userBox
+                            objectName: "managementUserBox"
                             implicitHeight: win.touchHeight
                             model: lem.users
                             textRole: "label"
@@ -4434,6 +4866,33 @@ ApplicationWindow {
                             Accessible.name: "Atribuir acesso ao contrato selecionado"
                             enabled: !lem.busy && userBox.currentIndex >= 0 && lem.contractId() !== ""
                             onClicked: lem.assignUser(lem.users[userBox.currentIndex].id)
+                        }
+                        UiButton {
+                            objectName: "resetTechnicianPasswordButton"
+                            text: "Repor password do técnico…"
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            visible: lem.user.role === "admin"
+                            enabled: lem.authenticated && !lem.busy && userBox.currentIndex >= 0
+                                     && (lem.users[userBox.currentIndex] || {}).role === "tech"
+                            onClicked: {
+                                const technician = lem.users[userBox.currentIndex];
+                                resetPasswordDialog.userId = technician.id;
+                                resetPasswordDialog.userLabel = technician.label;
+                                resetPasswordDialog.open();
+                            }
+                        }
+                        UiLabel {
+                            text: "O reset de password está disponível apenas para contas de técnicos."
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
+                        }
+                        UiLabel {
+                            objectName: "passwordResetStatus"
+                            text: lem.passwordReset.message || ""
+                            visible: !!lem.passwordReset.message
+                            wrapMode: Text.Wrap
+                            Layout.fillWidth: true
                         }
                     }
                     Item {

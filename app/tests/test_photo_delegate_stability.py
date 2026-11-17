@@ -13,7 +13,7 @@ if baseline:
     prefix = prefix.replace('PROJECT_ROOT = Path(__file__).resolve().parents[2]',
                             f'PROJECT_ROOT = Path({baseline!r})')
 exec(compile(prefix, str(source), "exec"), globals())
-js('splashActive=false; page="report"; selectedSection=0')
+js('splashActive=false; page="report"; selectedSection=' + str(next(i for i, section in enumerate(values["sections"]) if section["id"] == "EST")))
 w.setWidth(390)
 w.setHeight(844)
 fixture = PREVIEW_DIR / "performance-photo.png"

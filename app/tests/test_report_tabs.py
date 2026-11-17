@@ -7,7 +7,7 @@ For a narrow viewport: python app/tests/test_report_tabs.py report mobile
 The backend is a mock; this is not a C++/server integration test.
 """
 
-import os, sys, json, copy
+import os, sys, json, copy, re
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["QT_QUICK_BACKEND"] = "software"
@@ -32,6 +32,10 @@ for role in [QPalette.ColorRole.WindowText, QPalette.ColorRole.Text, QPalette.Co
     p.setColor(role, QColor("#ffffff"))
 app.setPalette(p)
 values = {
+    "desktopCorrections": True,
+    "desktopExports": True,
+    "contractExport": {},
+    "passwordReset": {},
     "pendingReports": 1,
     "operationStatus": {
         "active": False,
@@ -41,6 +45,7 @@ values = {
     },
     "operationTransfers": [],
     "clientCompatibility": {},
+    "reportPresentationSave": {},
     "saving": False,
     "localSaveError": False,
     "authenticated": False,
@@ -49,6 +54,7 @@ values = {
     "attachingFiles": False,
     "syncing": False,
     "downloadingPhotos": False,
+    "currentReportDownloadingPhotos": False,
     "photoDownloadState": "A descarregar fotografias: 0 / 1",
     "refreshing": False,
     "syncState": "A enviar em segundo plano",
@@ -124,6 +130,9 @@ def contractId(self):
 
 attrs["pendingCount"] = Slot(result=int)(pendingCount)
 attrs["contractId"] = Slot(result=str)(contractId)
+attrs["canSaveReportPresentation"] = Property(bool, lambda self:
+    values['authenticated'] and values['user'].get('role') == 'admin'
+    and not any(values[key] for key in ('busy', 'syncing', 'refreshing')), notify=attrs['changed'])
 attrs["useDefaultServer"] = Slot()(lambda self: None)
 attrs["prepareExport"] = Slot(str, result=bool)(lambda self, kind: True)
 qve_sources = [{"id":"other-report", "label":"PCVE-OUTRO · Concluído"}]
@@ -154,6 +163,14 @@ def answer(self, checkpoint, value, notes):
     if value in ("NA", "N/A", "Não Aplicável"): a.pop("assessment", None)
     self.changed.emit()
 
+
+def beginNotesEdit(self, key):
+    a = values["current"]["payload"]["answers"].get(key, {})
+    if a.get("suggested_notes") and a.get("suggested_notes") == a.get("notes"):
+        a["notes"] = ""
+        a.pop("suggested_notes", None)
+        self.changed.emit()
+attrs["beginNotesEdit"] = Slot(str)(beginNotesEdit)
 
 attrs["answer"] = Slot(str, str, str)(answer)
 def setAssessment(self, key, status):
@@ -279,6 +296,17 @@ attrs["transferReport"] = Slot(str)(transferReport)
 attrs["viewServerReport"] = Slot()(viewServerReport)
 attrs["copyLocalReport"] = Slot()(copyLocalReport)
 attrs["useServerReport"] = Slot()(useServerReport)
+def reportBrands(self):
+    return json.loads((PROJECT_ROOT / "shared/branding/report-logos.json").read_text(encoding="utf-8"))
+
+attrs["reportBrands"] = Slot(result="QVariantList")(reportBrands)
+def invalidatePreview(self):
+    pass
+
+attrs["invalidatePreview"] = Slot()(invalidatePreview)
+def connectorText(self, text):
+    return re.sub(r'\bMennekes\s+(?:Type|Tipo)\s*2\b', 'AC Type 2', text, flags=re.I)
+attrs['connectorText'] = Slot(str, result=str)(connectorText)
 Lem = type("Lem", (QObject,), attrs)
 lem = Lem()
 notified_current = None
@@ -319,7 +347,7 @@ w = engine.rootObjects()[0]
 page = sys.argv[1] if len(sys.argv) > 1 else "report"
 w.setProperty("page", page)
 if page == "report":
-    w.setProperty("selectedSection", 1)
+    w.setProperty("selectedSection", next(i for i, section in enumerate(values["sections"]) if section["id"] == "EST"))
 if "mobile" in sys.argv:
     w.setWidth(390)
     w.setHeight(844)
@@ -521,12 +549,14 @@ def run_tests():
         lem.operationChanged.emit()
         expected_items = sum(len(section["items"]) for section in values["sections"])
         assert js("totalItems()") == expected_items
-        assert js("sectionPanels.itemAt(1).checkpoints.count") == 17
+        est_index = next(i for i, section in enumerate(values["sections"]) if section["id"] == "EST")
+        assert js(f"sectionPanels.itemAt({est_index}).checkpoints.count") == len(values["sections"][est_index]["items"])
         assert js(
             "sectionPanels.itemAt(0).checkpoints===null"
         ), "Inactive groups must not allocate all question controls"
-        assert js("totalAnswered()") == 0
-        assert js("pendingItems().length") == expected_items
+        optional_items = sum(bool(item.get("optional")) for section in values["sections"] for item in section["items"])
+        assert js("totalAnswered()") == optional_items
+        assert js("pendingItems().length") == expected_items - optional_items
         notes = find_visual(w.contentItem(), "notes_EST.01")
         assert not notes.isVisible(), "Optional notes must start collapsed"
         assert not find_visual(w.contentItem(), "answer_EST.01_OK").property("checked")
@@ -559,28 +589,28 @@ def run_tests():
         assert find_visual(w.contentItem(), "toggleNotes_EST.01").property(
             "enabled"
         ), "Mandatory observations can be cleared after confirmation"
-        assert "Falta observação NOK" in js("itemIssues(lem.sections[1].items[0]).join()")
+        assert "Falta observação NOK" in js(f"itemIssues(lem.sections[{est_index}].items[0]).join()")
         notes.forceActiveFocus()
         for ch in "Teste":
             QTest.keyClick(w, ord(ch))
         QTest.qWait(50)
         assert values["current"]["payload"]["answers"]["EST.01"]["notes"] == "Teste"
-        assert "Falta observação NOK" not in js("itemIssues(lem.sections[1].items[0]).join()")
+        assert "Falta observação NOK" not in js(f"itemIssues(lem.sections[{est_index}].items[0]).join()")
         assert (
             find_visual(w.contentItem(), "photoRequirement_EST.01").property("text")
             == "Fotografia obrigatória em falta"
         )
         trigger("answer_EST.01_NA")
-        assert js("itemIssues(lem.sections[1].items[0]).length") == 0, "NA exempts photograph"
+        assert js(f"itemIssues(lem.sections[{est_index}].items[0]).length") == 0, "NA exempts photograph"
         trigger("answer_EST.01_OK")
-        assert js("pendingItems().length") == expected_items, "Answered item still needs required evidence"
+        assert js("pendingItems().length") == expected_items - optional_items, "Answered item still needs required evidence"
         values["current"]["photos"] = [
             {"checkpoint": "EST.01", "id": "photo-demo", "uploaded": True}
         ]
         lem.changed.emit()
         QTest.qWait(50)
-        assert js("pendingItems().length") == expected_items - 1
-        assert js("totalAnswered()") == 1
+        assert js("pendingItems().length") == expected_items - optional_items - 1
+        assert js("totalAnswered()") == optional_items + 1
         # Clearing only removes the status, retaining the observations and attached evidence.
         before_photos = copy.deepcopy(values["current"]["photos"])
         trigger("clearAnswer_EST.01")
@@ -619,7 +649,7 @@ def run_tests():
         trigger("removePhoto_photo-demo")
         trigger("confirmRemovePhoto")
         assert removal_calls == ["photo-demo"] and values["current"]["photos"] == []
-        assert js("pendingItems().length") == expected_items
+        assert js("pendingItems().length") == expected_items - optional_items
         values["current"]["photos"] = [
             {"checkpoint": "EST.01", "id": "photo-demo", "uploaded": True}
         ]
@@ -645,13 +675,13 @@ def run_tests():
         QTest.keyClick(w, Qt.Key.Key_Left)
         QTest.qWait(40)
         assert w.property("selectedSection") == 5
-        js("selectSection(1)")
+        js(f"selectSection({est_index})")
         QTest.qWait(50)
         scroll = find_visual(w.contentItem(), "reportScroll")
         scroll.property("contentItem").setProperty("contentY", 300)
         js("selectSection(4)")
         QTest.qWait(50)
-        js("selectSection(1)")
+        js(f"selectSection({est_index})")
         QTest.qWait(50)
         assert (
             abs(scroll.property("contentItem").property("contentY") - 300) < 2
@@ -725,16 +755,25 @@ def run_tests():
         assert not find_visual(w.contentItem(), "finishReportButton").property("enabled")
         trigger("reviewJump_EST.04")
         assert not js("reviewDialog.opened")
-        assert w.property("selectedSection") == 1
+        assert w.property("selectedSection") == est_index
         assert w.property("focusedCheckpoint") == "EST.04"
         assert scroll.property("contentItem").property("contentY") > 0
         # A complete report must enable the final action only after all requirements pass.
         for section in values["sections"]:
             for item in section["items"]:
                 values["current"]["payload"]["answers"][item["id"]] = {"value": "NA", "notes": "Sem veículo disponível" if item.get("na_notes_required") else ""}
+        # Closure also requires unconditional evidence and a matching signature.
+        for section in values["sections"]:
+            for item in section["items"]:
+                if item.get("photo_always") or item.get("signature_required"):
+                    photo_id = "complete-" + item["id"]
+                    values["current"]["photos"].append({"id": photo_id, "checkpoint": item["id"], "mime": "image/png", "uploaded": True})
+                    if item.get("signature_required"):
+                        values["current"]["payload"]["answers"][item["id"]]["value"] = "Técnico de teste"
+                        values["current"]["payload"].setdefault("signatures", {})[item["id"]] = {"signed_by": "Técnico de teste", "photo_id": photo_id}
         lem.changed.emit()
         QTest.qWait(50)
-        assert js("pendingItems().length") == 0
+        assert js("pendingItems().length") == 0, js("JSON.stringify(pendingItems())")
         trigger("reviewReportButton")
         trigger("finishReportButton")
         assert finish_calls == [True]
@@ -860,7 +899,7 @@ def run_tests():
         values["busy"] = False
         values["current"] = snapshot
         lem.changed.emit()
-        js("selectSection(1)")
+        js(f"selectSection({est_index})")
         js("showFeedback=false")
         QTest.qWait(80)
         scroll.property("contentItem").setProperty("contentY", 0)

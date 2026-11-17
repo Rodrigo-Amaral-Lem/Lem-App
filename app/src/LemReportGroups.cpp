@@ -33,9 +33,11 @@ bool hasGroup(QJsonObject report, const QString &scope) {
 
 // Update cached catalogue projections, never the frozen snapshots of other reports.
 void Lem::applyClosedIdentity(const QJsonObject &report) {
-    if (report["status"] != "closed" || report["template"].toObject()["version"].toInt() < 4) return;
+    if (report["status"] != "closed") return;
     const auto snapshot = report["snapshot"].toObject()["charger"].toObject();
     const auto authoritative = report["station_update"].toObject();
+    // Explicitly corrected legacy reports can receive a canonical server update.
+    if (authoritative.isEmpty() && report["template"].toObject()["version"].toInt() < 4) return;
     const auto answers = report["payload"].toObject()["answers"].toObject();
     const QMap<QString, QString> fields{{"EST.02", "manufacturer"}, {"EST.03", "model"}, {"EST.04", "serial"}};
     QJsonObject changes;
@@ -86,7 +88,7 @@ QVariantList Lem::groupCopySources(QString scope) const {
                 {"label", charger["external_id"].toString() + " · " +
                     (summary["status"].toString() == "closed" ? "Concluído" : "Rascunho") +
                     " · " + summary["started"].toString().left(16).replace('T', ' ') +
-                    " · " + id.left(8)}});
+                    " · " + summary["identifier"].toString()}});
         }
     }
     return result;
@@ -100,8 +102,8 @@ void Lem::copyReportGroup(QString sourceId, QString scope) {
         m_pendingCopySource = sourceId; m_pendingCopyScope = scope; m_pendingCopyTarget = m_current["id"].toString();
         status("Cópia adicionada à fila. Será iniciada quando terminar a atual."); return;
     }
-    if (switchingBlocked() || m_catalogueLoading || m_current["status"] != "draft" ||
-        m_current["owner_id"] != m_user["id"] || m_current["_conflict"].toBool() ||
+    if (reportActionBlocked() || m_catalogueLoading || m_current["status"] != "draft" ||
+        (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]) || m_current["_conflict"].toBool() ||
         !hasGroup(m_current, scope) || !flushEdits()) return;
     bool offered = false;
     for (auto v : groupCopySources(scope))
@@ -204,7 +206,7 @@ void Lem::stageQvePhoto(int index, const QByteArray &bytes) {
 
 void Lem::commitQveCopy() {
     if (m_current["id"].toString() != m_qveCopyTarget || m_current["status"] != "draft" ||
-        m_current["owner_id"] != m_user["id"] || m_current["_conflict"].toBool()) {
+        (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]) || m_current["_conflict"].toBool()) {
         failQveCopy("O report de destino deixou de estar disponível para edição."); return;
     }
     auto report = m_current;
@@ -270,8 +272,8 @@ bool Lem::importSignature(QString checkpoint, QUrl url) {
 #ifdef Q_OS_ANDROID
     Q_UNUSED(checkpoint); Q_UNUSED(url); return false;
 #else
-    if (switchingBlocked(false) || m_current["status"] != "draft" ||
-        m_current["owner_id"] != m_user["id"] || m_current["_conflict"].toBool()) return false;
+    if (m_busy || attachingFiles() || copyLocksCheckpoint(m_current["id"].toString(), checkpoint) || m_current["status"] != "draft" ||
+        (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]) || m_current["_conflict"].toBool()) return false;
     if (!url.isLocalFile()) { status("Escolha uma fotografia local da assinatura."); return false; }
     QFile file(url.toLocalFile());
     if (!file.open(QIODevice::ReadOnly) || file.size() > 20 * 1024 * 1024) {
@@ -293,8 +295,11 @@ bool Lem::importSignature(QString checkpoint, QUrl url) {
 }
 
 bool Lem::saveSignature(QString checkpoint, QString dataUrl) {
-    if (switchingBlocked(false) || m_current["status"] != "draft" || m_current["_conflict"].toBool() ||
-        m_current["owner_id"] != m_user["id"] || !flushEdits()) return false;
+    // Signing is a journaled local edit, just like attaching evidence. An upload
+    // acknowledgement merges into the latest edit sequence and cannot erase it.
+    if (m_busy || attachingFiles() || copyLocksCheckpoint(m_current["id"].toString(), checkpoint) ||
+        m_current["status"] != "draft" || m_current["_conflict"].toBool() ||
+        (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]) || !flushEdits()) return false;
     bool supported = false;
     for (auto section : m_current["template"].toObject()["sections"].toArray())
         for (auto item : section.toObject()["items"].toArray())
@@ -349,11 +354,10 @@ bool Lem::saveSignature(QString checkpoint, QString dataUrl) {
 }
 
 void Lem::attachMany(QString checkpoint, const QList<QUrl> &files) {
-    // Attaching is a local edit: an in-flight sync merges its acknowledgement
-    // into the latest report, retaining new evidence and its pending upload flag.
-    if (files.isEmpty() || m_busy || m_refreshing || !m_downloads.isEmpty() ||
-        downloadingPhotos() || attachingFiles() || m_current["status"] != "draft" ||
-        m_current["owner_id"] != m_user["id"] || m_current["_conflict"].toBool() ||
+    // Background sync, catalogue refresh and photo downloads merge into the latest
+    // report. They must not discard a desktop file selection, which is a local edit.
+    if (files.isEmpty() || m_busy || attachingFiles() || m_current["status"] != "draft" ||
+        (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]) || m_current["_conflict"].toBool() ||
         copyLocksCheckpoint(m_current["id"].toString(), checkpoint)) return;
     if (files.size() + m_current["photos"].toArray().size() > 200) {
         status("A seleção ultrapassa o limite de 200 evidências por report."); return;

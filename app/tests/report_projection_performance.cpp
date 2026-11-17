@@ -13,7 +13,7 @@ struct LemReviewTest {
         QJsonArray photos;
         for (int i = 0; i < 200; ++i)
             photos.append(QJsonObject{{"id", QString("photo-%1").arg(i)},
-                {"checkpoint", QString("PC01.%1").arg(i % 13 + 1, 2, 10, QChar('0'))},
+                {"checkpoint", QString("EST.%1").arg(i % 13 + 1, 2, 10, QChar('0'))},
                 {"path", QString("file:///private/photos/photo-%1.jpg").arg(i)},
                 {"uploaded", true}, {"size", 3000000}});
         client.m_current["photos"] = photos;

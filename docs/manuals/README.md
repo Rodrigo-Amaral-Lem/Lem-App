@@ -13,7 +13,7 @@ instale a fonte Arial no sistema. Não é necessário ter a aplicação Lem aber
 | Margens, tipos de letra, cores, capa, índice e rodapé | [template.typ](template.typ) |
 | Ilustrações | PNGs em `images/`; associação às secções em [build_manuals.py](../../tools/build_manuals.py) |
 
-Edite os ficheiros em UTF-8. No Markdown, `##` inicia uma das 15 secções, `###` cria um
+Edite os ficheiros em UTF-8. No Markdown, `##` inicia uma das 16 secções, `###` cria um
 subtítulo, `**texto**` marca negrito e as tabelas usam barras `|`. O conversor suporta
 estes elementos, parágrafos, ligações e passos numerados; não é um conversor Markdown genérico.
 Mantenha os números explícitos dos passos. Se acrescentar secções, ajuste também as associações
@@ -71,3 +71,5 @@ Depois de gerar, abra ambos os PDFs e reveja tabelas, imagens, índice, acentos,
 de página. Uma compilação sem erro não prova que as instruções correspondem ao comportamento da app.
 
 A secção 15 contém a referência de todos os campos. Cada grupo (ou parte de grupo) começa numa página nova. Ao alterar o formulário, reveja também esta referência nas duas edições, incluindo os requisitos de N/A e fotografia.
+
+A secção 16 reúne as referências técnicas e legais do critério elétrico usado nas medições.

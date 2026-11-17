@@ -23,6 +23,10 @@ int main(int argc, char **argv) {
     QFile schema(":/shared/checklist-v1.json");
     CHECK(schema.open(QIODevice::ReadOnly));
     const auto base = QJsonDocument::fromJson(schema.readAll()).object();
+    const QJsonObject historical{{"id", "CARG.01.01"}, {"label", "Teste de carga do conector Mennekes Type 2 #1"}};
+    CHECK(Checklist::label(historical) == "Teste de carga do conector AC Type 2 #1");
+    CHECK(historical["label"] == "Teste de carga do conector Mennekes Type 2 #1");
+    CHECK(Checklist::connectorText("2x Mennekes Type 2; CCS2") == "2x AC Type 2; CCS2");
     QJsonObject example;
     for (auto entry : cases) {
         auto c = entry.toObject();
@@ -38,7 +42,9 @@ int main(int argc, char **argv) {
         for (auto section : result["sections"].toArray())
             if (section.toObject()["id"] == "CARG")
                 tests = section.toObject()["items"].toArray();
-        CHECK(tests.size() == qMax(1, c["names"].toArray().size()) + 3);
+        CHECK(tests.size() == qMax(1, c["names"].toArray().size()) + 4);
+        CHECK(tests.last().toObject()["id"] == "CARG.07");
+        CHECK(tests.last().toObject()["kind"] == "notes");
         for (int i = 0; i < qMax(1, c["names"].toArray().size()); ++i)
             CHECK(tests[i].toObject()["id"] == QString("CARG.01.%1").arg(i + 1, 2, 10, QChar('0')));
         if (c.contains("labels")) {

@@ -16,7 +16,7 @@ for case in cases:
     assert js(f"Measurements.format({key},{raw})")==case.get("formatted"),case
     assert js(f"Measurements.outside({key},{raw})")==case.get("nok",False),case
 
-for key,valid,invalid in [("MAN.07","238,33","238,333"),("MAN.18","4564,4","100000")]:
+for key,valid,invalid in [("MAN.07","238,33","238,333"),("MAN.18","4564,4","100000"),("MAN.11","999999","1000000"),("MAN.12","30","30,1")]:
     field=find_visual(w.contentItem(),"value_"+key)
     assert field is not None
     field.setProperty("text",valid)
@@ -25,10 +25,10 @@ for key,valid,invalid in [("MAN.07","238,33","238,333"),("MAN.18","4564,4","1000
     assert not field.property("acceptableInput")
     field.setProperty("text",valid)
     QMetaObject.invokeMethod(field,"editingFinished",Qt.ConnectionType.DirectConnection)
-    assert values["current"]["payload"]["answers"][key]["value"]==valid+(" V" if key=="MAN.07" else " Ω")
+    assert values["current"]["payload"]["answers"][key]["value"]==valid+(" V" if key=="MAN.07" else " mA" if key in ("MAN.11","MAN.12") else " Ω")
 
 # Actual key events exercise the TextInput validator, not just acceptableInput.
-for key,typed,expected in [("MAN.07","1234","123"),("MAN.18","123456","12345"),("MAN.07","238,333","238,33")]:
+for key,typed,expected in [("MAN.07","1234","123"),("MAN.18","123456","12345"),("MAN.07","238,333","238,33"),("MAN.11","1234567","123456"),("MAN.12","30.5","305")]:
     field=find_visual(w.contentItem(),"value_"+key)
     QMetaObject.invokeMethod(field,"forceActiveFocus",Qt.ConnectionType.DirectConnection)
     QTest.keyClick(w,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier)
@@ -76,5 +76,5 @@ assert values["current"]["payload"]["answers"]["MAN.07"]["value"]=="230 V"
 field.setProperty("text", "Não apli")
 assert not field.property("acceptableInput")
 assert not errors,errors
-print("PASS: 77 shared cases, input precision, formatting, inclusive voltage limits, N-T >=50 and red NOK/NA UI")
+print("PASS: shared cases, integer mA, input precision, formatting, inclusive voltage limits, N-T >=50 and red NOK/NA UI")
 delete(engine)

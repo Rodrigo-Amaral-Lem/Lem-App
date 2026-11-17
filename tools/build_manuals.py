@@ -47,13 +47,16 @@ def convert(platform):
     if marker in lines[:start]:
         audience_start = lines.index(marker) + 1
         audience = next((line.strip() for line in lines[audience_start:start] if line.strip()), '')
-    body = ['#import "template.typ": manual, screenshot', '#show: manual.with(title: ' + quoted(title) + ', edition: ' + quoted(edition) + ', audience: ' + quoted(audience) + ')']
+    body = ['#import "template.typ": manual, screenshot, step, note', '#show: manual.with(title: ' + quoted(title) + ', edition: ' + quoted(edition) + ', audience: ' + quoted(audience) + ')']
     section = 0
 
     def illustration():
         if section in SHOTS[platform]:
             name = SHOTS[platform][section]
-            body.append('#screenshot(' + quoted('images/' + name + '.png') + ', ' + quoted(CAPTIONS[section] + ' - ' + platform + '. Dados fictícios.') + ')')
+            full_page = platform == 'android' and section == 4
+            if full_page:
+                body.append('#pagebreak(weak: true)')
+            body.append('#screenshot(' + quoted('images/' + name + '.png') + ', ' + quoted(CAPTIONS[section] + ' - ' + platform + '. Dados fictícios.') + (', height: 190mm' if full_page else '') + ')')
 
     i = start
     while i < len(lines):
@@ -65,7 +68,12 @@ def convert(platform):
             section += 1
             body.extend(['#pagebreak(weak: true)', '#heading(level: 1)[' + inline(line[3:]) + ']'])
         elif line.startswith('### '):
-            if section == 15 and not line.startswith('### SEG '):
+            # Keep the desktop correction procedure together after the expanded
+            # batch-export instructions instead of splitting its first paragraph.
+            if ((section == 15 and not line.startswith('### SEG '))
+                    or (section == 5 and line.startswith('### Intensidade diferencial'))
+                    or (section == 14 and line.startswith('### Verificação antes de'))
+                    or (platform == 'desktop' and section == 12 and line.startswith('### Corrigir um relatório fechado'))):
                 body.append('#pagebreak(weak: true)')
             body.append('#heading(level: 2)[' + inline(line[4:]) + ']')
         elif line.startswith('|'):
@@ -80,20 +88,26 @@ def convert(platform):
             if any(len(row) != columns for row in data):
                 raise ValueError('Inconsistent table width')
             widths = ['2.3fr', '1.7fr', '1.7fr'] if section == 15 and columns == 3 else ['1fr'] * columns
+            if columns == 2:
+                widths = ['1.05fr', '2.95fr'] if header[0] in ('Campos', 'Item', 'Grupo', 'Formato', 'Tipo ou limite', 'Medição') else ['1.35fr', '2.65fr']
+            elif header == ['Ordem', 'Grupo', 'Conteúdo']:
+                widths = ['0.5fr', '0.8fr', '2.7fr']
             body.append('#table(columns: (' + ', '.join(widths) + '),')
-            body.append('table.header(' + ', '.join('[' + inline(c) + ']' for c in header) + '),')
+            body.append('table.header(repeat: true, ' + ', '.join('[' + inline(c) + ']' for c in header) + '),')
             body.extend(', '.join('[' + inline(c) + ']' for c in row) + ',' for row in data)
             body.append(')')
             continue
         elif re.match(r'^\d+\. ', line):
             number, text = line.split('. ', 1)
-            body.append('#block(above: 5pt, below: 5pt)[' + inline(number + '. ') + inline(text) + ']')
+            body.append('#step(' + quoted(number + '.') + ')[' + inline(text) + ']')
+        elif re.match(r'^\*\*(Fotografia obrigatória:|Pedido de suporte:|Regras comuns:|PDF sem rede:)', line):
+            body.append('#note[' + inline(line) + ']')
         else:
             body.append(inline(line))
         i += 1
     illustration()
-    if section != 15:
-        raise ValueError(f'Expected 15 sections, found {section}')
+    if section != 16:
+        raise ValueError(f'Expected 16 sections, found {section}')
     return '\n'.join(body) + '\n'
 
 
@@ -110,7 +124,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(APP / 'docs/manuals/template.typ', output / 'template.typ')
     shutil.copytree(APP / 'docs/manuals/images', output / 'images', dirs_exist_ok=True)
-    shutil.copyfile(APP / 'shared/branding/lem-logo.png', output / 'lem-logo.png')
+    shutil.copyfile(APP / 'shared/branding/lem-logo-tight.svg', output / 'lem-logo-tight.svg')
     for platform in SHOTS:
         stem = f'manual-utilizador-{platform}'
         source = output / (stem + '.typ')

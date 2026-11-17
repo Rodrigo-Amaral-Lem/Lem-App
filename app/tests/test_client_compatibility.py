@@ -6,6 +6,7 @@ Usage: python app/tests/test_client_compatibility.py /path/to/Lem-compatibility-
 """
 
 import os
+import re
 from pathlib import Path
 import socket
 import subprocess
@@ -26,8 +27,8 @@ async def fixture(request,call_next):
   if mode=='missing':return JSONResponse({'detail':'not found'},status_code=404)
   if mode=='malformed':return JSONResponse({'compatible':True})
   if mode=='wrong-echo':
-   p=app.state.client_policy.evaluate('0.1.32');p['current_version']='0.1.31';return JSONResponse(p)
- if mode=='race' and request.url.path=='/api/login':app.state.client_policy.minimum='0.1.33'
+   p=app.state.client_policy.evaluate(os.environ['LEM_TEST_CLIENT_VERSION']);p['current_version']='0.0.0';return JSONResponse(p)
+ if mode=='race' and request.url.path=='/api/login':app.state.client_policy.minimum=os.environ['LEM_TEST_NEWER_VERSION']
  return await call_next(request)
 @app.get('/__test/stats')
 def stats():return {'calls':calls}
@@ -36,6 +37,9 @@ def stats():return {'calls':calls}
 
 def main(binary):
     root = Path(__file__).resolve().parents[2]
+    current = re.search(r'project\(Lem VERSION ([0-9.]+)', (root / 'app/CMakeLists.txt').read_text()).group(1)
+    major, minor, patch = map(int, current.split('.'))
+    newer = f'{major}.{minor}.{patch + 1}'
     for mode in ["latest", "update", "incompatible", "missing", "malformed", "wrong-echo", "race"]:
         with tempfile.TemporaryDirectory(prefix="lem-version-") as name:
             folder = Path(name)
@@ -43,16 +47,14 @@ def main(binary):
             with socket.socket() as probe:
                 probe.bind(("127.0.0.1", 0))
                 port = probe.getsockname()[1]
-            minimum = "0.1.33" if mode == "incompatible" else "0.1.28"
-            latest = (
-                "0.1.34"
-                if mode == "incompatible"
-                else "0.1.33" if mode in ["update", "race"] else "0.1.32"
-            )
+            minimum = newer if mode == "incompatible" else current
+            latest = newer if mode in ["incompatible", "update", "race"] else current
             env = {
                 **os.environ,
-                "PYTHONPATH": str(Path(os.environ.get("LEM_SERVER_REPO", str(root.parent / "Server"))) / "server"),
+                "PYTHONPATH": os.pathsep.join(filter(None, [str(Path(os.environ.get("LEM_SERVER_REPO", str(root.parent / "Server"))) / "server"), os.environ.get("PYTHONPATH", "")])),
                 "TEST_MODE": mode,
+                "LEM_TEST_CLIENT_VERSION": current,
+                "LEM_TEST_NEWER_VERSION": newer,
                 "ADMIN_EMAIL": "admin@lem.pt",
                 "ADMIN_PASSWORD": "CompatibilityPassword123!",
                 "DATABASE_URL": "sqlite:///" + str(folder / "test.db"),
@@ -97,6 +99,7 @@ def main(binary):
                             env=env,
                             capture_output=True,
                             text=True,
+                            errors="replace",  # Native Qt diagnostics may use the Windows code page.
                             timeout=20,
                         )
                         assert result.returncode == 0, (mode, result.stdout, result.stderr)
@@ -106,10 +109,16 @@ def main(binary):
                             mode,
                             calls,
                         )
-                        assert all(c[2] == "0.1.32" for c in calls if c[1] != "/api/health"), calls
+                        assert all(c[2] == current for c in calls if c[1] != "/api/health"), calls
                         print("PASS:", mode, "login requests:", len(logins))
                 finally:
-                    server.terminate()
+                    # Windows venv launchers can own a separate Python child;
+                    # stop this disposable process tree before deleting its log/DB.
+                    if os.name == "nt" and server.poll() is None:
+                        subprocess.run(["taskkill", "/PID", str(server.pid), "/T", "/F"],
+                                       capture_output=True, timeout=10)
+                    else:
+                        server.terminate()
                     server.wait(timeout=10)
 
 

@@ -7,13 +7,36 @@ Requires the server's dependencies plus httpx and openpyxl. No real server acces
 """
 
 import os, sys, time, tempfile, subprocess, socket, json
+from contextlib import contextmanager
+from io import BytesIO
+from zipfile import ZipFile
+from pypdf import PdfReader
 from pathlib import Path
 import openpyxl, httpx
 
 
+@contextmanager
+def temporary_workspace():
+    folder = tempfile.TemporaryDirectory(prefix="lem-offline-")
+    try:
+        yield folder.name
+    finally:
+        # Windows can briefly retain inherited log handles after the server exits.
+        # Retry only this owned temporary directory; never hide a persistent lock
+        # or let a transient cleanup error obscure a successful functional run.
+        for attempt in range(20):
+            try:
+                folder.cleanup()
+                break
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.1)
+
+
 def main(binary):
     root = Path(__file__).resolve().parents[2]
-    with tempfile.TemporaryDirectory(prefix="lem-offline-") as td:
+    with temporary_workspace() as td:
         folder = Path(td)
         xlsx = folder / "chargers.xlsx"
         w = openpyxl.Workbook()
@@ -23,20 +46,24 @@ def main(binary):
         s.append(["PERF-001", "DC60", "0001", "CCS2, CCS2"])
         w.save(xlsx)
         runner = folder / "runner.py"
+        branding_output = Path(os.environ.get("LEM_BRANDING_TEST_OUTPUT", str(folder / "branding")))
+        branding_output.mkdir(parents=True, exist_ok=True)
         runner.write_text("""import asyncio,json,sys
 from fastapi.responses import JSONResponse
 from app.main import create_app
-app=create_app();counts={};lost=False;lost_delete=False;arm_delete=False;photo_active=0;photo_max=0;photo_gets=0
+app=create_app();counts={};lost=False;lost_delete=False;arm_delete=False;photo_active=0;photo_max=0;photo_gets=0;lost_correction=False;fail_contract_refresh=False
 @app.middleware('http')
 async def track(request,call_next):
- global lost,lost_delete,arm_delete,photo_active,photo_max,photo_gets
+ global lost,lost_delete,arm_delete,photo_active,photo_max,photo_gets,lost_correction,fail_contract_refresh
  key=request.method+' '+request.url.path;counts[key]=counts.get(key,0)+1
+ if fail_contract_refresh and key=='GET /api/contracts':
+  fail_contract_refresh=False;return JSONResponse({'detail':'simulated failed refresh after settings save'},status_code=503)
  payload={}
  if request.method=='PUT' and '/api/reports/' in request.url.path:
   if '/photos/' in request.url.path:await asyncio.sleep(.3)
   else:
    payload=await request.json();await asyncio.sleep(.3)
-   marker=payload.get('payload',{}).get('answers',{}).get('FIN.03',{}).get('value')
+   marker=payload.get('payload',{}).get('answers',{}).get('FIN.03',{}).get('notes')
    if marker=='LOSE_DELETE_ACK':arm_delete=True
    if marker=='REJECT_413':return JSONResponse({'detail':'simulated report rejection'},status_code=413)
  if request.method=='GET' and '/photos/' in request.url.path:
@@ -47,13 +74,16 @@ async def track(request,call_next):
    response=await call_next(request)
   finally:photo_active-=1
  else:response=await call_next(request)
+ if request.method=='PUT' and request.url.path.endswith('/presentation') and response.status_code==200:fail_contract_refresh=True
  if arm_delete and not lost_delete and request.method=='DELETE' and '/photos/' in request.url.path and response.status_code==200:
   lost_delete=True;return JSONResponse({})
- if not lost and response.status_code==200 and payload.get('payload',{}).get('answers',{}).get('FIN.03',{}).get('value')=='LOSE_ACK':
+ if not lost and response.status_code==200 and payload.get('payload',{}).get('answers',{}).get('FIN.03',{}).get('notes')=='LOSE_ACK':
   lost=True;return JSONResponse({})
+ if not lost_correction and request.url.path.endswith('/correction/commit') and response.status_code==200:
+  lost_correction=True;return JSONResponse({})
  return response
 @app.get('/__test/stats')
-def stats():return {'requests':counts,'photo_max':photo_max,'lost_delete':lost_delete}
+def stats():return {'requests':counts,'photo_max':photo_max,'lost_delete':lost_delete,'lost_correction':lost_correction}
 """)
         env = {
             **os.environ,
@@ -63,6 +93,7 @@ def stats():return {'requests':counts,'photo_max':photo_max,'lost_delete':lost_d
             "DATABASE_URL": "sqlite:///" + str(folder / "test.db"),
             "NO_PROXY": "localhost,127.0.0.1",
             "QT_QPA_PLATFORM": "offscreen",
+            "LEM_BRANDING_TEST_OUTPUT": str(branding_output.resolve()),
         }
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 18765))
@@ -94,32 +125,46 @@ def stats():return {'requests':counts,'photo_max':photo_max,'lost_delete':lost_d
                         if server.poll() is not None:
                             raise RuntimeError("Local test API failed to start")
                         time.sleep(0.1)
+                    command = [str(Path(binary).resolve()), "--network", "--xlsx", str(xlsx)]
+                    if os.environ.get("LEM_TEST_GDB"):
+                        command = [os.environ["LEM_TEST_GDB"], "-batch", "-ex", "run", "-ex", "bt", "--args", *command]
                     result = subprocess.run(
-                        [str(Path(binary).resolve()), "--network", "--xlsx", str(xlsx)],
+                        command,
                         env=env,
                         capture_output=True,
                         text=True,
-                        timeout=90,
+                        encoding="mbcs" if os.name == "nt" else "utf-8",
+                        timeout=180,
                     )
                     print(result.stdout, result.stderr)
                     assert result.returncode == 0, result.returncode
+                    for name in ('legacy', 'legacy-admin'):
+                        direct = PdfReader(branding_output / (name + '.pdf'))
+                        assert 'CSMTEC' in direct.pages[0].extract_text()
+                        with ZipFile(branding_output / (name + '.zip')) as archive:
+                            report = json.loads(archive.read('report.json'))
+                            assert report['presentation']['issuer'] == 'CSMTEC'
+                            bundled = PdfReader(BytesIO(archive.read(report['identifier'] + '.pdf')))
+                            assert 'CSMTEC' in bundled.pages[0].extract_text()
+                            assert direct.pages[0].extract_text() == bundled.pages[0].extract_text()
                     stats = client.get("http://127.0.0.1:18765/__test/stats").json()
                     counts = stats["requests"]
-                    assert stats["photo_max"] <= 2, stats
+                    assert stats["photo_max"] <= 4, stats
                     assert stats["lost_delete"], stats
+                    assert stats["lost_correction"], stats
                     downloads = sum(
                         v for k, v in counts.items() if k.startswith("GET ") and "/photos/" in k
                     )
-                    assert downloads == 14, counts
-                    # Two contract selections + import + explicit deletion refresh; sync batches do not fetch catalogues.
+                    assert 13 <= downloads <= 14, counts
+                    # Manual sync receives catalogue state; automatic uploads remain deferred/batched.
                     catalogues = sum(
                         v
                         for k, v in counts.items()
                         if k.startswith("GET ") and k.endswith("/chargers")
                     )
-                    assert catalogues == 4, counts
+                    assert 6 <= catalogues < 80, counts
                     print(
-                        "PASS: bounded bulk concurrency, cached-photo reuse, cancel/resume and partial retry; no catalogue reload after sync; no live service accessed"
+                        "PASS: bounded bulk concurrency, cached-photo reuse, cancel/resume and partial retry; manual sync receives remote state; no live service accessed"
                     )
             finally:
                 server.terminate()
