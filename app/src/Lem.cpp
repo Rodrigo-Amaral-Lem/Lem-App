@@ -338,30 +338,47 @@ void Lem::loadUser() {
 bool Lem::persist() {
     if (m_user.isEmpty() || !flushEdits())
         return false;
+    const auto error = writeCheckpoint(m_reports);
+    if (!error.isEmpty()) status(error);
+    return error.isEmpty();
+}
+
+// The caller has flushed pending edits. A failed write leaves the old cache and
+// all journals available for recovery. Publish the new snapshot atomically.
+QString Lem::writeCheckpoint(const QJsonObject &reports) {
     QSaveFile f(cacheDir() + "/cache.json");
-    if (!f.open(QIODevice::WriteOnly)) {
-        status("Não foi possível gravar o cache local: " + f.errorString());
-        return false;
-    }
+    if (!f.open(QIODevice::WriteOnly))
+        return "Não foi possível abrir a cache local para gravação: " + f.errorString();
     QJsonArray removed;
     for (const auto &id : m_deletedReports)
         removed.append(id);
-    f.write(json({{"deleted_reports", removed},
-                  {"contracts", m_contracts},
-                  {"chargers", m_chargers},
-                  {"reports", m_reports},
-                  {"contract", m_contract},
-                  {"catalogues", m_catalogues},
-                  {"catalogue_times", m_catalogueTimes}}));
-    if (!f.commit()) {
-        status("Erro ao gravar os dados locais: " + f.errorString());
+    const auto bytes = json({{"deleted_reports", removed},
+                             {"contracts", m_contracts},
+                             {"chargers", m_chargers},
+                             {"reports", reports},
+                             {"contract", m_contract},
+                             {"catalogues", m_catalogues},
+                             {"catalogue_times", m_catalogueTimes}});
+    if (f.write(bytes) != bytes.size() || !f.commit())
+        return "Não foi possível gravar a cache local: " + f.errorString();
+    for (auto it = reports.constBegin(); it != reports.constEnd(); ++it)
+        QFile::remove(editPath(it.key()));
+    return {};
+}
+
+// Keep the proposed report out of the editor, catalogue and sync queue until it
+// is durable. Flushing first protects unrelated edits even if this write fails.
+bool Lem::checkpointReport(const QJsonObject &report, const QString &failureMessage) {
+    if (!flushEdits()) return false;
+    auto reports = m_reports;
+    reports.insert(report.value("id").toString(), report);
+    const auto error = writeCheckpoint(reports);
+    if (!error.isEmpty()) {
+        qWarning().noquote() << error;
+        status(failureMessage);
         return false;
     }
-    for (auto it = m_reports.begin(); it != m_reports.end(); ++it) {
-        const auto name = QString::fromLatin1(
-            QCryptographicHash::hash(it.key().toUtf8(), QCryptographicHash::Sha256).toHex());
-        QFile::remove(cacheDir() + "/edits/" + name + ".json");
-    }
+    m_reports = reports;
     return true;
 }
 
@@ -861,10 +878,13 @@ QVariantList Lem::buildChargerRows() const {
 
 // Show cached reports immediately, refresh clean observer/stale copies, or create a draft.
 // Switching reports also releases photographs deferred until a question-group boundary.
-void Lem::openReport(QString chargerId, QString reportId) {
-    if (m_busy || !m_qveCopyTarget.isEmpty() || attachingFiles() || m_user.isEmpty() || m_deletedReports.contains(reportId))
-        return;
-    if (reportId != m_current.value("id").toString())
+bool Lem::openReport(QString chargerId, QString reportId) {
+    if (m_busy || !m_qveCopyTarget.isEmpty() || attachingFiles() || m_user.isEmpty() || m_deletedReports.contains(reportId)) {
+        if (reportId.isEmpty())
+            status("Não foi possível iniciar a intervenção neste momento. Tente novamente.");
+        return false;
+    }
+    if (!reportId.isEmpty() && reportId != m_current.value("id").toString())
         reportSyncBoundary();
     if (!reportId.isEmpty()) {
         if (m_reports.contains(reportId)) {
@@ -887,10 +907,10 @@ void Lem::openReport(QString chargerId, QString reportId) {
             if (!m_token.isEmpty() && !m_current["dirty"].toBool() &&
                 m_current["revision"].toInt() > 0 && stale)
                 refreshReport();
-            return;
+            return true;
         }
         if (!online())
-            return;
+            return false;
         m_busy = true;
         emit changed();
         request("GET", "/api/reports/" + reportId, {}, [this](QByteArray data) {
@@ -898,9 +918,9 @@ void Lem::openReport(QString chargerId, QString reportId) {
             report["dirty"] = false;
             getPhotos(report, 0);
         });
-        return;
+        return true;
     }
-    if (!storageWritable()) return;
+    if (!storageWritable()) return false;
     QJsonObject charger, contract;
     for (auto v : m_chargers)
         if (v.toObject()["id"].toString() == chargerId)
@@ -908,44 +928,49 @@ void Lem::openReport(QString chargerId, QString reportId) {
     for (auto v : m_contracts)
         if (v.toObject()["id"].toString() == m_contract)
             contract = v.toObject();
-    if (charger.isEmpty())
-        return;
+    if (charger.isEmpty()) {
+        status("Carregador indisponível para iniciar a intervenção.");
+        return false;
+    }
     QFile f(":/shared/checklist-v1.json");
     if (!f.open(QIODevice::ReadOnly)) {
         status("Checklist indisponível.");
-        return;
+        return false;
     }
-    m_template = QJsonDocument::fromJson(f.readAll()).object();
     auto details = charger["details"].toObject();
     details["external_id"] = charger["external_id"];
     if (charger.contains("station_id")) details["station_id"] = charger["station_id"];
     QString checklistError;
-    auto configured = Checklist::forCharger(m_template, details, &checklistError);
-    if (!checklistError.isEmpty()) { status(checklistError); return; }
-    m_template = configured;
+    const auto configured = Checklist::forCharger(QJsonDocument::fromJson(f.readAll()).object(), details, &checklistError);
+    if (!checklistError.isEmpty()) { status(checklistError); return false; }
     QJsonObject answers;
     const QMap<QString, QString> identityFields{{"EST.02", "manufacturer"}, {"EST.03", "model"}, {"EST.04", "serial"}};
     for (auto it = identityFields.begin(); it != identityFields.end(); ++it)
         if (!details[it.value()].toString().isEmpty())
             answers[it.key()] = QJsonObject{{"value", details[it.value()]}, {"notes", ""}};
     answers["FIN.02"] = QJsonObject{{"value", m_user["name"]}, {"notes", ""}};
-    m_current = {{"id", uuid()},
-                 {"charger_id", chargerId},
-                 {"contract_id", m_contract},
-                 {"presentation", contract["presentation"]},
-                 {"owner_id", m_user["id"]},
-                 {"revision", 0},
-                 {"status", "draft"},
-                 {"dirty", true},
-                 {"payload",
-                  QJsonObject{{"answers", answers},
-                              {"started", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}}},
-                 {"photos", QJsonArray{}},
-                 {"template", m_template},
-                 {"snapshot", QJsonObject{{"charger", details}, {"contract", contract}}},
-                 {"started", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}};
-    remember();
+    const auto started = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    const QJsonObject draft{{"id", uuid()},
+                            {"charger_id", chargerId},
+                            {"contract_id", m_contract},
+                            {"presentation", contract["presentation"]},
+                            {"owner_id", m_user["id"]},
+                            {"revision", 0},
+                            {"status", "draft"},
+                            {"dirty", true},
+                            {"payload", QJsonObject{{"answers", answers}, {"started", started}}},
+                            {"photos", QJsonArray{}},
+                            {"template", configured},
+                            {"snapshot", QJsonObject{{"charger", details}, {"contract", contract}}},
+                            {"started", started}};
+    if (!checkpointReport(draft, "O novo rascunho não foi criado. Tente novamente após verificar o armazenamento."))
+        return false;
+    // Only leave the previous report once we can open the new one.
+    reportSyncBoundary();
+    m_current = draft;
+    m_template = configured;
     status("Novo rascunho guardado no dispositivo.");
+    return true;
 }
 
 // Despite the historical name, install report/photo METADATA without downloading images.
@@ -1631,8 +1656,11 @@ void Lem::beginReportCorrection() {
 }
 
 bool Lem::setCorrectionTimes(QString started, QString finished) {
-    if (!correctionAllowed(m_current) || m_current["correction"].toObject()["state"] != "editing" ||
-        m_current["status"] != "draft" || m_busy || m_current["_conflict"].toBool()) return false;
+    if (!correctionAllowed(m_current) || m_current.value("correction").toObject()["state"] != "editing" ||
+        m_current.value("status") != "draft" || m_busy || m_current.value("_conflict").toBool()) {
+        status("A correção não está disponível para alterar as datas neste momento.");
+        return false;
+    }
     const auto start = QDateTime::fromString(started.trimmed(), Qt::ISODate);
     const auto end = QDateTime::fromString(finished.trimmed(), Qt::ISODate);
     if (!start.isValid() || !end.isValid() || start.timeSpec() == Qt::LocalTime ||
@@ -1643,12 +1671,15 @@ bool Lem::setCorrectionTimes(QString started, QString finished) {
     auto payload = m_current["payload"].toObject();
     payload["started"] = start.toUTC().toString(Qt::ISODate);
     payload["finished"] = end.toUTC().toString(Qt::ISODate);
-    m_current["payload"] = payload;
-    m_current["started"] = payload["started"];
-    m_current["finished"] = payload["finished"];
-    m_current["dirty"] = true;
-    m_current["_edit_seq"] = m_current["_edit_seq"].toDouble() + 1;
-    remember();
+    auto corrected = m_current;
+    corrected["payload"] = payload;
+    corrected["started"] = payload["started"];
+    corrected["finished"] = payload["finished"];
+    corrected["dirty"] = true;
+    corrected["_edit_seq"] = corrected["_edit_seq"].toDouble() + 1;
+    if (!checkpointReport(corrected, "Não foi possível guardar as datas. As datas anteriores foram conservadas. Tente novamente após verificar o armazenamento."))
+        return false;
+    m_current = corrected;
     status("Datas da correção guardadas. O nome do PDF/ZIP utiliza a data e hora de fim.");
     return true;
 }
@@ -2565,8 +2596,8 @@ void Lem::demo() {
                                                        {"power", "60 kW"}}},
                                {"reports", QJsonArray{}}}};
     m_catalogues[cid] = m_chargers;
-    openReport(chargerId, "");
-    status("DEMONSTRAÇÃO LOCAL • dados fictícios; sem ligação ao servidor.");
+    if (openReport(chargerId, ""))
+        status("DEMONSTRAÇÃO LOCAL • dados fictícios; sem ligação ao servidor.");
 }
 
 // Administrator account listing for management; loadReportOwners lists eligible owners instead.

@@ -162,7 +162,7 @@ class Lem : public QObject {
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void selectContract(QString id);
     // Local-first report editing and synchronization.
-    Q_INVOKABLE void openReport(QString chargerId, QString reportId = {});
+    Q_INVOKABLE bool openReport(QString chargerId, QString reportId = {});
     Q_INVOKABLE void answer(QString checkpoint, QString value, QString notes);
     Q_INVOKABLE void beginNotesEdit(QString checkpoint);
     Q_INVOKABLE void setAssessment(QString checkpoint, QString assessment);
@@ -327,6 +327,8 @@ class Lem : public QObject {
     bool online();
     bool storageWritable();
     bool persist();
+    QString writeCheckpoint(const QJsonObject &reports);
+    bool checkpointReport(const QJsonObject &report, const QString &failureMessage);
     void loadUser();
     QString cacheDir() const;
     void remember();
