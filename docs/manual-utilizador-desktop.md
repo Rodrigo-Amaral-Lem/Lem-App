@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para desktop
 
-Desktop · Aplicação 0.3.0 · Edição 2.3 · 17 de novembro de 2026
+Desktop · Aplicação 0.3.2 · Edição 2.4 · 18 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-desktop.pdf](manual-utilizador-desktop.pdf).
 
@@ -20,7 +20,7 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. As ações são realizadas com o rato e o teclado. Clique nos botões e utilize a roda do rato ou a barra de deslocação para percorrer o relatório.
 
-Este manual descreve a versão 0.3.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
+Este manual descreve a versão 0.3.2 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
 
@@ -365,7 +365,7 @@ N/A dispensa a fotografia, incluindo em **MAN.12**, mas pode exigir uma observa�
 
 ### Observações sugeridas ao selecionar N/A
 
-Ao selecionar N/A com a observação vazia, a app sugere os motivos abaixo. Confirme e adapte o texto à situação real. Ao mudar o estado da pergunta, a sugestão automática inalterada é removida. Ao tocar ou clicar dentro do campo para escrever, também é apagada imediatamente. Uma observação escrita ou modificada pelo utilizador mantém-se, mesmo que tenha o mesmo texto de uma sugestão. Esta regra aplica-se também às sugestões das medições. O botão de observação pede confirmação antes de apagar o texto, mesmo quando obrigatório. Nesse caso, o campo fica visível e vazio e impede a conclusão até ser preenchido. Em **QVE.03**, a observação é opcional.
+Ao selecionar N/A com a observação vazia, a app sugere os motivos abaixo. Confirme e adapte o texto à situação real. Ao mudar o estado da pergunta, a sugestão automática inalterada é removida. Ao tocar ou clicar dentro do campo para escrever, apenas o texto sugerido é apagado imediatamente; o campo de observação continua aberto e com o cursor ativo para escrever. Uma observação escrita ou modificada pelo utilizador mantém-se, mesmo que tenha o mesmo texto de uma sugestão. Esta regra aplica-se a todas as perguntas com observações sugeridas, incluindo as sugestões das medições. O botão de observação pede confirmação antes de apagar o texto, mesmo quando obrigatório. Nesse caso, o campo fica visível e vazio e impede a conclusão até ser preenchido. Em **QVE.03**, a observação é opcional.
 
 | Item | Sugestão editável |
 | --- | --- |

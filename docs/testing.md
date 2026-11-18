@@ -59,6 +59,7 @@ python app/tests/test_general_notes.py
 python app/tests/test_safety_layout.py
 python app/tests/test_rules_057_ui.py
 python app/tests/test_measurement_inputs.py
+python app/tests/test_suggested_notes_ui.py
 python app/tests/test_photo_delegate_stability.py
 python app/tests/test_report_groups_054.py
 ```

@@ -4109,7 +4109,9 @@ ApplicationWindow {
                                                     onTextChanged: if (activeFocus)
                                                         lem.answer(itemCard.modelData.id, win.answerFor(itemCard.modelData.id).value || "", text)
                                                     onActiveFocusChanged: if (activeFocus) {
-                                                        // Replace only a still-generated suggestion on intentional editing.
+                                                        // Keep the editor open before clearing generated text. Optional
+                                                        // observations (e.g. MAN.18 OK) would otherwise hide and lose focus.
+                                                        itemCard.noteExpanded = true;
                                                         lem.beginNotesEdit(itemCard.modelData.id);
                                                         Qt.callLater(function () {
                                                             const y = notes.mapToItem(reportBody, 0, 0).y;
