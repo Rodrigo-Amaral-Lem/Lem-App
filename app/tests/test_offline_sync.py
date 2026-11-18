@@ -3,9 +3,12 @@
 
 """Disposable local HTTP integration runner for the C++ offline_sync executable.
 Usage: python app/tests/test_offline_sync.py /path/to/Lem-offline-test
+Use --delete-ack for the focused two-process test, or --legacy-delete-ack to replay
+the old server response in the race.
 Requires the server's dependencies plus httpx and openpyxl. No real server access.
 """
 
+import argparse
 import os, sys, time, tempfile, subprocess, socket, json
 from contextlib import contextmanager
 from io import BytesIO
@@ -34,7 +37,7 @@ def temporary_workspace():
                 time.sleep(0.1)
 
 
-def main(binary):
+def main(binary, delete_ack=False, legacy_delete_ack=False):
     root = Path(__file__).resolve().parents[2]
     with temporary_workspace() as td:
         folder = Path(td)
@@ -84,7 +87,70 @@ async def track(request,call_next):
  return response
 @app.get('/__test/stats')
 def stats():return {'requests':counts,'photo_max':photo_max,'lost_delete':lost_delete,'lost_correction':lost_correction}
-""")
+""" + ("""
+import os
+import httpx
+
+delete_cases = {}
+delete_faults = {}
+legacy_delete_ack = os.environ.get('LEM_TEST_LEGACY_DELETE_ACK') == '1'
+
+@app.middleware('http')
+async def delete_ack_faults(request, call_next):
+    parts = request.url.path.strip('/').split('/')
+    if parts[:2] != ['api', 'reports'] or len(parts) not in (3, 5):
+        return await call_next(request)
+    report_id = parts[2]
+    if len(parts) == 3 and request.method == 'PUT':
+        body = await request.json()
+        marker = body['payload']['answers'].get('FIN.03', {}).get('notes')
+        if marker in ('RACE_DELETE_ACK', 'DROP_UPLOAD_ACK', 'DROP_DELETE_ACK'):
+            delete_cases.setdefault(report_id, marker)
+        return await call_next(request)
+    case = delete_cases.get(report_id)
+    if len(parts) != 5 or case in delete_faults:
+        return await call_next(request)
+    path = '/api/reports/' + report_id
+    if case == 'RACE_DELETE_ACK' and request.method == 'DELETE':
+        # A has finished its GET. Give B a distinct session and write through
+        # the real API immediately before dispatching A's DELETE.
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url='http://fixture') as writer:
+            version = {'X-Lem-Client-Version': request.headers['X-Lem-Client-Version']}
+            login = await writer.post('/api/login', headers=version, json={
+                'email': 'admin@lem.pt', 'password': 'IntegrationPassword123!',
+            })
+            login.raise_for_status()
+            headers = {**version, 'Authorization': 'Bearer ' + login.json()['token']}
+            current = (await writer.get(path, headers=headers)).raise_for_status().json()
+            assert current['revision'] == int(request.query_params['base_revision'])
+            assert all(photo['id'] != parts[4] for photo in current['photos'])
+            payload = current['payload']
+            payload['answers']['FIN.03']['notes'] = 'Another device saved this answer'
+            saved = await writer.put(path, headers=headers, json={
+                'charger_id': current['charger_id'], 'base_revision': current['revision'],
+                'checklist_version': current['template']['version'], 'status': 'draft', 'payload': payload,
+            })
+            revision = saved.raise_for_status().json()['revision']
+        response = await call_next(request)
+        delete_faults[case] = {'report_id': report_id, 'revision': revision, 'status': response.status_code}
+        if legacy_delete_ack:
+            return JSONResponse({'id': parts[4], 'deleted': True, 'revision': revision})
+        return response
+    response = await call_next(request)
+    if response.status_code == 200 and (
+        (case == 'DROP_UPLOAD_ACK' and request.method == 'PUT') or
+        (case == 'DROP_DELETE_ACK' and request.method == 'DELETE')
+    ):
+        delete_faults[case] = {'report_id': report_id, 'photo_id': parts[4]}
+        # The write committed. Suppress its application acknowledgement.
+        return JSONResponse({'detail': 'test fixture discarded committed response'}, status_code=503)
+    return response
+
+@app.get('/__test/delete-ack')
+def delete_ack_stats():
+    return delete_faults
+""" if delete_ack else ""))
         env = {
             **os.environ,
             "PYTHONPATH": os.pathsep.join(filter(None, [str(Path(os.environ.get("LEM_SERVER_REPO", str(root.parent / "Server"))) / "server"), os.environ.get("PYTHONPATH", "") ])),
@@ -93,6 +159,7 @@ def stats():return {'requests':counts,'photo_max':photo_max,'lost_delete':lost_d
             "DATABASE_URL": "sqlite:///" + str(folder / "test.db"),
             "NO_PROXY": "localhost,127.0.0.1",
             "QT_QPA_PLATFORM": "offscreen",
+            "LEM_TEST_LEGACY_DELETE_ACK": "1" if legacy_delete_ack else "0",
             "LEM_BRANDING_TEST_OUTPUT": str(branding_output.resolve()),
         }
         with socket.socket() as probe:
@@ -114,6 +181,7 @@ def stats():return {'requests':counts,'photo_max':photo_max,'lost_delete':lost_d
                 stdout=log,
                 stderr=log,
             )
+            print(f"Owned test API process {server.pid} on 127.0.0.1:18765", flush=True)
             try:
                 with httpx.Client(trust_env=False) as client:
                     for _ in range(100):
@@ -125,19 +193,23 @@ def stats():return {'requests':counts,'photo_max':photo_max,'lost_delete':lost_d
                         if server.poll() is not None:
                             raise RuntimeError("Local test API failed to start")
                         time.sleep(0.1)
-                    command = [str(Path(binary).resolve()), "--network", "--xlsx", str(xlsx)]
+                    command = [str(Path(binary).resolve())]
                     if os.environ.get("LEM_TEST_GDB"):
                         command = [os.environ["LEM_TEST_GDB"], "-batch", "-ex", "run", "-ex", "bt", "--args", *command]
-                    result = subprocess.run(
-                        command,
-                        env=env,
-                        capture_output=True,
-                        text=True,
-                        encoding="mbcs" if os.name == "nt" else "utf-8",
-                        timeout=180,
-                    )
-                    print(result.stdout, result.stderr)
-                    assert result.returncode == 0, result.returncode
+
+                    def run_native(*args):
+                        result = subprocess.run(
+                            [*command, *args], env=env, capture_output=True, text=True,
+                            encoding="mbcs" if os.name == "nt" else "utf-8", timeout=180,
+                        )
+                        print(result.stdout, result.stderr)
+                        return result.returncode
+
+                    args = ("--network", "--xlsx", str(xlsx))
+                    if delete_ack:
+                        check_delete_ack(client, run_native, args, folder)
+                        return
+                    assert run_native(*args) == 0
                     for name in ('legacy', 'legacy-admin'):
                         direct = PdfReader(branding_output / (name + '.pdf'))
                         assert 'CSMTEC' in direct.pages[0].extract_text()
@@ -171,5 +243,47 @@ def stats():return {'requests':counts,'photo_max':photo_max,'lost_delete':lost_d
                 server.wait(timeout=10)
 
 
+def check_delete_ack(client, run_native, args, folder):
+    state = ("--state", str(folder))
+    first = run_native(*args, *state, "--delete-ack")
+    url = "http://127.0.0.1:18765"
+    auth = {"X-Lem-Client-Version": "0.3.2"}
+    login = client.post(url + "/api/login", headers=auth,
+                        json={"email": "admin@lem.pt", "password": "IntegrationPassword123!"})
+    auth["Authorization"] = "Bearer " + login.raise_for_status().json()["token"]
+    faults = client.get(url + "/__test/delete-ack").raise_for_status().json()
+
+    def report(case):
+        return client.get(f"{url}/api/reports/{faults[case]['report_id']}",
+                          headers=auth).raise_for_status().json()
+
+    raced = report("RACE_DELETE_ACK")
+    race_answer = raced["payload"]["answers"]["FIN.03"]["notes"]
+    print(f"Stale DELETE HTTP {faults['RACE_DELETE_ACK']['status']}; "
+          f"remote revision {raced['revision']}, status {raced['status']}, answer {race_answer!r}")
+    assert first == 0, first
+    assert faults["RACE_DELETE_ACK"]["status"] == 409
+    assert race_answer == "Another device saved this answer"
+    assert raced["revision"] == faults["RACE_DELETE_ACK"]["revision"] and raced["status"] == "draft"
+    assert report("DROP_UPLOAD_ACK")["photos"] == []
+
+    dropped = faults["DROP_DELETE_ACK"]
+    deleted = report("DROP_DELETE_ACK")
+    base = json.loads((folder / "resume.json").read_text())["base"]
+    assert deleted["revision"] == base + 1
+    assert all(photo["id"] != dropped["photo_id"] for photo in deleted["photos"])
+    assert run_native(*state, "--resume-delete-ack") == 0
+    closed = report("DROP_DELETE_ACK")
+    # Closing adds the finish timestamp in a draft PUT before the final closure PUT.
+    assert (closed["revision"], closed["status"]) == (base + 4, "closed")
+    assert closed["payload"]["answers"]["FIN.03"]["notes"] == "Newer local answer after lost response"
+
+
 if __name__ == "__main__":
-    main(sys.argv[1])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("binary")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--delete-ack", action="store_true", help="run the focused DELETE ACK integration")
+    modes.add_argument("--legacy-delete-ack", action="store_true", help="also replay the old server's unsafe ACK")
+    options = parser.parse_args()
+    main(options.binary, options.delete_ack or options.legacy_delete_ack, options.legacy_delete_ack)

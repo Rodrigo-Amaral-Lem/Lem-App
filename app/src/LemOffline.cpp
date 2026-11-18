@@ -403,6 +403,7 @@ bool Lem::mergeSync(QJsonObject sent, bool complete) {
     if (ackDeleted.contains(latest.value("_inflight_delete_id"))) {
         latest.remove("_inflight_delete_id");
         latest.remove("_inflight_delete_revision");
+        latest.remove("_inflight_delete_payload");
     }
     if (complete) {
         bool uploaded = true;
@@ -538,6 +539,9 @@ void Lem::syncNext(QStringList ids, int index) {
                         for (const auto &key : {"revision", "snapshot", "template", "started"})
                             if (saved.contains(key))
                                 local[key] = saved[key];
+                        // Record the server's representation, which can normalize
+                        // answers during PUT. Keep the editable payload separate.
+                        local["_inflight_delete_payload"] = saved.value("payload");
                         if (mergeSync(local))
                             syncPhotos(ids, index, local, 0);
                     });
@@ -607,27 +611,35 @@ void Lem::syncNext(QStringList ids, int index) {
             }
             return;
         }
+        bool confirmedDelete = false;
         if (remote["revision"] != r["revision"]) {
             const bool lostAck = remote["payload"] == r["_inflight_payload"] &&
                                  remote["revision"] == r["_inflight_revision"];
-            // A photograph DELETE advances the server revision by one. If only its
-            // acknowledgement was lost, the server has the answers this device sent,
-            // exactly one more revision, and no longer has the photograph queued for
-            // removal. Adopt that revision; the retried DELETE is idempotent.
-            bool lostDeleteAck = false;
-            const auto queuedDeletions = r["deleted_photos"].toArray();
+            auto queuedDeletions = r["deleted_photos"].toArray();
+            const auto remotePhotos = remote["photos"].toArray();
+            // An older server can return the new revision even when DELETE did
+            // nothing. Verify the actual report before adopting that revision.
+            // Older checkpoints may only have a matching local or prior PUT payload.
+            const bool matchesDeleteBase = r.contains("_inflight_delete_payload")
+                ? remote["payload"] == r["_inflight_delete_payload"]
+                : samePayload || (r["_inflight_revision"] == r["revision"] &&
+                                  remote["payload"] == r["_inflight_payload"]);
             if (!lostAck && !queuedDeletions.isEmpty() &&
                 r.value("_inflight_delete_id") == queuedDeletions.first() &&
                 r.value("_inflight_delete_revision") == r["revision"] &&
-                remote["revision"].toInt() == r["revision"].toInt() + 1 &&
-                (samePayload || remote["payload"] == r["_inflight_payload"])) {
-                lostDeleteAck = true;
-                const auto pending = queuedDeletions.first().toString();
-                for (auto value : remote["photos"].toArray())
-                    if (value.toObject()["id"].toString() == pending)
-                        lostDeleteAck = false;
+                remote["revision"] == QJsonValue(r["revision"].toDouble() + 1) &&
+                remote["status"] == "draft" && remote["payload"].isObject() &&
+                remote["photos"].isArray() && matchesDeleteBase) {
+                const auto pending = queuedDeletions.first();
+                confirmedDelete = std::none_of(remotePhotos.begin(), remotePhotos.end(),
+                    [&pending](const auto &photo) { return photo.toObject()["id"] == pending; });
+                if (confirmedDelete) {
+                    queuedDeletions.removeAt(0);
+                    r["deleted_photos"] = queuedDeletions;
+                    r["_ack_deleted"] = QJsonArray{pending};
+                }
             }
-            if (!lostAck && !lostDeleteAck) {
+            if (!lostAck && !confirmedDelete) {
                 syncFailed(409, "Report alterado noutro dispositivo. Rascunho local conservado.");
                 return;
             }
@@ -640,10 +652,13 @@ void Lem::syncNext(QStringList ids, int index) {
         const auto localTemplate = r["template"].toObject();
         const bool sameForm = remoteTemplate["version"] == localTemplate["version"] &&
             remoteTemplate["frozen_upload"].toBool() == localTemplate["frozen_upload"].toBool();
-        if (samePayload && sameForm) {
-            if (mergeSync(r))
-                syncPhotos(ids, index, r, 0);
-        } else
+        r["_inflight_delete_payload"] = remote.value("payload");
+        // Checkpoint a recovered deletion before sending any newer local answers.
+        if ((confirmedDelete || (samePayload && sameForm)) && !mergeSync(r))
+            return;
+        if (samePayload && sameForm)
+            syncPhotos(ids, index, r, 0);
+        else
             send(r);
     });
 }
@@ -660,6 +675,7 @@ void Lem::syncPhotos(QStringList ids, int index, QJsonObject r, int photoIndex) 
         auto latest = m_reports.value(id).toObject();
         latest["_inflight_delete_id"] = pid;
         latest["_inflight_delete_revision"] = r["revision"];
+        latest["_inflight_delete_payload"] = r.value("_inflight_delete_payload");
         m_reports[id] = latest;
         if (m_current.value("id").toString() == id)
             m_current = latest;
@@ -673,13 +689,24 @@ void Lem::syncPhotos(QStringList ids, int index, QJsonObject r, int photoIndex) 
                         "?base_revision=" + QString::number(r["revision"].toInt()),
                     {}, [this, ids, index, r, deleted, photoIndex, pid](QByteArray data) mutable {
                         const auto saved = QJsonDocument::fromJson(data).object();
-                        if (!saved.contains("revision")) {
+                        const auto revision = saved.value("revision");
+                        if (saved.value("id") != pid || saved.value("deleted") != QJsonValue(true) ||
+                            !revision.isDouble()) {
                             syncFailed(0, "Resposta inválida ao remover fotografia.");
+                            return;
+                        }
+                        if (revision == QJsonValue(r["revision"].toDouble() + 1)) {
+                            // Reuse the durable DELETE recovery path for a one-step
+                            // advance. The response alone cannot confirm the answers.
+                            syncNext(ids, index);
+                            return;
+                        }
+                        if (revision != r.value("revision")) {
+                            syncFailed(409, "Report alterado noutro dispositivo. Rascunho local conservado.");
                             return;
                         }
                         deleted.removeAt(0);
                         r["deleted_photos"] = deleted;
-                        r["revision"] = saved["revision"];
                         auto ack = r["_ack_deleted"].toArray();
                         ack.append(pid);
                         r["_ack_deleted"] = ack;

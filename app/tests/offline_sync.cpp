@@ -17,6 +17,7 @@
 #include <QFileInfo>
 #include <QDebug>
 #include <QNetworkProxy>
+#include <QSettings>
 #include <QDesktopServices>
 #include <QUuid>
 #include <functional>
@@ -118,6 +119,125 @@ struct LemReviewTest {
         emit client.changed();
     }
 };
+
+static bool completeAnswers(Lem &client, const QString &source) {
+    for (auto section : client.sections())
+        for (auto entry : section.toMap()["items"].toList()) {
+            const auto item = entry.toMap();
+            const auto key = item["id"].toString();
+            client.answer(key, item["kind"] == "notes" ? "" : "NA", "Sem conector/veículo disponível");
+            if (item["photo_always"].toBool()) client.attach(key, QUrl::fromLocalFile(source));
+            if (item["signature_required"].toBool()) {
+                client.answer(key, "Técnico de teste", "");
+                QFile png(source);
+                if (!png.open(QIODevice::ReadOnly) ||
+                    !client.saveSignature(key, "data:image/png;base64," + QString::fromLatin1(png.readAll().toBase64())))
+                    return false;
+            }
+        }
+    return true;
+}
+
+static QString notes(Lem &client, const QString &key) {
+    return client.current()["payload"].toMap()["answers"].toMap()[key].toMap()["notes"].toString();
+}
+
+static int exerciseDeleteAck(Lem &client, const QString &charger, const QString &source, const QString &state) {
+    const auto attach = [&] {
+        client.attach("SITE.02", QUrl::fromLocalFile(source));
+        return client.current()["photos"].toList().last().toMap()["id"].toString();
+    };
+    const auto sync = [&] {
+        client.sync();
+        return settled(client);
+    };
+
+    client.openReport(charger);
+    CHECK(completeAnswers(client, source));
+    client.answer("FIN.03", "", "ORIGINAL");
+    CHECK(sync() && !client.current()["dirty"].toBool());
+    const auto racedReport = client.current()["id"].toString();
+    const auto base = client.current()["revision"];
+    client.removePhoto(attach()); // Never uploaded. A same-base absence is a successful no-op.
+    CHECK(sync() && !client.current()["dirty"].toBool());
+    CHECK(client.current()["revision"] == base && client.current()["deleted_photos"].toList().isEmpty());
+
+    client.answer("FIN.03", "", "RACE_DELETE_ACK");
+    CHECK(sync() && !client.current()["dirty"].toBool());
+    const auto raceBase = client.current()["revision"];
+    client.removePhoto(attach()); // The API fixture schedules B's PUT immediately before DELETE.
+    client.sync();
+    CHECK(client.syncing());
+    // Keep a newer local edit pending so a catalogue refresh cannot update the
+    // cached answers before the next sync attempt exercises the stale revision.
+    client.answer("SITE.02", "NA", "A edits another answer");
+    CHECK(settled(client));
+    const bool protectedBase = client.current()["_conflict"].toBool() &&
+        client.current()["revision"] == raceBase && client.current()["deleted_photos"].toList().size() == 1;
+    // The earlier client actually uploads this unrelated answer and closes over B's answers.
+    CHECK(sync());
+    client.finish();
+    CHECK(sync());
+    qInfo() << "Absent-photo race:" << protectedBase << client.current()["revision"] << client.current()["status"];
+    CHECK(protectedBase);
+    CHECK(client.current()["status"] == "draft" && notes(client, "FIN.03") == "RACE_DELETE_ACK");
+    CHECK(notes(client, "SITE.02") == "A edits another answer");
+
+    client.openReport(charger);
+    client.answer("FIN.03", "", "DROP_UPLOAD_ACK");
+    const auto lostUpload = attach();
+    CHECK(sync() && client.current()["dirty"].toBool());
+    CHECK(!client.current()["photos"].toList().first().toMap()["uploaded"].toBool());
+    client.removePhoto(lostUpload);
+    CHECK(sync() && !client.current()["dirty"].toBool());
+    CHECK(client.current()["photos"].toList().isEmpty() && client.current()["deleted_photos"].toList().isEmpty());
+
+    client.openReport(charger);
+    CHECK(completeAnswers(client, source));
+    client.answer("FIN.03", "", "DROP_DELETE_ACK");
+    const auto lostDelete = attach();
+    CHECK(sync() && !client.current()["dirty"].toBool());
+    const auto lostBase = client.current()["revision"].toInt();
+    client.removePhoto(lostDelete);
+    CHECK(sync() && client.current()["dirty"].toBool() && !client.current()["_conflict"].toBool());
+    CHECK(client.current()["_inflight_delete_id"] == lostDelete);
+    client.answer("FIN.03", "", "Newer local answer after lost response");
+    CHECK(write(state + "/resume.json", {
+        {"race_id", racedReport}, {"id", client.current()["id"].toString()},
+        {"photo_id", lostDelete}, {"base", lostBase},
+    }));
+    qInfo() << "PASS: same-base no-op, interleaved answer protection, lost upload response and durable DELETE intent";
+    return 0;
+}
+
+static int resumeDeleteAck(const QString &state) {
+    const auto fixture = read(state + "/resume.json");
+    Lem client(state + "/device");
+    client.setServer("http://127.0.0.1:18765");
+    client.login("admin@lem.pt", "IntegrationPassword123!");
+    CHECK(settled(client) && client.authenticated());
+    client.openReport("", fixture["race_id"].toString());
+    CHECK(settled(client) && client.current()["_conflict"].toBool());
+    CHECK(client.current()["deleted_photos"].toList().size() == 1);
+    client.openReport("", fixture["id"].toString());
+    CHECK(settled(client) && client.current()["dirty"].toBool());
+    CHECK(client.current()["_inflight_delete_id"].toString() == fixture["photo_id"].toString());
+    CHECK(notes(client, "FIN.03") == "Newer local answer after lost response");
+    CHECK(client.current()["revision"].toInt() == fixture["base"].toInt());
+
+    client.sync();
+    CHECK(settled(client) && !client.current()["dirty"].toBool() && !client.current()["_conflict"].toBool());
+    CHECK(client.current()["deleted_photos"].toList().isEmpty() && !client.current().contains("_inflight_delete_id"));
+    CHECK(client.current()["revision"].toInt() == fixture["base"].toInt() + 2);
+    client.finish();
+    CHECK(client.current()["status"] == "closed");
+    client.sync();
+    CHECK(settled(client) && !client.current()["dirty"].toBool());
+    CHECK(notes(client, "FIN.03") == "Newer local answer after lost response");
+    qInfo() << "PASS: process restart recovered the committed DELETE, kept newer local edits and closed";
+    return 0;
+}
+
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
     ExportViewer exportViewer;
@@ -127,7 +247,15 @@ int main(int argc, char **argv) {
     app.setApplicationVersion("0.3.2");
     app.setOrganizationName("Lem-Offline-Test");
     app.setApplicationName("Lem Offline Test");
+    const auto args = app.arguments();
+    const auto state = args.contains("--state") ? args.value(args.indexOf("--state") + 1) : QString{};
     QTemporaryDir temp;
+    // Both processes use the same disposable settings, including the server URL.
+    const auto settingsRoot = state.isEmpty() ? temp.path() : state;
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsRoot + "/settings");
+    QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, settingsRoot + "/system-settings");
+    if (args.contains("--resume-delete-ack")) return resumeDeleteAck(state);
     QImage image(64, 48, QImage::Format_RGB32);
     image.fill(Qt::darkCyan);
     const auto source = temp.path() + "/original.png";
@@ -528,7 +656,7 @@ int main(int argc, char **argv) {
         qInfo() << "PASS: edit journals/restart and protected draft/closed-photo cache policy";
         return 0;
     }
-    Lem c(temp.path() + "/network");
+    Lem c(state.isEmpty() ? temp.path() + "/network" : state + "/device");
     bool sawTransfer = false, sawPhotoContext = false, sawWaiting = false, validProgress = true;
     QObject::connect(&c, &Lem::operationChanged, &app, [&] {
         const auto overall = c.operationStatus();
@@ -562,6 +690,7 @@ int main(int argc, char **argv) {
     CHECK(settled(c));
     CHECK(!c.chargers().isEmpty());
     const auto charger = c.chargers().first().toMap()["id"].toString();
+    if (args.contains("--delete-ack")) return exerciseDeleteAck(c, charger, source, state);
     c.openReport(charger);
     const auto frozenTests = c.current()["template"].toMap()["load_test_connectors"].toList();
     CHECK(frozenTests == QVariantList({"CCS2", "CCS2"}));
@@ -703,22 +832,7 @@ int main(int argc, char **argv) {
     CHECK(settled(c)); // Manual synchronization now also receives catalogue/report changes.
     CHECK(c.current()["id"].toString() == retryId);
     // Complete while an older draft snapshot is in flight, then start another job.
-    auto completeAnswers = [&] {
-        for (auto sv : c.sections())
-            for (auto iv : sv.toMap()["items"].toList()) {
-                const auto item = iv.toMap();
-                const auto key = item["id"].toString();
-                c.answer(key, item["kind"] == "notes" ? "" : "NA", "Sem conector/veículo disponível");
-                if (item["photo_always"].toBool()) c.attach(key, QUrl::fromLocalFile(source));
-                if (item["signature_required"].toBool()) {
-                    c.answer(key, "Técnico de teste", "");
-                    QFile png(source);
-                    if (!png.open(QIODevice::ReadOnly) || !c.saveSignature(key, "data:image/png;base64," + QString::fromLatin1(png.readAll().toBase64()))) return false;
-                }
-            }
-        return true;
-    };
-    CHECK(completeAnswers());
+    CHECK(completeAnswers(c, source));
     bool finishedDuringSync = false;
     bool signedDuringSync = false;
     QString following;
@@ -767,7 +881,7 @@ int main(int argc, char **argv) {
     CHECK(until([&] { return !c.current()["dirty"].toBool() && !c.syncing(); }, 6000));
     // Manual local cleanup preserves the server report and reopens without old image paths.
     c.openReport("", rid);
-    CHECK(completeAnswers());
+    CHECK(completeAnswers(c, source));
     c.finish();
     CHECK(settled(c));
     CHECK(c.current()["status"].toString() == "closed");
