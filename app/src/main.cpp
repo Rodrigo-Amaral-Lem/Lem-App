@@ -30,7 +30,7 @@ int main(int argc, char **argv) {
     app.setOrganizationName("Lem");
     app.setApplicationName("Lem");
     app.setApplicationDisplayName("Lem");
-    app.setApplicationVersion("0.3.2");
+    app.setApplicationVersion("0.4.0");
 #ifdef Q_OS_ANDROID
     // Keep evidence if a platform window closure ends the process again.
     QObject::connect(&app, &QGuiApplication::lastWindowClosed, &app, []() {

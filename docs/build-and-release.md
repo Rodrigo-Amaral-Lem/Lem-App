@@ -1,13 +1,13 @@
 # Build and release the client
 
-This guide describes the current `0.3.2` source. Run all commands from the **App repository
+This guide describes the current `0.4.0` source. Run all commands from the **App repository
 root**, which contains `app/`, `shared/` and `docs/`. Build and staging examples use ignored
 subdirectories of `build/`; no sibling working directory is required.
 
-The prepared version is **0.3.2**, Android code **179**, checklist **7**. Minimum compatible
-client remains **0.2.6**, with latest **0.3.2**; deploy the updated server policy before the app.
-This batch uses the user's explicit 0.3.2 target. Normally, commit-preparation requests trigger
-one minor increment with patch zero per batch. Prepare detailed
+The prepared version is **0.4.0**, Android code **180**, checklist **7**. Minimum compatible
+client remains **0.2.6**, with latest **0.4.0**; deploy the updated server policy before the app.
+This batch consolidates T1/T2 as 0.4.0 under the minor-version policy. Follow-up edits
+do not increment this preparation batch again. Prepare detailed
 messages and user-executed `git commit -S` commands as required by the
 [version policy](../../Common/docs/maintenance.md#version-policy). A sign-off (`-s`) is not signing.
 
@@ -249,7 +249,7 @@ python -m unittest discover -s tools/tests -v
 ### Qt Creator and device checks
 
 Use an Android Qt kit, compatible SDK/NDK/JDK and the desired ABIs in Qt Creator. The project
-currently declares package ID `pt.lem.app`, version name `0.3.2`, and version code **179**.
+currently declares package ID `pt.lem.app`, version name `0.4.0`, and version code **180**.
 Increase the version code for a future Android release. Changing a package ID creates a different
 installation; synchronize outstanding reports before switching or uninstalling.
 

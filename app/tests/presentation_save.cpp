@@ -43,7 +43,7 @@ static QString state(const Lem &client) {
 }
 
 int main(int argc, char **argv) {
-    QGuiApplication app(argc, argv); app.setApplicationVersion("0.3.2");
+    QGuiApplication app(argc, argv); app.setApplicationVersion("0.4.0");
     QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
     QTemporaryDir root; QTcpServer server; CHECK(server.listen(QHostAddress::LocalHost));
     const auto endpoint = "http://127.0.0.1:" + QString::number(server.serverPort());

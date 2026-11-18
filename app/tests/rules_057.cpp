@@ -150,4 +150,4 @@ struct LemReviewTest {
   qInfo()<<"PASS: independent mandatory readings, NOK notes, NA reset, optional serial photo, closed/pending cleanup and restart";return true;
  }
 };
-int main(int argc,char**argv){QGuiApplication app(argc,argv);app.setApplicationVersion("0.3.2");QTemporaryDir dir;Lem c(dir.path());return LemReviewTest::run(c,dir.path())?0:1;}
+int main(int argc,char**argv){QGuiApplication app(argc,argv);app.setApplicationVersion("0.4.0");QTemporaryDir dir;Lem c(dir.path());return LemReviewTest::run(c,dir.path())?0:1;}
