@@ -57,6 +57,14 @@ stays queued. `flushEdits()` is a blocking durability boundary; `persist()` chec
 removing old journals. Startup replays newer eligible journals, excluding tombstones and mismatched
 owners.
 
+Starting a new intervention and saving correction dates use `checkpointReport()`.
+It flushes ordinary journaled edits before atomically writing a cache with the proposed
+report. The editor and sync queue see the proposed draft or dates only after commit.
+On failure, the previous report state and its journals stay recoverable. The catalogue
+offers another attempt at **Nova intervenção**, and the date dialog keeps the entered
+values for retry. The ordinary `persist()` contract remains a success flag for callers
+checkpointing their current state.
+
 Cache and journal reads validate JSON and the essential report structure. An unreadable or incomplete
 local store is a recovery condition: the client reports a local-save error and suspends report metadata writes,
 synchronization and evidence cleanup. It preserves the original files rather than replacing them

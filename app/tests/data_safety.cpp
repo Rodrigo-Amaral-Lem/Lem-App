@@ -12,6 +12,7 @@
 #include <QDebug>
 #include <QJsonDocument>
 #include <QFileInfo>
+#include <QSaveFile>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QNetworkProxy>
@@ -42,7 +43,151 @@ struct LemReviewTest {
             QCoreApplication::processEvents();
         return !client.busy();
     }
+
+    static bool checkpoint(const QString &root, bool correction, bool failCommit) {
+        Lem client(root);
+        client.demo();
+        const QString charger = "demo-charger";
+        const auto originalId = client.m_current["id"].toString();
+        const auto originalStart = QStringLiteral("2026-11-16T09:30:00Z");
+        const auto originalEnd = QStringLiteral("2026-11-16T11:00:00Z");
+        const auto newStart = QStringLiteral("2026-11-17T09:30:00Z");
+        const auto newEnd = QStringLiteral("2026-11-17T11:00:00Z");
+
+        QImage photo(40, 30, QImage::Format_RGB32);
+        photo.fill(Qt::cyan);
+        const auto source = root + "/evidence.png";
+        CHECK(photo.save(source));
+        client.attach("SITE.02", QUrl::fromLocalFile(source));
+        const auto photos = client.m_current["photos"].toArray();
+        CHECK(photos.size() == 1);
+        const auto evidence = QUrl(photos.first().toObject()["path"].toString()).toLocalFile();
+        const auto evidenceBytes = read(evidence);
+        CHECK(!evidenceBytes.isEmpty());
+
+        // The correction fixture owns an editing copy and retains a separate closed original.
+        auto original = client.m_current;
+        if (correction) {
+            auto payload = client.m_current["payload"].toObject();
+            payload["started"] = originalStart;
+            payload["finished"] = originalEnd;
+            client.m_current["payload"] = payload;
+            client.m_current["started"] = originalStart;
+            client.m_current["finished"] = originalEnd;
+            original = client.m_current;
+            original["status"] = "closed";
+            original["revision"] = 3;
+            original["dirty"] = false;
+            client.m_reports[originalId] = original;
+            client.m_current["id"] = "correction-copy";
+            client.m_current["correction"] = QJsonObject{{"state", "editing"},
+                                                         {"editor_id", client.m_user["id"]},
+                                                         {"source_id", originalId}};
+        }
+        const auto editedId = client.m_current["id"].toString();
+        client.m_reports[editedId] = client.m_current;
+        CHECK(client.persist());
+
+        const auto cache = client.cacheDir() + "/cache.json";
+        const auto cacheBytes = read(cache);
+        CHECK(!cacheBytes.isEmpty());
+        const auto journal = client.editPath(editedId);
+        CHECK(!QFileInfo::exists(journal));
+        client.answer("SITE.02", "NOK", "Keep this pending journal");
+        CHECK(client.saving());
+        const auto before = client.m_current;
+        const auto reports = client.m_reports;
+        const auto sections = client.m_template;
+        const auto change = [&] {
+            return correction ? client.setCorrectionTimes(newStart, newEnd) : client.openReport(charger);
+        };
+
+        QFile lockedCache(cache);
+        if (failCommit) {
+            // A Windows QFile shares reads/writes but denies deletion. QSaveFile can
+            // write its temporary file, then fails at the atomic replacement.
+            CHECK(lockedCache.open(QIODevice::ReadOnly));
+            QSaveFile probe(cache);
+            CHECK(probe.open(QIODevice::WriteOnly));
+            CHECK(probe.write(cacheBytes) == cacheBytes.size());
+            CHECK(!probe.commit());
+        } else {
+            CHECK(QFile::rename(cache, cache + ".backup"));
+            CHECK(QDir().mkdir(cache));
+            QSaveFile probe(cache);
+            CHECK(!probe.open(QIODevice::WriteOnly));
+        }
+
+        CHECK(!change());
+        CHECK(client.message().contains(correction ? "datas anteriores" : "rascunho não foi criado"));
+        CHECK(client.m_current == before);
+        CHECK(client.m_reports == reports);
+        CHECK(client.m_template == sections);
+        CHECK(!client.saving());
+        CHECK(read(evidence) == evidenceBytes);
+        CHECK(QJsonDocument::fromJson(read(journal)).object() == before);
+        if (failCommit) {
+            lockedCache.close();
+        } else {
+            CHECK(QDir().rmdir(cache));
+            CHECK(QFile::rename(cache + ".backup", cache));
+        }
+        CHECK(read(cache) == cacheBytes);
+
+        // Open the durable state with a fresh controller before retrying, so a
+        // later successful checkpoint cannot mask a lost journal or stale date.
+        Lem reloaded(root);
+        reloaded.m_server = client.m_server;
+        reloaded.m_user = client.m_user;
+        reloaded.loadUser();
+        CHECK(reloaded.m_reports == reports);
+        CHECK(!reloaded.localSaveError());
+
+        CHECK(change());
+        CHECK(client.message().contains(correction ? "Datas da correção guardadas" : "Novo rascunho guardado"));
+        CHECK(read(evidence) == evidenceBytes);
+        reloaded.loadUser();
+        const auto savedId = client.m_current["id"].toString();
+        CHECK(reloaded.m_reports.contains(savedId));
+        const auto saved = reloaded.m_reports.value(savedId).toObject();
+        if (correction) {
+            CHECK(!QFileInfo::exists(journal));
+            CHECK(savedId == editedId);
+            CHECK(saved["started"] == newStart);
+            CHECK(saved["finished"] == newEnd);
+            const auto payload = saved["payload"].toObject();
+            CHECK(payload["started"] == newStart);
+            CHECK(payload["finished"] == newEnd);
+            CHECK(payload["answers"] == before["payload"].toObject()["answers"]);
+            CHECK(saved["photos"] == photos);
+            CHECK(saved["dirty"].toBool());
+            CHECK(saved["_edit_seq"].toDouble() == before["_edit_seq"].toDouble() + 1);
+            CHECK(reloaded.m_reports.value(originalId).toObject() == original);
+        } else {
+            CHECK(savedId != editedId);
+            CHECK(saved["status"] == "draft");
+            CHECK(saved["dirty"].toBool());
+            CHECK(saved["charger_id"] == charger);
+            CHECK(saved["payload"].toObject()["started"] == saved["started"]);
+            auto previous = before;
+            // A successful switch releases deferred photos in the old report.
+            // This creates a newer journal after checkpointing the draft.
+            CHECK(previous.take("_defer_photo_sync").toBool());
+            previous["_edit_seq"] = before["_edit_seq"].toDouble() + 1;
+            CHECK(reloaded.m_reports.value(editedId).toObject() == previous);
+        }
+        qInfo() << "PASS: checkpoint" << (correction ? "correction dates" : "new draft")
+                << (failCommit ? "commit failure" : "open failure") << "rollback, retry and reload";
+        return true;
+    }
+
     static bool storage(const QString &root) {
+        CHECK(checkpoint(root + "/draft-open", false, false));
+        CHECK(checkpoint(root + "/correction-open", true, false));
+#ifdef Q_OS_WIN
+        CHECK(checkpoint(root + "/draft-commit", false, true));
+        CHECK(checkpoint(root + "/correction-commit", true, true));
+#endif
         for (const auto &kind :
              {"syntax", "shape", "record-shape", "journal", "journal-shape", "unreadable"}) {
             Lem client(root + '/' + kind);

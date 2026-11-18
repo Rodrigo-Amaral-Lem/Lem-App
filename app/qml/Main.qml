@@ -1067,9 +1067,15 @@ ApplicationWindow {
     function openCatalogReport(chargerId, reportId) {
         rememberCatalogPosition();
         openingCatalogReport = true;
-        lem.openReport(chargerId, reportId);
-        page = "report";
+        const opened = lem.openReport(chargerId, reportId);
+        if (opened !== false)
+            page = "report";
         openingCatalogReport = false;
+        if (!reportId && opened === false) {
+            win.showFeedback = false;
+            draftSaveErrorDialog.detail = lem.message;
+            draftSaveErrorDialog.open();
+        }
     }
     onPageChanged: {
         if (page === "catalog")
@@ -2181,12 +2187,35 @@ ApplicationWindow {
         }
     }
     Dialog {
+        id: draftSaveErrorDialog
+        objectName: "draftSaveErrorDialog"
+        property string detail: ""
+        title: "Falha ao criar rascunho"
+        modal: true
+        width: Math.min(480, win.width - 32)
+        anchors.centerIn: parent
+        contentItem: ColumnLayout {
+            UiLabel {
+                text: draftSaveErrorDialog.detail
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            UiButton {
+                text: "Voltar à lista"
+                Layout.fillWidth: true
+                onClicked: draftSaveErrorDialog.close()
+            }
+        }
+    }
+    Dialog {
         id: correctionDatesDialog
         objectName: "correctionDatesDialog"
+        property string saveError: ""
         title: "Data e hora da intervenção"
         modal: true
         width: Math.min(580, win.width - 32)
         anchors.centerIn: parent
+        onAboutToShow: saveError = ""
         contentItem: ColumnLayout {
             spacing: 12
             UiLabel { text: "Início da intervenção"; Layout.fillWidth: true }
@@ -2208,11 +2237,26 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
+            UiLabel {
+                objectName: "correctionDateSaveError"
+                text: correctionDatesDialog.saveError
+                visible: text.length > 0
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
             UiButton {
                 objectName: "saveCorrectionDates"
                 text: "Guardar datas"
                 Layout.fillWidth: true
-                onClicked: { if (lem.setCorrectionTimes(correctionStart.text, correctionEnd.text)) correctionDatesDialog.close(); }
+                onClicked: {
+                    Qt.inputMethod.hide();
+                    if (lem.setCorrectionTimes(correctionStart.text, correctionEnd.text))
+                        correctionDatesDialog.close();
+                    else {
+                        win.showFeedback = false;
+                        correctionDatesDialog.saveError = lem.message;
+                    }
+                }
             }
             UiButton { text: "Cancelar"; Layout.fillWidth: true; onClicked: correctionDatesDialog.close() }
         }

@@ -65,6 +65,8 @@ Em **Gestão → Contas e acessos**, selecione a conta de um técnico e escolha 
 
 Antes de criar uma intervenção, confirme se já existe um rascunho para o trabalho em curso. Uma falha de rede, por si só, não exige a criação de outro relatório.
 
+Se surgir **Falha ao criar rascunho**, verifique o armazenamento do dispositivo. Escolha **Voltar à lista** e toque novamente em **Nova intervenção**. A app abre o novo rascunho quando consegue guardá-lo.
+
 O estado **Concluído** no cartão indica que existe pelo menos uma intervenção fechada para esse carregador no contrato selecionado. Não confirma, por si só, que a intervenção que acabou de realizar está entregue. Confirme também o estado de sincronização dentro do relatório; o fecho local pode ainda estar por enviar.
 
 ## 04 Preencher e navegar no relatório

@@ -62,7 +62,13 @@ python app/tests/test_measurement_inputs.py
 python app/tests/test_suggested_notes_ui.py
 python app/tests/test_photo_delegate_stability.py
 python app/tests/test_report_groups_054.py
+python -X utf8 -B app/tests/test_checkpoint_save_ui.py
 ```
+
+`test_checkpoint_save_ui.py` exercises failed draft creation, visible save errors, exact
+retention of correction-date inputs, retries and first-attempt success in `Main.qml`.
+For an isolated run, set `TMP` and `TEMP` to the task's scratch directory before invoking
+the runner. It disables the QML disk cache and prints results to the console.
 
 The wider `app/tests/test_*.py` collection covers navigation, scroll bounds, Android margins, import
 preview, feedback, export visibility and accounts. Most are standalone runners; do not assume
@@ -207,6 +213,10 @@ acknowledgement without losing the signature. `data-safety-rotation` checks cloc
 orientation, four-turn round trips, combined rotation/cropping at every orientation, no-op saving,
 new evidence IDs/deletion tombstones, restart recovery and owner/closed guards.
 `data-safety-rejected-closure` checks durable editing recovery after a rejected offline closure.
+`data-safety-storage` blocks checkpoint open for new drafts and correction-date changes.
+On Windows it also holds a file handle that allows the temporary write and denies atomic
+replacement. The cases check truthful failure, rollback, fresh-controller journal replay,
+retry, and preservation of reports and evidence after a successful reload.
 `data-safety-migration-sync` uses a loopback HTTP fixture to verify that identical answers cannot
 skip the draft PUT when the form version or historical-upload marker differs. It also checks that
 an already matching form does not cause an unnecessary write.

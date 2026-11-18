@@ -71,6 +71,8 @@ Pode anexar fotografias, vídeos e uma imagem da assinatura a partir dos ficheir
 
 Antes de criar uma intervenção, confirme se já existe um rascunho para o trabalho em curso. Uma falha de rede, por si só, não exige a criação de outro relatório.
 
+Se surgir **Falha ao criar rascunho**, verifique o armazenamento do dispositivo. Escolha **Voltar à lista** e selecione novamente **Nova intervenção**. A app abre o novo rascunho quando consegue guardá-lo.
+
 O estado **Concluído** no cartão indica que existe pelo menos uma intervenção fechada para esse carregador no contrato selecionado. Não confirma, por si só, que a intervenção que acabou de realizar está entregue. Confirme também o estado de sincronização dentro do relatório; o fecho local pode ainda estar por enviar.
 
 ## 04 Preencher e navegar no relatório
@@ -318,6 +320,8 @@ Quando existir uma correção de fabricante, modelo ou número de série nos cam
 ### Corrigir um relatório fechado (administrador)
 
 Esta opção está disponível apenas para administradores em Windows e Linux. Abra o relatório fechado e sincronizado, escolha **Corrigir report fechado…** e edite a cópia criada. Pode corrigir respostas, observações e evidências; use **Editar início e fim…** para alterar as datas e horas. Em **Rever report**, escolha **Guardar correção e substituir original…** e confirme. O original só é substituído quando o servidor aceitar a correção; o relatório continua a pertencer ao técnico original. Cancelar a cópia conserva o original. A cópia utiliza as novas perguntas e regras, incluindo MAN.21 após manutenção. As antigas observações MAN.21 passam para MAN.22; as observações e evidências de EST.10 passam para EST.18. Confirme valores antigos sem unidade em MAN.11/MAN.12 antes de concluir.
+
+Se a gravação das datas falhar, o relatório conserva as datas anteriores e o diálogo mantém os valores introduzidos. Depois de verificar a mensagem, volte a selecionar **Guardar datas**.
 
 Nos formulários muito antigos, os códigos podiam ter outros significados. A secção **ANT - Registos anteriores** conserva essas respostas, observações e evidências. Preencha e valide as perguntas atuais e assine novamente antes de guardar a correção.
 
