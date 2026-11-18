@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# Works from any directory. Generated files default to app/build/windows-static.
+# Works from any directory. Generated files default to build/windows-static in the App repository.
 [CmdletBinding()]
 param(
     [string]$QtPrefix, [switch]$BuildQt, [string]$QtSource, [string]$QtBuild,
@@ -49,5 +49,6 @@ foreach ($entry in @(
 }
 if ($BuildQt) { $forward += '--build-qt' }
 if ($Plan) { $forward += '--plan' }
-& $python (Join-Path $PSScriptRoot 'build_standalone.py') @forward
+$builder = Join-Path $PSScriptRoot '../app/windows/build_standalone.py'
+& $python $builder @forward
 if ($LASTEXITCODE -ne 0) { throw "Windows static build failed (exit $LASTEXITCODE). See the reported build log." }

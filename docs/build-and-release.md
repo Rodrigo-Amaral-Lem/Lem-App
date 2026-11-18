@@ -1,15 +1,14 @@
 # Build and release the client
 
-This guide describes the current `0.4.0` source. Run all commands from the **App repository
+This guide describes the current `0.4.1` source. Run all commands from the **App repository
 root**, which contains `app/`, `shared/` and `docs/`. Build and staging examples use ignored
 subdirectories of `build/`; no sibling working directory is required.
 
-The prepared version is **0.4.0**, Android code **180**, checklist **7**. Minimum compatible
-client remains **0.2.6**, with latest **0.4.0**; deploy the updated server policy before the app.
-This batch consolidates T1/T2 as 0.4.0 under the minor-version policy. Follow-up edits
-do not increment this preparation batch again. Prepare detailed
-messages and user-executed `git commit -S` commands as required by the
-[version policy](../../Common/docs/maintenance.md#version-policy). A sign-off (`-s`) is not signing.
+The prepared version is **0.4.1**, Android code **181**, checklist **7**. Minimum compatible
+client remains **0.2.6**, with latest **0.4.1**. Deploy the matching server before the app
+so pending desktop corrections can use the updated identity checks.
+Prepare detailed messages and user-executed `git commit -S` commands under the
+[version policy](../../Common/docs/maintenance.md#version-policy).
 
 ## Prerequisites and kit selection
 
@@ -56,18 +55,18 @@ is not a portable package.
 
 ## Single-file Windows packaging
 
-[build-standalone.ps1](../app/windows/build-standalone.ps1) finds the installed tools, builds Lem,
+[build-standalone.ps1](../tools/build-standalone.ps1) finds the installed tools, builds Lem,
 audits PE imports and runs an isolated startup/TLS/JPEG test. It explicitly enables
-`LEM_WINDOWS_STANDALONE`. Run from an ordinary PowerShell terminal; no PATH setup is normally needed:
+`LEM_WINDOWS_STANDALONE`. Use PowerShell from the App repository root.
 
 ```powershell
-& ./app/windows/build-standalone.ps1 -Plan   # inspect detected inputs and output paths
-& ./app/windows/build-standalone.ps1         # build and verify
+& ./tools/build-standalone.ps1 -Plan   # inspect detected inputs and output paths
+& ./tools/build-standalone.ps1         # build and verify
 ```
 
-The default output is **`app/build/windows-static/portable/Lem.exe`**, relative to the repository,
+The default output is **`build/windows-static/portable/Lem.exe`**, relative to the App repository,
 regardless of the terminal's current directory. All generated Qt libraries, Qt/app compilation
-files, logs and reports are inside `app/build/windows-static`. Installed Qt directories are read-only.
+files, logs and reports are inside `build/windows-static`. Installed Qt directories are read-only.
 
 The helper first reuses its local static Qt installation, then looks for an existing static x64
 Qt 6.12+ installation. If none is suitable, it uses the installed Qt Sources component and builds
@@ -90,19 +89,22 @@ The tool does not download or install dependencies. Missing inputs produce an ac
 | `-QtBuild` | Override the Qt compilation subdirectory within `BuildDirectory` |
 | `-Compiler MinGW` or `MSVC` | Native toolchain; MSVC requires an x64 Visual Studio developer shell |
 | `-ToolchainBin` | Override the matching compiler's `bin` directory; its version/architecture are checked |
-| `-BuildDirectory` | Output root, default `app/build/windows-static`; cannot be inside an installed Qt root |
+| `-BuildDirectory` | Output root, default `build/windows-static` in the App repository. Use a path outside any installed Qt root. |
 | `-Jobs` | Parallel jobs, 1–128; default 4 |
 
 Qt source/build/install paths must be space-free. The Qt build uses Schannel TLS and requires Windows,
 offscreen and JPEG plugins. Configuration markers reject incompatible compiler/Qt/source caches;
 an interrupted matching build resumes when rerun. Existing unknown caches are preserved: select a
 new build directory instead of mixing kits. External static kits are never rebuilt in place.
-Only one build can use an output directory at a time.
+Only one build can use an output directory at a time. In a deeply nested checkout, a new build uses
+a temporary Windows drive for shorter paths. It records the letter in the output directory so it
+can reopen the same CMake cache. If that drive is occupied, wait until it is free or select a fresh
+`-BuildDirectory` under `build/`.
 The helper shortens long generated Ninja object/dependency paths inside `.lem-obj/` and `.lem-deps/`.
 MinGW can write a long object path but its archiver/dependency writer can still fail on that path.
-The mapping updates compile/archive references consistently after each CMake generation. Before
-installation, objects are copied back to their original layout so Qt's installation/export files
-remain valid. Installed SDKs and Windows long-path settings remain unchanged.
+The helper runs CMake explicitly before shortening compile and archive paths, then starts Ninja
+with that manifest. Before installation, it copies objects back to their original paths so Qt's
+installation and export files resolve them.
 Qt's generated plugin `moc` files use short `.ag/` directories as well. A local CMake include sets
 `AUTOGEN_BUILD_DIR` when long plugin targets are created, before Qt calculates its metatype paths;
 normal library targets retain their original paths. No installed Qt source files are patched.
@@ -116,7 +118,7 @@ ignored by Git. This replaces the previous `app/windows-static-transcript.log` l
 anything:
 
 ```powershell
-python app/windows/verify-pe.py app/build/windows-static/Lem.exe --report app/build/windows-static/dll-imports.json
+python app/windows/verify-pe.py build/windows-static/Lem.exe --report build/windows-static/dll-imports.json
 ```
 
 It reads normal and delay-loaded PE imports, rejects DLL names outside its explicit Windows-system
@@ -249,7 +251,7 @@ python -m unittest discover -s tools/tests -v
 ### Qt Creator and device checks
 
 Use an Android Qt kit, compatible SDK/NDK/JDK and the desired ABIs in Qt Creator. The project
-currently declares package ID `pt.lem.app`, version name `0.4.0`, and version code **180**.
+currently declares package ID `pt.lem.app`, version name `0.4.1`, and version code **181**.
 Increase the version code for a future Android release. Changing a package ID creates a different
 installation; synchronize outstanding reports before switching or uninstalling.
 

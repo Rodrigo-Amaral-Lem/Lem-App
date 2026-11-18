@@ -54,7 +54,8 @@ struct LemReviewTest {
         if (!QDir().mkpath(client.cacheDir())) return false;
         client.m_token = "isolated-test";
         client.m_syncing = true;
-        client.syncNext({id}, 0);
+        client.m_syncIds = {id};
+        client.syncNext(0);
         // This checkpoint must be upgraded synchronously before the first network reply.
         const auto updated = client.m_reports[id].toObject();
         const auto answers = updated["payload"].toObject()["answers"].toObject();
@@ -238,7 +239,8 @@ struct LemReviewTest {
         client.m_token = "session";
         client.m_syncing = true;
         client.m_syncReport = reportId;
-        client.syncPhotos({reportId}, 0, snapshot, 0);
+        client.m_syncIds = {reportId};
+        client.syncPhotos(0, snapshot, 0);
         QElapsedTimer elapsed; elapsed.start();
         while (client.m_syncing && elapsed.elapsed() < 5000) {
             QCoreApplication::processEvents(); QThread::msleep(1);

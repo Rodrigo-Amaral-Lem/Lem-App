@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Build a static Windows Lem.exe using installed tools/sources; no downloads.
 
-Generated Qt libraries, app objects, logs and portable EXE stay in the app build
-directory. Existing SDKs are read-only. Python 3.10+, standard library only.
+Generated Qt libraries, app objects, logs and the portable EXE default to the
+repository's build/windows-static directory. Installed SDKs are read-only.
+Python 3.10+, standard library only.
 """
 import argparse
 from contextlib import contextmanager
@@ -17,7 +18,14 @@ import sys
 import threading
 
 APP = Path(__file__).resolve().parents[1]
+DEFAULT_BUILD = Path('build/windows-static')
 MODULES = ('', 'Core', 'Gui', 'Network', 'Concurrent', 'Qml', 'Quick', 'QuickControls2', 'QuickDialogs2', 'ShaderTools')
+# The builder runs CMake explicitly before shortening paths. Ninja must use
+# that edited manifest for the whole build. This does not change the cache ABI.
+MANUAL_GENERATION = '-DCMAKE_SUPPRESS_REGENERATION=ON'
+# Qt Quick generates paths well beyond CMake's object-file controls. Leave
+# enough room for them when the checkout itself is deeply nested.
+SHORT_BUILD_PATH_THRESHOLD = 96
 
 
 class BuildError(Exception):
@@ -171,11 +179,52 @@ def build_lock(directory):
             msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
 
 
+@contextmanager
+def short_build_directory(directory, qt_build):
+    """Keep the generated files in place and reuse the same path in CMake caches."""
+    marker = directory / 'lem-build-drive.txt'
+    saved = marker.read_text(encoding='ascii').strip() if marker.is_file() else ''
+    if saved and not re.fullmatch(r'[D-Z]:', saved):
+        raise BuildError(f'Invalid Windows build drive recorded in {marker}.')
+    configured = any((path / 'CMakeCache.txt').exists() for path in (directory, qt_build))
+    if not saved and (configured or len(str(directory)) < SHORT_BUILD_PATH_THRESHOLD):
+        yield directory
+        return
+    subst = Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32/subst.exe'
+    candidates = (saved,) if saved else tuple(f'{letter}:' for letter in 'ZYXWVUTSRQP')
+    # Keep the CMake build in a subdirectory. At a drive root, Qt can emit
+    # both Z:/ and Z:// for the same generated source in its Ninja rules.
+    parent = directory.parent
+    for drive in candidates:
+        root = Path(drive + '/')
+        if root.exists():
+            continue
+        result = subprocess.run([str(subst), drive, str(parent)], capture_output=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+        if result.returncode:
+            continue
+        try:
+            marker.write_text(drive + '\n', encoding='ascii')
+            path = root / directory.name
+            print(f'Using {path} for the build directory {directory}', flush=True)
+            yield path
+        finally:
+            if root.exists() and root.samefile(parent):
+                cleanup = subprocess.run([str(subst), drive, '/D'], capture_output=True,
+                                         creationflags=subprocess.CREATE_NO_WINDOW)
+                if cleanup.returncode:
+                    raise BuildError(f'Could not release the temporary build drive {drive}.')
+        return
+    raise BuildError(f'No available Windows drive for the short build path ({saved or "Z: through P:"}).')
+
+
 class Builder:
     def __init__(self, args, env=None):
         self.args = args
         self.env = dict(os.environ if env is None else env)
-        self.build = Path(args.build_directory or APP / 'build/windows-static').resolve()
+        # Keep the cache under the App repository, independent of the launch directory.
+        self.build = Path(args.build_directory or APP.parent / DEFAULT_BUILD).resolve()
+        self.output_directory = self.build
         self.qt_build = Path(args.qt_build or self.build / 'qt-build').resolve()
         self.log = None
         roots = [args.qt_root] if args.qt_root else [self.env.get('QT_ROOT'), 'C:/Qt', self.env.get('SystemDrive', 'C:') + '/Qt']
@@ -189,6 +238,15 @@ class Builder:
                     roots.append(str(installed_root(Path(self.env[name]))))
         self.roots = list(dict.fromkeys(Path(root).resolve() for root in roots if root and Path(root).is_dir()))
         self.prefixes = list(dict.fromkeys(path for root in self.roots for pattern in ('*', '*/*') for path in root.glob(pattern) if qt_info(path)))
+
+    def use_build_directory(self, path):
+        if path == self.build:
+            return
+        if self.qt_build.is_relative_to(self.build):
+            self.qt_build = path / self.qt_build.relative_to(self.build)
+        if self.prefix.is_relative_to(self.build):
+            self.prefix = path / self.prefix.relative_to(self.build)
+        self.build = path
 
     def tool(self, name, candidates=()):
         for candidate in [*candidates, shutil.which(name, path=self.env.get('PATH', ''))]:
@@ -207,7 +265,7 @@ class Builder:
             raise BuildError('Unowned app CMake cache. Select a new -BuildDirectory; existing build files are preserved.')
         for root in self.roots:
             if inside(self.build, root):
-                raise BuildError('BuildDirectory must be outside the installed Qt directory. Default: app/build/windows-static.')
+                raise BuildError(f'BuildDirectory must be outside the installed Qt directory. App default: {DEFAULT_BUILD.as_posix()}.')
         explicit = self.args.qt_prefix or self.env.get('QT_STATIC_PREFIX')
         local_prefix = self.build / 'qt'
         pending = (self.qt_build / 'lem-static-install-pending').exists()
@@ -291,12 +349,13 @@ class Builder:
         return self
 
     def plan(self):
-        return {'app_source': str(APP), 'build_directory': str(self.build), 'qt_prefix': str(self.prefix),
-                'qt_source': str(self.source) if self.source else None, 'qt_build': str(self.qt_build) if self.build_qt else None,
+        return {'app_source': str(APP), 'build_directory': str(self.output_directory), 'qt_prefix': str(self.prefix.resolve()),
+                'qt_source': str(self.source) if self.source else None,
+                'qt_build': str(self.qt_build.resolve()) if self.build_qt else None,
                 'build_qt': self.build_qt, 'qt_version': self.qt_version, 'compiler': str(self.compiler),
                 'compiler_version': self.compiler_version, 'cmake': str(self.cmake), 'ninja': str(self.ninja),
                 'python': sys.executable, 'perl': str(self.perl) if self.perl else None,
-                'executable': str(self.build / 'portable/Lem.exe'), 'log': str(self.build / 'build.log')}
+                'executable': str(self.output_directory / 'portable/Lem.exe'), 'log': str(self.output_directory / 'build.log')}
 
     def say(self, message):
         print(message, flush=True)
@@ -338,7 +397,7 @@ class Builder:
             finally:
                 reader.join()
         if code:
-            raise BuildError(f'{args[0]} failed (exit {code}). See {self.build / "build.log"}')
+            raise BuildError(f'{args[0]} failed (exit {code}). See {self.output_directory / "build.log"}')
 
     def guard(self, directory, filename, signature):
         marker = directory / filename
@@ -369,12 +428,10 @@ class Builder:
                 pending.touch()
                 if not (self.qt_build / 'build.ninja').is_file():
                     self.say('[1/6] Configure static Qt from installed sources')
-                    self.run([self.source / 'configure.bat', *args], cwd=self.qt_build)
+                    self.run([self.source / 'configure.bat', *args, MANUAL_GENERATION], cwd=self.qt_build)
                 else:
-                    # Generate explicitly before fixing long dependency filenames;
-                    # Ninja must not regenerate and discard that fix mid-build.
                     self.say('[1/6] Refresh the existing Qt configuration')
-                    self.run([self.cmake, '-S', self.source, '-B', self.qt_build,
+                    self.run([self.cmake, '-S', self.source, '-B', self.qt_build, MANUAL_GENERATION,
                               cmake_path('CMAKE_PROJECT_INCLUDE', APP / 'windows/ShortAutogenPaths.cmake')])
                 if not (self.qt_build / 'build.ninja').is_file():
                     raise BuildError('Qt configure did not generate build.ninja. See build.log; rerun to resume.')
@@ -402,7 +459,7 @@ class Builder:
             self.guard(self.build, 'lem-app-config.json', {'arguments': list(map(str, args)), 'compiler_version': self.compiler_version})
             self.say('[4/6] Configure Lem')
             fresh = ['--fresh'] if (self.build / 'CMakeCache.txt').exists() and not (self.build / 'build.ninja').exists() else []
-            self.run([self.cmake, *fresh, *args])
+            self.run([self.cmake, *fresh, *args, MANUAL_GENERATION])
             if not (self.build / 'build.ninja').is_file():
                 raise BuildError('Lem configure did not generate build.ninja. See build.log.')
             shorten_ninja_paths(self.build)
@@ -425,7 +482,7 @@ class Builder:
                             QT_QPA_FONTDIR=str(Path(system) / 'Fonts'))
             self.run([output, '--smoke-test'], cwd=portable, env=isolated, timeout=30)
             (self.build / 'build-result.json').write_text(json.dumps({**self.plan(), 'verified': True}, indent=2), encoding='utf-8')
-            self.say(f'Ready: {output}')
+            self.say(f'Ready: {self.output_directory / "portable/Lem.exe"}')
         self.log = None
 
 
@@ -449,7 +506,8 @@ def main():
     if build.args.plan:
         print(json.dumps(build.plan(), indent=2))
     else:
-        with build_lock(build.build):
+        with build_lock(build.build), short_build_directory(build.build, build.qt_build) as directory:
+            build.use_build_directory(directory)
             build.compile()
 
 

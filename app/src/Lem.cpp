@@ -241,6 +241,8 @@ void Lem::loadUser() {
     m_localSaveError = false;
     m_autoSync.stop();
     m_syncConflicts.clear();
+    m_syncIds.clear();
+    m_manualRestoredCorrections.clear();
     m_retryNotBefore = 0;
     m_catalogueTimes = {};
     m_deletedReports.clear();
@@ -722,13 +724,17 @@ void Lem::logout() {
 
 // Refresh accessible contracts and force refresh of the selected catalogue.
 void Lem::refresh() {
+    refreshContracts(false);
+}
+
+void Lem::refreshContracts(bool fromManualSync) {
     if (m_busy || !m_qveCopyTarget.isEmpty() || attachingFiles() || m_refreshing || m_catalogueLoading || !online())
         return;
     m_refreshing = true;
     emit changed();
     request(
         "GET", "/api/contracts", {},
-        [this](QByteArray data) {
+        [this, fromManualSync](QByteArray data) {
             const auto previousContracts = m_contracts;
             m_contracts = QJsonDocument::fromJson(data).array();
             // An older catalogue reply must not undo an acknowledged settings save.
@@ -737,7 +743,7 @@ void Lem::refresh() {
                 receiveContractPresentation(contract["id"].toString(), contract["presentation"].toObject());
             }
             applyContractPresentations();
-            reconcileContractSync();
+            reconcileContractSync(fromManualSync);
             // A deleted/unassigned contract must not remain the active catalogue.
             // Preserve report journals and local photographs for offline recovery.
             bool stillAccessible = false;

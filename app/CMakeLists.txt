@@ -2,7 +2,7 @@
 # Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
 
 cmake_minimum_required(VERSION 3.25)
-project(Lem VERSION 0.4.0 LANGUAGES CXX)
+project(Lem VERSION 0.4.1 LANGUAGES CXX)
 # Normal Qt Creator builds use the selected shared Qt kit.
 # The standalone packaging script explicitly enables the static-only option.
 option(LEM_WINDOWS_STANDALONE "Link Windows Qt/plugins/runtime into one Lem.exe" OFF)
@@ -91,8 +91,8 @@ set_target_properties(Lem PROPERTIES MACOSX_BUNDLE TRUE WIN32_EXECUTABLE TRUE MA
 if(ANDROID)
  set_property(TARGET Lem PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
  # Preserve the R1 scroll fix; Android version codes increase for every release.
- set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_NAME "0.4.0")
- set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_CODE 180)
+ set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_NAME "0.4.1")
+ set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_CODE 181)
 endif()
 include(GNUInstallDirs)
 install(TARGETS Lem

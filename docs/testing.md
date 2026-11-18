@@ -199,10 +199,15 @@ PySide6 version. Keep fixture paths local to the test environment.
 
 `test_report_correction_ui.py` covers desktop/admin controls, date editing and confirmation.
 The native offline integration creates a correction of another technician's report, retains
-server-side evidence, edits dates and charger identity, simulates a lost commit response, updates
-the local charger catalogue from the recovered server confirmation, restores the original owner
-and protects unsent work on another device. Its branding scenario fails the settings writer's
-follow-up catalogue request, then exports from a different device without manually refreshing.
+server-side evidence and edits dates and charger identity after a later intervention has updated the
+station. It retries a cached legacy identity conflict using manual Sync even when an earlier
+report in the same batch receives HTTP 423 for another contract. It then restores the
+correction's own contract from a second device and recovers a lost commit response with one
+manual Sync. It checks the original on disk before confirmation, its removal after the durable
+replacement, the restored owner and all three catalogue fields. The checkpoint-failure case keeps
+the pending correction eligible for retry. Another device retains its unsent work. The branding
+scenario fails the settings writer's follow-up catalogue request, then exports from a different
+device without manually refreshing.
 Set `LEM_TEST_GDB` to a local GDB executable only for diagnostic runs of this disposable fixture.
 The native `station-identity` test also checks that staged corrections do not change cached
 catalogues and that committed canonical values reach all cached memberships, including legacy

@@ -361,6 +361,7 @@ class Lem : public QObject {
     mutable QVariantMap m_currentProjection, m_photoProjection;
     mutable QJsonArray m_projectedPhotos;
     QJsonArray m_notifiedContracts;
+    void refreshContracts(bool fromManualSync);
     void refreshCatalogue(QString id, bool force = false);
     void fetchPhotoForReport(QString reportId, QString photoId);
     void pumpPhotoBatch();
@@ -375,9 +376,9 @@ class Lem : public QObject {
                attachingFiles() || (includeGroupCopy && !m_qveCopyTarget.isEmpty());
     }
     void suspendContractSync(QString contractId, QString reason);
-    void reconcileContractSync();
-    void syncNext(QStringList ids, int index);
-    void syncPhotos(QStringList ids, int index, QJsonObject report, int photoIndex);
+    void reconcileContractSync(bool fromManualSync);
+    void syncNext(int index, QString notice = {});
+    void syncPhotos(int index, QJsonObject report, int photoIndex);
     void getPhotos(QJsonObject report, int index);
     QString localPath(QUrl url) const;
     QNetworkAccessManager net;
@@ -390,8 +391,10 @@ class Lem : public QObject {
     qint64 m_retryNotBefore = 0;
     QString m_syncState = "Guardado no dispositivo";
     QString m_syncReport;
+    QStringList m_syncIds;
     QTimer m_autoSync;
     QSet<QString> m_syncConflicts, m_downloads;
+    QSet<QString> m_manualRestoredCorrections;
     QJsonObject m_catalogueTimes;
     qint64 m_photoBytes = 0;
     // One explicit report-download batch, sharing four slots with individual downloads.

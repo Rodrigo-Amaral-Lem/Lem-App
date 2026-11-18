@@ -65,6 +65,71 @@ class InstalledBuild(unittest.TestCase):
         parsed = builder.parser().parse_args(['--qt-root', str(self.sdk), '--build-directory', str(self.output), *args])
         return builder.Builder(parsed, self.env)
 
+    def test_default_build_path_is_under_repository_build(self):
+        parsed = builder.parser().parse_args(['--qt-root', str(self.sdk)])
+        build = builder.Builder(parsed, self.env)
+        self.assertEqual(build.build, SCRIPT.parents[2] / 'build/windows-static')
+
+    def test_configure_preserves_shortened_ninja_paths_during_build(self):
+        def check_first_configure(expected_executable):
+            build = self.make().discover()
+            with patch.object(build, 'say'), patch.object(
+                build, 'run', side_effect=builder.BuildError('configuration captured')
+            ) as run, self.assertRaisesRegex(builder.BuildError, 'configuration captured'):
+                build.compile()
+            command = run.call_args.args[0]
+            self.assertEqual(Path(command[0]).name, expected_executable)
+            self.assertIn('-DCMAKE_SUPPRESS_REGENERATION=ON', command)
+
+        check_first_configure('configure.bat')
+        self.file(self.output / 'qt-build/build.ninja')
+        check_first_configure('cmake.exe')
+        (self.output / 'qt-build/lem-static-install-pending').unlink()
+        self.kit(self.output / 'qt')
+        check_first_configure('cmake.exe')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows build drive')
+    def test_build_drive_is_saved_and_released_after_interruption(self):
+        self.output.mkdir(parents=True)
+        drive = Path('Z:/')
+        mounted = False
+        original_exists = Path.exists
+
+        def exists(path):
+            return mounted if path == drive else original_exists(path)
+
+        def subst(command, **kwargs):
+            nonlocal mounted
+            self.assertEqual(command[1], 'Z:')
+            mounted = command[2] != '/D'
+            if mounted:
+                self.assertEqual(Path(command[2]), self.output.parent)
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch.object(builder, 'SHORT_BUILD_PATH_THRESHOLD', 0), patch.object(
+            Path, 'exists', exists
+        ), patch.object(Path, 'samefile', lambda path, target: path == drive and target == self.output.parent), patch.object(
+            builder.subprocess, 'run', side_effect=subst
+        ) as run:
+            with self.assertRaisesRegex(RuntimeError, 'interrupted'):
+                with builder.short_build_directory(self.output, self.output / 'qt-build') as path:
+                    self.assertEqual(path, drive / self.output.name)
+                    raise RuntimeError('interrupted')
+            self.assertFalse(mounted)
+            self.assertEqual((self.output / 'lem-build-drive.txt').read_text().strip(), 'Z:')
+            with builder.short_build_directory(self.output, self.output / 'qt-build') as path:
+                self.assertEqual(path, drive / self.output.name)
+            self.assertFalse(mounted)
+        self.assertEqual(run.call_count, 4)
+
+    def test_short_build_paths_preserve_the_reported_output(self):
+        build = self.make().discover()
+        short_path = self.root / 'short'
+        build.use_build_directory(short_path)
+        self.assertEqual(build.qt_build, short_path / 'qt-build')
+        self.assertEqual(build.prefix, short_path / 'qt')
+        self.assertEqual(build.plan()['executable'], str(self.output / 'portable/Lem.exe'))
+
     def test_first_build_uses_installed_source_and_outputs_only_under_app(self):
         build = self.make().discover()
         self.assertTrue(build.build_qt)

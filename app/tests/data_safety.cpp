@@ -496,7 +496,8 @@ struct LemReviewTest {
                 });
             });
             client.m_syncing = true;
-            client.syncNext({id}, 0);
+            client.m_syncIds = {id};
+            client.syncNext(0);
             QElapsedTimer timer; timer.start();
             while (client.m_syncing && timer.elapsed() < 5000) QCoreApplication::processEvents();
             client.m_autoSync.stop();

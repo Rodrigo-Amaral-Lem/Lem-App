@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para desktop
 
-Desktop · Aplicação 0.4.0 · Edição 2.5 · 18 de novembro de 2026
+Desktop · Aplicação 0.4.1 · Edição 2.6 · 18 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-desktop.pdf](manual-utilizador-desktop.pdf).
 
@@ -20,7 +20,7 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. As ações são realizadas com o rato e o teclado. Clique nos botões e utilize a roda do rato ou a barra de deslocação para percorrer o relatório.
 
-Este manual descreve a versão 0.4.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
+Este manual descreve a versão 0.4.1 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
 
@@ -325,7 +325,7 @@ Se a gravação das datas falhar, o relatório conserva as datas anteriores e o 
 
 Nos formulários muito antigos, os códigos podiam ter outros significados. A secção **ANT - Registos anteriores** conserva essas respostas, observações e evidências. Preencha e valide as perguntas atuais e assine novamente antes de guardar a correção.
 
-Se alterar fabricante/marca (EST.02), modelo (EST.03) ou número de série (EST.04), a correção aceite também atualiza a ficha desse ID de carregador no servidor e nos contratos que partilham o equipamento. Guardar apenas o rascunho não atualiza a ficha. Os outros relatórios históricos conservam os seus dados. Se outra intervenção tiver alterado o mesmo campo entretanto, surge um conflito: os dados e os dois relatórios são conservados para revisão.
+Se alterar fabricante/marca (EST.02), modelo (EST.03) ou número de série (EST.04), a correção aceite também atualiza a ficha do carregador nos contratos que partilham o equipamento. O servidor compara cada campo alterado com o valor que a ficha tinha ao abrir a cópia. Se o campo tiver mudado entretanto para outro valor, o envio indica o conflito e conserva os dois relatórios. Para voltar a verificar uma correção pendente por este motivo, escolha **Sincronizar**.
 
 A correção recebe um novo identificador interno. O nome do PDF/ZIP usa a data e hora de fim; alterar apenas o início não muda esse nome. Ficheiros já exportados não são alterados.
 

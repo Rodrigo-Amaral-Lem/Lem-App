@@ -55,10 +55,15 @@ def main(binary, delete_ack=False, legacy_delete_ack=False):
 from fastapi.responses import JSONResponse
 from app.main import create_app
 app=create_app();counts={};lost=False;lost_delete=False;arm_delete=False;photo_active=0;photo_max=0;photo_gets=0;lost_correction=False;fail_contract_refresh=False
+legacy_identity_conflict = False
 @app.middleware('http')
 async def track(request,call_next):
  global lost,lost_delete,arm_delete,photo_active,photo_max,photo_gets,lost_correction,fail_contract_refresh
+ global legacy_identity_conflict
  key=request.method+' '+request.url.path;counts[key]=counts.get(key,0)+1
+ if request.method == 'POST' and request.url.path.endswith('/correction/commit') and not legacy_identity_conflict:
+  legacy_identity_conflict = True
+  return JSONResponse({'detail': 'Os dados do carregador foram corrigidos noutro report; atualize antes de concluir. Campo: model'}, status_code=409)
  if fail_contract_refresh and key=='GET /api/contracts':
   fail_contract_refresh=False;return JSONResponse({'detail':'simulated failed refresh after settings save'},status_code=503)
  payload={}
@@ -86,7 +91,7 @@ async def track(request,call_next):
   lost_correction=True;return JSONResponse({})
  return response
 @app.get('/__test/stats')
-def stats():return {'requests':counts,'photo_max':photo_max,'lost_delete':lost_delete,'lost_correction':lost_correction}
+def stats():return {'requests':counts,'photo_max':photo_max,'lost_delete':lost_delete,'lost_correction':lost_correction,'legacy_identity_conflict':legacy_identity_conflict}
 """ + ("""
 import os
 import httpx
@@ -223,6 +228,7 @@ def delete_ack_stats():
                     counts = stats["requests"]
                     assert stats["photo_max"] <= 4, stats
                     assert stats["lost_delete"], stats
+                    assert stats["legacy_identity_conflict"], stats
                     assert stats["lost_correction"], stats
                     downloads = sum(
                         v for k, v in counts.items() if k.startswith("GET ") and "/photos/" in k

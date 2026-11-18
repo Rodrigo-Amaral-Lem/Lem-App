@@ -144,6 +144,10 @@ and processes other contracts. Only a successful active-contract refresh clears 
 restoration. The API independently enforces retention for reads, new/existing reports and evidence.
 Manual synchronization requested during an active operation retains its receive/refresh intent
 until the scheduler can run it; it must not degrade into an upload-only automatic attempt.
+Report-specific rejections leave the remaining reports in the current batch, so an unavailable
+contract cannot cancel an explicit correction retry for a different contract. If a manual
+refresh confirms that a contract is active again, its pending identity corrections each get
+one recheck. The normal handling for ownership and revision conflicts still applies.
 
 ## Copying and signatures
 
@@ -197,3 +201,8 @@ ordinary owner mismatch handling. Replacement tombstones preserve dirty local co
 independent draft copies strip correction metadata. A failed local checkpoint keeps the editor
 eligible to retry, rather than stranding a dirty report under another owner. Local copies of cloned
 evidence use independent files; deleting the source cannot invalidate replacement paths.
+
+Manual Sync revalidates a pending correction blocked by a station identity conflict, including
+conflicts cached from earlier servers. The client clears the conflict when the server confirms the
+replacement and the new report is checkpointed. Ownership and revision conflicts use their usual
+recovery flow.
