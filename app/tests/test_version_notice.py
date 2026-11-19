@@ -45,8 +45,29 @@ def checks():
             assert js("accountVersionStatus.text") == values["clientCompatibility"]["message"]
             js("loginDialog.close()")
             QTest.qWait(100)
+        values["clientCompatibility"] = {}
+        values["sessionPending"] = True
+        values["user"] = {"id": "offline-account"}
+        lem.changed.emit()
+        lem.compatibilityChanged.emit()
+        js("loginDialog.open()")
+        for width, height in ((540, 1080), (320, 640), (1080, 540)):
+            w.setWidth(width)
+            w.setHeight(height)
+            QTest.qWait(150)
+            assert "por validar" in js("accountSessionStatus.text")
+            assert js("accountOfflineNote.visible")
+            assert js("loginScroll.contentWidth === loginScroll.width")
+            assert js("serverField.x + serverField.width <= loginScroll.width"), js(
+                "JSON.stringify({window:win.width,dialog:loginDialog.width,viewport:loginScroll.width,"
+                "form:loginForm.width,formImplicit:loginForm.implicitWidth,scrollbar:loginScrollbar.width,"
+                "fieldX:serverField.x,fieldWidth:serverField.width,fieldImplicit:serverField.implicitWidth})"
+            )
+            assert js("accountOfflineNote.contentWidth <= accountOfflineNote.width + 1")
+            assert js("loginScroll.contentHeight >= loginForm.height")
+        js("loginDialog.close()")
         assert not errors, errors
-        print("PASS: update/blocked notices and persistent account guidance; no QML warnings")
+        print("PASS: version notices and pending-session layout in portrait, landscape and narrow widths")
         app.exit(0)
     except Exception:
         import traceback

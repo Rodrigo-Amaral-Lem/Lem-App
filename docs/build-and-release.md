@@ -141,6 +141,10 @@ The Linux install adds the desktop entry and icon; distribute the required runti
 separately. A macOS application bundle is configured by CMake. These commands describe supported
 project configuration, not a claim that every platform has been validated on this computer.
 
+For persistent sign-in on Linux, install `secret-tool` (for example, `libsecret-tools` on Ubuntu)
+and run the app in a desktop session with an available Secret Service keyring. When the
+credential store is unavailable, users can still sign in for the current run.
+
 ## Android
 
 ### Shell build and USB deployment (Windows / Ubuntu)

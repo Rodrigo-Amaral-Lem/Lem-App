@@ -49,6 +49,7 @@ values = {
     "saving": False,
     "localSaveError": False,
     "authenticated": False,
+    "sessionPending": False,
     "busy": False,
     "copyingGroup": "",
     "attachingFiles": False,
