@@ -26,9 +26,9 @@ Este documento explica a aplicação. Os ensaios elétricos e os procedimentos d
 
 ### Consultar as notas do contrato
 
-Ao abrir um report, o técnico vê as **Notas** desse PCVE quando há texto. **Voltar ao report** abre o formulário. Para reler as instruções, escolha **Notas do PCVE** no menu do report. Sem ligação, a app apresenta a última versão recebida para esse ID e contrato.
+Ao abrir um report, o técnico vê as **Notas** desse PCVE quando há texto. Escolha **Voltar ao report** para abrir o formulário ou **Notas do PCVE** no menu para reler as instruções. A última leitura fica disponível sem rede, mesmo depois de o ID sair do contrato.
 
-O administrador pode abrir o ícone de notas junto à seta de navegação do cartão, escolher **Editar notas** e **Guardar**. Para apagar as notas, guarde o campo vazio. Na importação por Excel, a coluna **Notas** define o texto de cada ID. Uma folha sem essa coluna conserva as notas existentes.
+O administrador pode abrir o ícone de notas junto à seta do cartão, escolher **Editar notas** e **Guardar**. Para apagar as notas, guarde o campo vazio. No Excel, uma célula **Notas** vazia também apaga a nota do ID. Omitir a coluna conserva o texto. Se a pré-visualização indicar uma fórmula por calcular, recalcule a folha e guarde o ficheiro antes de importar.
 
 ## 02 Começar a utilizar a app
 

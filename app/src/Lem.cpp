@@ -287,6 +287,7 @@ void Lem::loadUser() {
     m_reports = {};
     m_current = {};
     m_catalogues = {};
+    m_historicalNotes = {};
     m_contract.clear();
     if (!QDir().mkpath(cacheDir())) m_localReadError = true;
     QFile f(cacheDir() + "/cache.json");
@@ -298,7 +299,7 @@ void Lem::loadUser() {
                      o.value("reports").isObject();
         for (const auto &key : {"contracts", "chargers", "deleted_reports"})
             if (o.contains(key) && !o.value(key).isArray()) valid = false;
-        for (const auto &key : {"catalogues", "catalogue_times"})
+        for (const auto &key : {"catalogues", "catalogue_times", "historical_notes"})
             if (o.contains(key) && !o.value(key).isObject()) valid = false;
         if (o.contains("contract") && !o.value("contract").isString()) valid = false;
         if (!valid) { m_localReadError = true; o = {}; }
@@ -307,6 +308,7 @@ void Lem::loadUser() {
         m_reports = o["reports"].toObject();
         m_contract = o["contract"].toString();
         m_catalogues = o["catalogues"].toObject();
+        m_historicalNotes = o["historical_notes"].toObject();
         for (const auto &key : m_catalogues.keys())
             m_catalogues[key] = currentPcveRows(m_catalogues.value(key).toArray());
         m_catalogueTimes = o["catalogue_times"].toObject();
@@ -406,6 +408,7 @@ QString Lem::writeCheckpoint(const QJsonObject &reports) {
                              {"reports", reports},
                              {"contract", m_contract},
                              {"catalogues", m_catalogues},
+                             {"historical_notes", m_historicalNotes},
                              {"catalogue_times", m_catalogueTimes},
                              {"station_catalogue", stationCache}});
     if (f.write(bytes) != bytes.size() || !f.commit())
@@ -859,7 +862,18 @@ void Lem::refreshContracts(bool fromManualSync, bool includeStations) {
         "GET", "/api/contracts", {},
         [this, fromManualSync, includeStations, restoring](QByteArray data) {
             const auto document = QJsonDocument::fromJson(data);
-            if (!document.isArray()) {
+            // Only a complete list of identifiable contracts can revoke cached access.
+            QSet<QString> allowedContracts;
+            bool validContracts = document.isArray();
+            for (const auto &entry : document.array()) {
+                const auto cid = entry.toObject()["id"].toString();
+                if (cid.isEmpty() || allowedContracts.contains(cid)) {
+                    validContracts = false;
+                    break;
+                }
+                allowedContracts.insert(cid);
+            }
+            if (!validContracts) {
                 m_refreshing = false;
                 if (restoring) m_sessionRetry.start(30000);
                 status("Resposta de contratos inválida. Os dados locais continuam disponíveis.");
@@ -878,6 +892,8 @@ void Lem::refreshContracts(bool fromManualSync, bool includeStations) {
             }
             const auto previousContracts = m_contracts;
             m_contracts = document.array();
+            for (const auto &cid : m_historicalNotes.keys())
+                if (!allowedContracts.contains(cid)) m_historicalNotes.remove(cid);
             // An older catalogue reply must not undo an acknowledged settings save.
             for (auto value : previousContracts) {
                 const auto contract = value.toObject();
@@ -1432,10 +1448,16 @@ bool Lem::editPhoto(QString photoId, int quarterTurns, qreal x, qreal y, qreal w
     if (reportActionBlocked(false) || m_current.isEmpty() || m_current["_conflict"].toBool() ||
         m_current["status"].toString() != "draft" || (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]))
         return false;
-    for (auto entry : m_current["payload"].toObject()["signatures"].toObject())
-        if (entry.toObject()["photo_id"].toString() == photoId) {
-            status("Para alterar a assinatura, assine novamente em FIN.02."); return false;
+    const auto payload = m_current["payload"].toObject();
+    for (const auto field : {"signatures", "legacy_signatures"}) {
+        for (const auto &entry : payload[field].toObject()) {
+            if (entry.toObject()["photo_id"] != photoId) continue;
+            status(QLatin1StringView(field) == "legacy_signatures"
+                       ? "A imagem da assinatura histórica deve ser conservada."
+                       : "Para alterar a assinatura, assine novamente em FIN.02.");
+            return false;
         }
+    }
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(width) || !std::isfinite(height) ||
         x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > 1.000001 || y + height > 1.000001 ||
         quarterTurns < 0 || quarterTurns > 3)
@@ -1968,8 +1990,12 @@ void Lem::detachCharger(QString contractId, QString chargerId) {
             [this, contractId, chargerId](QByteArray) {
                 m_busy = false;
                 auto rows = m_catalogues[contractId].toArray();
-                for (qsizetype i = rows.size(); i-- > 0;)
-                    if (rows.at(i).toObject()["id"] == chargerId) rows.removeAt(i);
+                auto history = m_historicalNotes.value(contractId).toObject();
+                for (qsizetype i = rows.size(); i-- > 0;) {
+                    if (rows.at(i).toObject()["id"] == chargerId)
+                        retainContractNote(history, rows.takeAt(i).toObject());
+                }
+                m_historicalNotes[contractId] = history;
                 m_catalogues[contractId] = rows;
                 if (m_contract == contractId) m_chargers = rows;
                 m_catalogueTimes.remove(contractId);
@@ -1981,6 +2007,19 @@ void Lem::detachCharger(QString contractId, QString chargerId) {
                 m_busy = false;
                 status("Não foi possível retirar o PCVE. Atualize o contrato e tente novamente.");
             });
+}
+
+void Lem::retainContractNote(QJsonObject &history, const QJsonObject &row) {
+    const auto id = row["id"].toString();
+    const auto revision = row["notes_revision"].toInt(-1);
+    if (!id.isEmpty() && revision >= 0 && row["contract_notes"].isString()
+        && history.value(id).toObject()["notes_revision"].toInt(-1) < revision)
+        history[id] = QJsonObject{{"contract_notes", row["contract_notes"]}, {"notes_revision", revision}};
+}
+
+QVariantMap Lem::historicalContractNotes(QString contractId, QString chargerId) const {
+    if (m_user.isEmpty() || contractId.isEmpty() || contractId != m_contract) return {};
+    return m_historicalNotes.value(contractId).toObject().value(chargerId).toObject().toVariantMap();
 }
 
 void Lem::loadContractNotes(QString contractId, QString chargerId) {
@@ -2016,9 +2055,17 @@ void Lem::exchangeContractNotes(const QString &cid, const QString &id, const QJs
             // Update only this membership. Detached history can still be read
             // without reintroducing the ID into the active contract list.
             auto rows = m_catalogues.value(cid).toArray();
+            auto history = m_historicalNotes.value(cid).toObject();
+            const auto prior = history.value(id).toObject();
+            if (prior["notes_revision"].toInt(-1) > record["notes_revision"].toInt()) {
+                record["contract_notes"] = prior["contract_notes"];
+                record["notes_revision"] = prior["notes_revision"];
+            }
+            bool listed = false;
             for (qsizetype i = 0; i < rows.size(); ++i) {
                 auto row = rows[i].toObject();
                 if (row["id"] != id) continue;
+                listed = true;
                 if (row["notes_revision"].toInt(-1) > record["notes_revision"].toInt()) {
                     record["contract_notes"] = row["contract_notes"];
                     record["notes_revision"] = row["notes_revision"];
@@ -2032,6 +2079,11 @@ void Lem::exchangeContractNotes(const QString &cid, const QString &id, const QJs
                     emit changed();
                 }
                 break;
+            }
+            if (!listed && cid == m_contract && prior["notes_revision"] != record["notes_revision"]) {
+                retainContractNote(history, record);
+                m_historicalNotes[cid] = history;
+                persist();
             }
             emit contractNotesReceived(record.toVariantMap(), saving);
         }, "application/json", [this, cid, id, saving, session](int code, const QString &body) {
@@ -2735,6 +2787,7 @@ void Lem::deleteContract(QString id, QString confirmation) {
                     m_preview = {};
                 }
                 m_catalogues.remove(id);
+                m_historicalNotes.remove(id);
                 m_catalogueTimes.remove(id);
                 for (int i = m_contracts.size() - 1; i >= 0; --i)
                     if (m_contracts[i].toObject()["id"].toString() == id)

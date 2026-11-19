@@ -164,6 +164,7 @@ class Lem : public QObject {
     Q_INVOKABLE void loadStationReports(QString stationId);
     Q_INVOKABLE void detachCharger(QString contractId, QString chargerId);
     Q_INVOKABLE void loadContractNotes(QString contractId, QString chargerId);
+    Q_INVOKABLE QVariantMap historicalContractNotes(QString contractId, QString chargerId) const;
     Q_INVOKABLE void saveContractNotes(QString contractId, QString chargerId, int baseRevision, QString notes);
     Q_INVOKABLE void refreshStations();
     Q_INVOKABLE void saveStation(QString id, QString baseUpdated, QVariantMap fields);
@@ -458,6 +459,8 @@ class Lem : public QObject {
     int m_photoBatchTotal = 0, m_photoBatchDone = 0, m_photoBatchFailures = 0;
     bool m_photoBatchStopped = false;
     QJsonObject m_catalogues;
+    QJsonObject m_historicalNotes; // By contract and membership, within this server/user's cache.
+    static void retainContractNote(QJsonObject &history, const QJsonObject &row);
     // m_reports is keyed by report UUID; m_current mirrors the selected report.
     QJsonObject m_user, m_template, m_current, m_reports, m_importInfo, m_preview, m_mapping;
     QJsonArray m_contracts, m_chargers, m_users, m_deletedContracts;
