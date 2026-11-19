@@ -534,6 +534,23 @@ ApplicationWindow {
                 c.moveTo(width * .51, height * .85);
                 c.lineTo(width * .92, height * .85);
                 c.stroke();
+            } else if (kind === "notes" || kind === "editNotes") {
+                c.beginPath();
+                c.moveTo(width * .42, height * .87);
+                c.lineTo(width * .16, height * .87);
+                c.lineTo(width * .16, height * .13);
+                c.lineTo(width * .84, height * .13);
+                c.lineTo(width * .84, height * (kind === "notes" ? .87 : .37));
+                if (kind === "notes") c.closePath();
+                c.moveTo(width * .32, height * .34); c.lineTo(width * .66, height * .34);
+                c.moveTo(width * .32, height * .52); c.lineTo(width * .54, height * .52);
+                c.stroke();
+                if (kind === "editNotes") {
+                    c.beginPath();
+                    c.moveTo(width * .47, height * .88); c.lineTo(width * .52, height * .69);
+                    c.lineTo(width * .82, height * .39); c.lineTo(width * .95, height * .52);
+                    c.lineTo(width * .65, height * .82); c.closePath(); c.stroke();
+                }
             } else if (kind === "navigate") {
                 c.beginPath();
                 c.moveTo(width * .83, height * .14);
@@ -1138,6 +1155,7 @@ ApplicationWindow {
         }
     }
     onPageChanged: {
+        if (contractNotesDialog) contractNotesDialog.dismiss();
         pendingReportOpen = null;
         if (page === "catalog")
             Qt.callLater(function () {
@@ -1158,7 +1176,16 @@ ApplicationWindow {
         if (page !== "report") {
             stationReportOrigin = null;
             lem.reportSyncBoundary();
+        } else if (lem.user.role === "tech") {
+            showReportNotes(true);
         }
+    }
+    function showReportNotes(automatic) {
+        const report = lem.current;
+        if (!report.id || !report.charger_id) return;
+        const contract = (report.snapshot || {}).contract || {};
+        contractNotesDialog.showFor(report.contract_id || contract.id || lem.contractId(), report.charger_id,
+                                    ((report.snapshot || {}).charger || {}).external_id || "", automatic);
     }
     property int selectedSection: 0
     property string sectionReportId: win.reportData.id || ""
@@ -1321,7 +1348,7 @@ ApplicationWindow {
         sequences: win.androidCamera ? ["Back"] : [StandardKey.Back]
         enabled: !win.splashActive && (win.page === "report" || win.page === "pcves")
                  && !reviewDialog.opened && !groupDialog.opened && !detailsDialog.opened && !pcveDetailsDialog.opened
-                 && !pcveEditDialog.opened && !pcveImportDialog.opened
+                 && !pcveEditDialog.opened && !pcveImportDialog.opened && !contractNotesDialog.visible
                  && !photoPreview.opened && !cropDialog.opened && !removePhotoDialog.opened && !deleteReportDialog.opened
                  && !removeNotesDialog.opened && !photoDownloadDialog.opened && !statusDialog.opened && !loginDialog.opened
                  && !clearLocalCopiesDialog.opened && !reportMenu.opened && !navMenu.opened
@@ -1405,9 +1432,11 @@ ApplicationWindow {
     function previewDetails(record) {
         const details = record.details || {};
         const source = details.source || {};
-        if (Object.keys(source).length)
-            return Object.keys(source).filter(k => k !== "Station ID").map(k => ({label: k, value: lem.connectorText(String(source[k] === null ? "" : source[k]))}));
-        return Object.keys(details).filter(k => k !== "source").map(k => ({label: (fields.find(f => f.key === k) || {}).label || k, value: lem.connectorText(String(details[k] === null ? "" : details[k]))}));
+        const rows = Object.keys(source).length
+            ? Object.keys(source).filter(k => k !== "Station ID").map(k => ({label: k, value: lem.connectorText(String(source[k] === null ? "" : source[k]))}))
+            : Object.keys(details).filter(k => k !== "source").map(k => ({label: (fields.find(f => f.key === k) || {}).label || k, value: lem.connectorText(String(details[k] === null ? "" : details[k]))}));
+        if (record.contract_notes !== undefined) rows.push({label: "Notas", value: record.contract_notes});
+        return rows;
     }
     function pcveFields(details) {
         const rows = [];
@@ -1442,7 +1471,7 @@ ApplicationWindow {
             "id": "external_id", "identificador": "external_id", "id de pcve": "external_id",
             "id do carregador": "external_id", "série": "serial", "nº(s) série": "serial",
             "station id": "external_id", "id do pcve": "external_id",
-            "cpe": "cpe", "fornecimento": "energy_supply", "tomadas": "connectors"
+            "cpe": "cpe", "fornecimento": "energy_supply", "tomadas": "connectors", "notas": "contract_notes"
         };
         for (const raw of headers) {
             const header = raw.trim();
@@ -1626,6 +1655,13 @@ ApplicationWindow {
                             color: "white"
                             radius: 8
                             border.color: win.outline
+                        }
+                        Base.MenuItem {
+                            objectName: "reportContractNotes"
+                            implicitHeight: win.touchHeight
+                            text: "Notas do PCVE"
+                            enabled: !!win.reportData.charger_id
+                            onTriggered: win.showReportNotes(false)
                         }
                         Base.MenuItem {
                             implicitHeight: win.touchHeight
@@ -2471,6 +2507,214 @@ ApplicationWindow {
             }
         }
     }
+    Dialog {
+        id: contractNotesDialog
+        objectName: "contractNotesPage"
+        parent: win.contentItem
+        anchors.centerIn: parent
+        width: Math.max(0, Math.min(parent.width - 20, 580))
+        height: Math.max(0, Math.min(parent.height - 16, 550))
+        title: "Notas"
+        modal: true
+        palette: lightPalette
+        closePolicy: editing || saving ? Popup.NoAutoClose : Popup.CloseOnEscape
+        property string contractId: ""
+        property string chargerId: ""
+        property string ownerId: ""
+        property string reportId: ""
+        property string externalId: ""
+        property string contractName: ""
+        property string note: ""
+        property int revision: -1
+        property int editRevision: -1
+        property bool attached: false
+        property bool automatic: false
+        property bool editing: false
+        property bool saving: false
+        property bool loading: false
+        property string notice: ""
+        function dismiss() {
+            chargerId = "";
+            automatic = false;
+            close();
+        }
+        function showFor(cid, id, label, autoShow) {
+            if (!cid || !id || cid !== lem.contractId()) return;
+            const row = (lem.chargers || []).find(c => c.id === id && (!c.contract_id || c.contract_id === cid)) || {};
+            contractId = cid;
+            chargerId = id;
+            ownerId = lem.user.id || "";
+            reportId = win.page === "report" ? lem.current.id : "";
+            externalId = label || row.external_id || "";
+            contractName = ((lem.contracts || []).find(c => c.id === cid) || {}).name || "";
+            note = row.contract_notes || "";
+            revision = row.notes_revision === undefined ? -1 : row.notes_revision;
+            attached = !!row.id;
+            editing = false;
+            saving = false;
+            automatic = autoShow;
+            loading = lem.authenticated && typeof lem.loadContractNotes === "function";
+            notice = "";
+            editor.text = note;
+            if (!automatic || note.length) open();
+            // The membership cache makes notes immediate and works offline. The
+            // per-ID read also discovers edits made since the last catalogue refresh.
+            if (loading)
+                lem.loadContractNotes(cid, id);
+        }
+        function matches(cid, id) {
+            return chargerId === id && contractId === cid && ownerId === lem.user.id
+                   && lem.contractId() === cid && (!reportId || reportId === lem.current.id);
+        }
+        onClosed: {
+            chargerId = "";
+            editing = false;
+            saving = false;
+            automatic = false;
+            note = "";
+            editor.text = "";
+            if (win.androidCamera && win.page === "report")
+                reportScroll.forceActiveFocus(Qt.OtherFocusReason);
+        }
+        Connections {
+            target: lem
+            ignoreUnknownSignals: true
+            function onChanged() {
+                const page = contractNotesDialog;
+                if (page.chargerId && !page.matches(page.contractId, page.chargerId)) {
+                    page.dismiss();
+                } else if (!lem.authenticated && (page.saving || page.loading)) {
+                    // An expired session keeps the local identity for offline access.
+                    page.saving = false;
+                    page.loading = false;
+                    page.notice = "Entre novamente para atualizar as notas.";
+                }
+            }
+            function onContractNotesReceived(record, saved) {
+                const page = contractNotesDialog;
+                if (!page.matches(record.contract_id, record.id) || record.notes_revision < page.revision) return;
+                page.loading = false;
+                page.externalId = record.external_id;
+                page.note = record.contract_notes;
+                page.revision = record.notes_revision;
+                page.attached = record.attached;
+                if (saved) {
+                    page.saving = false;
+                    page.editing = false;
+                    page.notice = "Notas guardadas.";
+                } else if (page.editing && page.revision !== page.editRevision)
+                    page.notice = "As notas mudaram. Copie o texto que pretende manter e escolha Cancelar para consultar a versão atual.";
+                if (!page.editing) editor.text = page.note;
+                if (page.automatic) {
+                    if (page.note.length) page.open();
+                    else if (page.visible) page.dismiss();
+                }
+            }
+            function onContractNotesFailed(cid, id, code, message, saving) {
+                const page = contractNotesDialog;
+                if (!page.matches(cid, id)) return;
+                if (saving) page.saving = false;
+                else page.loading = false;
+                if (code === 401 || code === 403 || code === 423) {
+                    page.dismiss();
+                    return;
+                }
+                page.notice = !saving && page.revision >= 0 && !code ? "A mostrar a última versão guardada neste dispositivo." : message;
+                // Preserve the editor buffer while fetching the conflicting revision.
+                if (saving && code === 409) lem.loadContractNotes(cid, id);
+            }
+        }
+        contentItem: ColumnLayout {
+            spacing: 6
+            RowLayout {
+                Layout.fillWidth: true
+                UiLabel {
+                    Layout.fillWidth: true
+                    font.bold: true
+                    wrapMode: Text.Wrap
+                    textFormat: Text.PlainText
+                    text: [contractNotesDialog.externalId, contractNotesDialog.contractName].filter(Boolean).join(" · ")
+                }
+                UiIconButton {
+                    objectName: "editContractNotes"
+                    text: "Editar notas"
+                    symbol: "editNotes"
+                    visible: lem.user.role === "admin" && !contractNotesDialog.editing
+                    enabled: lem.authenticated && contractNotesDialog.attached && contractNotesDialog.revision >= 0
+                    onClicked: {
+                        contractNotesDialog.editRevision = contractNotesDialog.revision;
+                        contractNotesDialog.editing = true;
+                        contractNotesDialog.notice = "";
+                        editor.forceActiveFocus();
+                    }
+                }
+            }
+            // Keep edit actions above the text so the Android keyboard cannot
+            // cover them on a compact screen. Reading keeps the return button below.
+            RowLayout {
+                Layout.fillWidth: true
+                visible: contractNotesDialog.editing
+                UiButton {
+                    Layout.fillWidth: true
+                    objectName: "cancelContractNotes"
+                    text: "Cancelar"
+                    enabled: !contractNotesDialog.saving
+                    onClicked: {
+                        Qt.inputMethod.hide();
+                        contractNotesDialog.editing = false;
+                        contractNotesDialog.notice = "";
+                        editor.text = contractNotesDialog.note;
+                    }
+                }
+                UiButton {
+                    objectName: "saveContractNotes"
+                    Layout.fillWidth: true
+                    primary: true
+                    text: contractNotesDialog.saving ? "A guardar…" : "Guardar"
+                    enabled: lem.authenticated && contractNotesDialog.attached && !contractNotesDialog.saving
+                             && contractNotesDialog.editRevision === contractNotesDialog.revision
+                             && editor.text !== contractNotesDialog.note
+                    onClicked: {
+                        Qt.inputMethod.hide();
+                        contractNotesDialog.saving = true;
+                        lem.saveContractNotes(contractNotesDialog.contractId, contractNotesDialog.chargerId,
+                                              contractNotesDialog.editRevision, editor.text);
+                    }
+                }
+            }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumHeight: 0
+                clip: true
+                TextArea {
+                    id: editor
+                    objectName: "contractNotesText"
+                    Accessible.name: contractNotesDialog.editing ? "Texto das notas" : "Notas do contrato"
+                    textFormat: TextEdit.PlainText
+                    wrapMode: TextEdit.Wrap
+                    selectByMouse: true
+                    readOnly: !contractNotesDialog.editing || contractNotesDialog.saving
+                    placeholderText: contractNotesDialog.editing ? "Escreva as notas deste ID…"
+                                     : contractNotesDialog.revision >= 0 ? "Sem notas para este PCVE neste contrato."
+                                     : contractNotesDialog.loading ? "A consultar as notas…" : "Notas indisponíveis neste dispositivo."
+                }
+            }
+            UiLabel {
+                Layout.fillWidth: true
+                visible: !!text
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+                text: contractNotesDialog.notice
+            }
+            UiButton {
+                Layout.fillWidth: true
+                visible: !contractNotesDialog.editing
+                text: contractNotesDialog.reportId ? "Voltar ao report" : "Fechar"
+                onClicked: contractNotesDialog.dismiss()
+            }
+        }
+    }
     component ExcelImportPanel: ColumnLayout {
         id: importPanel
         property bool stationsOnly: false
@@ -2797,7 +3041,7 @@ ApplicationWindow {
             // Return key focus to the report after the popup releases its grab.
             if (win.androidCamera && win.page === "report")
                 Qt.callLater(function () {
-                    if (win.page === "report" && !pcveDetailsDialog.visible)
+                    if (win.page === "report" && !pcveDetailsDialog.visible && !contractNotesDialog.visible)
                         reportScroll.forceActiveFocus(Qt.OtherFocusReason);
                 });
         }
@@ -4481,6 +4725,17 @@ ApplicationWindow {
                                 font.bold: true
                                 wrapMode: Text.Wrap
                                 Layout.fillWidth: true
+                            }
+                            UiIconButton {
+                                objectName: "contractNotes_" + chargerTile.modelData.id
+                                symbol: "notes"
+                                text: "Notas do PCVE"
+                                Accessible.name: text + " · " + chargerTile.modelData.external_id
+                                visible: lem.user.role === "admin"
+                                Layout.preferredWidth: win.touchHeight
+                                Layout.minimumWidth: win.touchHeight
+                                onClicked: contractNotesDialog.showFor(lem.contractId(), chargerTile.modelData.id,
+                                                                        chargerTile.modelData.external_id, false)
                             }
                             UiIconButton {
                                 objectName: "navigateCharger_" + chargerTile.modelData.id

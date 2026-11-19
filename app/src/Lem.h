@@ -163,6 +163,8 @@ class Lem : public QObject {
     QVariantMap stationReports() const { return m_stationReports.toVariantMap(); }
     Q_INVOKABLE void loadStationReports(QString stationId);
     Q_INVOKABLE void detachCharger(QString contractId, QString chargerId);
+    Q_INVOKABLE void loadContractNotes(QString contractId, QString chargerId);
+    Q_INVOKABLE void saveContractNotes(QString contractId, QString chargerId, int baseRevision, QString notes);
     Q_INVOKABLE void refreshStations();
     Q_INVOKABLE void saveStation(QString id, QString baseUpdated, QVariantMap fields);
     QVariantMap current() const;
@@ -272,6 +274,8 @@ class Lem : public QObject {
     void contractTrashChanged();
     void chargersChanged();
     void stationsChanged();
+    void contractNotesReceived(QVariantMap record, bool saved);
+    void contractNotesFailed(QString contractId, QString chargerId, int code, QString message, bool saving);
     void excelImported(QString summary);
     void ownPasswordChangeFinished(bool saved, QString message);
     void currentChanged();
@@ -404,6 +408,7 @@ class Lem : public QObject {
     void refreshCatalogue(QString id, bool force = false);
     void resetStationCatalogue();
     static QJsonArray currentPcveRows(QJsonArray rows);
+    void exchangeContractNotes(const QString &contractId, const QString &chargerId, const QJsonObject &edit);
     void applyStationRecords(const QJsonArray &records, bool complete = false, QJsonArray *memberships = nullptr);
     bool canManageStations() const;
     void beginExcelImport(QUrl file, bool stationsOnly, QString idsContract = {});

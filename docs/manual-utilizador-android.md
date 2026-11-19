@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para Android
 
-Android · Aplicação 0.5.0 · Edição 2.9 · 19 de novembro de 2026
+Android · Aplicação 0.5.1 · Edição 2.10 · 19 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-android.pdf](manual-utilizador-android.pdf).
 
@@ -20,9 +20,15 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. Utilize o toque para selecionar opções e deslize o dedo para percorrer as perguntas. O botão de retrocesso do sistema permite regressar ao ecrã anterior quando aplicável.
 
-Este manual descreve a versão 0.5.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. As capturas mostram a app num emulador Android, em orientação vertical.
+Este manual descreve a versão 0.5.1 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. As capturas mostram a app num emulador Android, em orientação vertical.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
+
+### Consultar as notas do contrato
+
+Ao abrir um report, o técnico vê as **Notas** desse PCVE quando há texto. **Voltar ao report** abre o formulário. Para reler as instruções, escolha **Notas do PCVE** no menu do report. Sem ligação, a app apresenta a última versão recebida para esse ID e contrato.
+
+O administrador pode abrir o ícone de notas junto à seta de navegação do cartão, escolher **Editar notas** e **Guardar**. Para apagar as notas, guarde o campo vazio. Na importação por Excel, a coluna **Notas** define o texto de cada ID. Uma folha sem essa coluna conserva as notas existentes.
 
 ## 02 Começar a utilizar a app
 
@@ -69,7 +75,7 @@ Em **Gestão → Contas e acessos**, selecione a conta de um técnico e escolha 
 
 ### Consultar PCVEs
 
-Em **PCVEs**, abra a ficha e escolha um dos **Relatórios associados**. **Voltar** regressa ao mesmo ponto da ficha. **Atualizar** guarda a ficha para consulta sem rede. Em **Gestão → Contratos → Gerir IDs do contrato**, o administrador pode **Adicionar ou atualizar por Excel**. Os dados ficam na ficha central e nos contratos associados. **Retirar** conserva a ficha e os relatórios. No cartão, **Fechado 30_03_16** indica 30 de março entre as 16h00 e as 16h59, seguido do nome do relatório.
+Em **PCVEs**, abra a ficha e escolha um dos **Relatórios associados**. **Voltar** regressa ao mesmo ponto da ficha. **Atualizar** guarda a ficha para consulta sem rede. Em **Gestão → Contratos → Gerir IDs do contrato**, o administrador pode **Adicionar ou atualizar por Excel**. Os contratos partilham a ficha técnica do PCVE. **Retirar** conserva a ficha e os relatórios. No cartão, **Fechado 30_03_16** indica 30 de março entre as 16h00 e as 16h59, seguido do nome do relatório.
 
 ### Evitar registos duplicados
 

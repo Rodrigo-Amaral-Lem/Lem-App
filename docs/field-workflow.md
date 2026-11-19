@@ -32,6 +32,11 @@ Excel import accepts empty model, serial number, energy supply, power and power-
 Model (EST.03) and serial number (EST.04) must be filled before closing a report, both offline
 and on the server. Drafts can be saved while these fields are still empty.
 
+The optional **Notas** column supplies instructions for each ID in this contract. Technicians
+see them on opening a report and can reopen **Notas do PCVE** from its menu. Offline, the app
+uses the last notes saved for that membership. Administrators can use the notes icon beside
+navigation on the contract card, then **Editar notas** and **Guardar**.
+
 ## Fill and review a report
 
 The groups are **SEG → SITE → QVE → EST → MAN → CARG → FIN**. Switching groups retains position and
