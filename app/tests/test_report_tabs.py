@@ -34,6 +34,12 @@ app.setPalette(p)
 values = {
     "desktopCorrections": True,
     "desktopExports": True,
+    "desktopStationManagement": False,
+    "stations": [],
+    "stationCatalogueLoaded": False,
+    "stationCatalogueLoading": False,
+    "stationCatalogueMessage": "",
+    "stationEditResult": {},
     "contractExport": {},
     "passwordReset": {},
     "pendingReports": 1,
@@ -133,6 +139,7 @@ attrs["contractId"] = Slot(result=str)(contractId)
 attrs["canSaveReportPresentation"] = Property(bool, lambda self:
     values['authenticated'] and values['user'].get('role') == 'admin'
     and not any(values[key] for key in ('busy', 'syncing', 'refreshing')), notify=attrs['changed'])
+attrs["refreshStations"] = Slot()(lambda self: None)
 attrs["useDefaultServer"] = Slot()(lambda self: None)
 attrs["prepareExport"] = Slot(str, result=bool)(lambda self, kind: True)
 qve_sources = [{"id":"other-report", "label":"PCVE-OUTRO · Concluído"}]

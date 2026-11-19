@@ -67,6 +67,10 @@ Pode anexar fotografias, vídeos e uma imagem da assinatura a partir dos ficheir
 
 4. Escolha **Nova intervenção** para criar um relatório. Para continuar trabalho já iniciado, abra o botão **Rascunho** correspondente. Um relatório **Fechado** permite consultar a intervenção concluída.
 
+### Consultar IDs de PCVEs
+
+Abra **PCVEs** para consultar a ficha única usada pelos contratos. Os administradores podem **Importar Excel** e **Editar ficha** neste menu.
+
 ### Evitar registos duplicados
 
 Antes de criar uma intervenção, confirme se já existe um rascunho para o trabalho em curso. Uma falha de rede, por si só, não exige a criação de outro relatório.

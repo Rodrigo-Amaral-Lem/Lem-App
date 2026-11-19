@@ -58,6 +58,12 @@ class Lem : public QObject {
     Q_PROPERTY(QVariantList contracts READ contracts NOTIFY contractsChanged)
     Q_PROPERTY(QVariantList deletedContracts READ deletedContracts NOTIFY contractTrashChanged)
     Q_PROPERTY(QVariantList chargers READ chargers NOTIFY chargersChanged)
+    Q_PROPERTY(QVariantList stations READ stations NOTIFY stationsChanged)
+    Q_PROPERTY(bool stationCatalogueLoaded READ stationCatalogueLoaded NOTIFY changed)
+    Q_PROPERTY(bool stationCatalogueLoading READ stationCatalogueLoading NOTIFY changed)
+    Q_PROPERTY(QString stationCatalogueMessage READ stationCatalogueMessage NOTIFY changed)
+    Q_PROPERTY(bool desktopStationManagement READ desktopStationManagement CONSTANT)
+    Q_PROPERTY(QVariantMap stationEditResult READ stationEditResult NOTIFY changed)
     Q_PROPERTY(QVariantMap current READ current NOTIFY currentChanged)
     Q_PROPERTY(QVariantMap photosByCheckpoint READ photosByCheckpoint NOTIFY photosChanged)
     Q_PROPERTY(QVariantList sections READ sections NOTIFY sectionsChanged)
@@ -139,6 +145,14 @@ class Lem : public QObject {
         return m_deletedContracts.toVariantList();
     }
     QVariantList chargers() const;
+    QVariantList stations() const { return m_stations.toVariantList(); }
+    bool stationCatalogueLoaded() const { return m_stationCatalogueLoaded; }
+    bool stationCatalogueLoading() const { return m_stationCatalogueLoading; }
+    QString stationCatalogueMessage() const { return m_stationCatalogueMessage; }
+    bool desktopStationManagement() const;
+    QVariantMap stationEditResult() const { return m_stationEditResult.toVariantMap(); }
+    Q_INVOKABLE void refreshStations();
+    Q_INVOKABLE void saveStation(QString id, QString baseUpdated, QVariantMap fields);
     QVariantMap current() const;
     QVariantMap photosByCheckpoint() const;
     QVariantList sections() const {
@@ -214,6 +228,8 @@ class Lem : public QObject {
     Q_INVOKABLE void loadDeletedContracts();
     Q_INVOKABLE void restoreContract(QString id);
     Q_INVOKABLE void analyseExcel(QUrl file);
+    Q_INVOKABLE void analyseStationExcel(QUrl file);
+    Q_INVOKABLE void previewStationExcel(QString sheet, int row, QVariantMap columns);
     Q_INVOKABLE QVariantList reportBrands() const;
     Q_INVOKABLE void previewExcel(QString sheet, int row, QVariantMap columns, QString primary = "", QString secondary = "", QString issuer = "", int brandingRevision = -1);
     Q_INVOKABLE void saveReportPresentation(QString issuer, QString primary, QString secondary, int revision);
@@ -240,6 +256,7 @@ class Lem : public QObject {
     void contractsChanged();
     void contractTrashChanged();
     void chargersChanged();
+    void stationsChanged();
     void currentChanged();
     void photosChanged();
     void contractExportCancelled();
@@ -363,6 +380,11 @@ class Lem : public QObject {
     QJsonArray m_notifiedContracts;
     void refreshContracts(bool fromManualSync);
     void refreshCatalogue(QString id, bool force = false);
+    void resetStationCatalogue();
+    void applyStationRecords(const QJsonArray &records, bool complete = false, QJsonArray *memberships = nullptr);
+    bool canManageStations() const;
+    void beginExcelImport(QUrl file, bool stationsOnly);
+    void previewImport(const QString &path, QJsonObject mapping);
     void fetchPhotoForReport(QString reportId, QString photoId);
     void pumpPhotoBatch();
     void photoDownloadFinished(QString reportId, QString photoId, bool success);
@@ -407,6 +429,10 @@ class Lem : public QObject {
     // m_reports is keyed by report UUID; m_current mirrors the selected report.
     QJsonObject m_user, m_template, m_current, m_reports, m_importInfo, m_preview, m_mapping;
     QJsonArray m_contracts, m_chargers, m_users, m_deletedContracts;
-    QString m_excelName;
+    QJsonArray m_stations, m_notifiedStations;
+    QJsonObject m_stationEditResult;
+    QString m_stationCatalogueMessage, m_excelImportPath, m_excelName;
+    quint64 m_stationRequest = 0;
+    bool m_stationCatalogueLoaded = false, m_stationCatalogueLoading = false;
     QByteArray m_excel;
 };

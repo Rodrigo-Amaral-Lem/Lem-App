@@ -7,8 +7,111 @@
 #include <QTemporaryDir>
 #include <QImage>
 #include <QDebug>
+#include <QElapsedTimer>
+#include <QSettings>
+#include <QThread>
+#include <utility>
 #define CHECK(x) do { if (!(x)) {qCritical()<<"FAIL"<<__LINE__<<#x; return false;} } while(false)
 struct LemReviewTest {
+    static bool waitUntil(const std::function<bool()> &done) {
+        QElapsedTimer elapsed;
+        elapsed.start();
+        while (!done() && elapsed.elapsed() < 8000) {
+            QCoreApplication::processEvents();
+            QThread::msleep(10);
+        }
+        return done();
+    }
+
+    static QJsonObject station(const Lem &c, const QString &externalId) {
+        for (const auto &value : c.m_stations) {
+            const auto row = value.toObject();
+            if (row["external_id"] == externalId) return row;
+        }
+        return {};
+    }
+
+    static QJsonObject membership(const Lem &c, const QString &contract, const QString &externalId) {
+        for (const auto &value : c.m_catalogues[contract].toArray()) {
+            const auto row = value.toObject();
+            if (row["external_id"] == externalId) return row;
+        }
+        return {};
+    }
+
+    // Run against the disposable API fixture with real Windows HTTP and Excel.
+    static bool live(Lem &c, const QString &server, const QString &file) {
+        const QString shared = "PCVE-DEMO-001";
+        const QString created = "PCVE-DESKTOP-NEW-901";
+        c.setServer(server);
+        c.login("pcve-admin@example.invalid", qEnvironmentVariable("LEM_TEST_CATALOGUE_PASSWORD"));
+        CHECK(waitUntil([&] { return c.authenticated() && !c.refreshing() && c.m_contracts.size() == 5; }));
+        CHECK(c.canManageStations() && c.contractId().isEmpty());
+        c.refreshStations();
+        CHECK(waitUntil([&] { return c.stationCatalogueLoaded() && !c.stationCatalogueLoading(); }));
+        auto central = station(c, shared);
+        CHECK(!central.isEmpty() && !station(c, "PCVE-SEM-CONTRATO-900").isEmpty());
+
+        QString first, second;
+        for (const auto &value : std::as_const(c.m_contracts)) {
+            const auto contract = value.toObject();
+            if (contract["company"] == "Exemplo" && contract["year"] == 2026) {
+                if (contract["semester"] == 1) first = contract["id"].toString();
+                if (contract["semester"] == 2) second = contract["id"].toString();
+            }
+        }
+        CHECK(!first.isEmpty() && !second.isEmpty());
+        c.selectContract(first);
+        CHECK(waitUntil([&] { return !c.refreshing() && !membership(c, first, shared).isEmpty(); }));
+        c.selectContract(second);
+        CHECK(waitUntil([&] { return !c.refreshing() && !membership(c, second, shared).isEmpty(); }));
+        const auto firstMembership = membership(c, first, shared);
+        const auto secondMembership = membership(c, second, shared);
+        CHECK(firstMembership["station_id"] == central["id"] && secondMembership["station_id"] == central["id"]);
+        CHECK(firstMembership["id"] != secondMembership["id"]);
+        CHECK(c.openReport(secondMembership["id"].toString(), ""));
+        const auto snapshot = c.m_current["snapshot"];
+
+        c.analyseStationExcel(QUrl::fromLocalFile(file));
+        CHECK(waitUntil([&] { return !c.busy() && c.m_importInfo["station_catalogue"].toBool(); }));
+        c.previewStationExcel("Manual", 1, {{"external_id", "ID"}, {"model", "Modelo"}});
+        CHECK(waitUntil([&] { return !c.busy() && c.m_preview["count"] == 2; }));
+        CHECK(c.m_preview["errors"].toArray().isEmpty());
+        CHECK(station(c, created).isEmpty());
+        c.commitExcel();
+        CHECK(waitUntil([&] { return !c.busy() && !station(c, created).isEmpty(); }));
+        CHECK(station(c, shared)["details"].toObject()["model"] == "Imported model");
+        CHECK(membership(c, first, shared)["details"].toObject()["model"] == "Imported model");
+        CHECK(membership(c, second, shared)["details"].toObject()["model"] == "Imported model");
+        CHECK(c.m_current["snapshot"] == snapshot);
+
+        const auto id = central["id"].toString();
+        c.saveStation(id, central["updated"].toString(), {{"model", "Conflicting edit"}});
+        CHECK(waitUntil([&] { return c.m_stationEditResult["state"] == "error" && !c.stationCatalogueLoading(); }));
+        central = station(c, shared);
+        c.saveStation(id, central["updated"].toString(), {{"model", "Edited model"}, {"serial", "000123"}});
+        CHECK(waitUntil([&] { return c.m_stationEditResult["state"] == "saved"; }));
+        const auto updated = station(c, shared);
+        CHECK(updated["details"].toObject()["model"] == "Edited model");
+        CHECK(updated["details"].toObject()["serial"] == "000123");
+        CHECK(membership(c, first, shared)["details"] == updated["details"]);
+        CHECK(membership(c, second, shared)["details"] == updated["details"]);
+        CHECK(c.m_current["snapshot"] == snapshot);
+        CHECK(membership(c, first, created).isEmpty() && membership(c, second, created).isEmpty());
+
+        // A response dispatched before the edit cannot replace the new revision.
+        c.applyStationRecords(QJsonArray{central});
+        CHECK(station(c, shared) == updated);
+        CHECK(membership(c, first, shared)["details"] == updated["details"]);
+        CHECK(c.persist());
+        Lem restored(c.storage());
+        CHECK(restored.stationCatalogueLoaded() && !restored.authenticated());
+        CHECK(station(restored, shared) == updated && !station(restored, created).isEmpty());
+        CHECK(membership(restored, second, shared)["details"] == updated["details"]);
+        qInfo() << "PASS: desktop Excel and edits over HTTP, canonical cache across contracts, stale conflict and offline checkpoint";
+        return true;
+    }
+
     static bool run(Lem &c, const QString &root) {
         c.demo();
         auto primary=c.m_chargers[0].toObject(); primary["station_id"]="physical-station";
@@ -81,4 +184,20 @@ struct LemReviewTest {
         return true;
     }
 };
-int main(int argc,char **argv){QGuiApplication app(argc,argv);app.setApplicationVersion("0.1.55");QTemporaryDir root;Lem c(root.path());return LemReviewTest::run(c,root.path())?0:1;}
+int main(int argc, char **argv) {
+    QGuiApplication app(argc, argv);
+    QTemporaryDir root;
+    if (!root.isValid()) return 1;
+    const auto args = app.arguments();
+    const bool live = args.size() == 4 && args[1] == "--live-catalogue";
+    app.setApplicationVersion(live ? "0.4.1" : "0.1.55");
+    if (live) {
+        app.setOrganizationName("LemStationTest");
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, root.path());
+    }
+    Lem controller(root.path());
+    const bool passed = live ? LemReviewTest::live(controller, args[2], args[3])
+                             : LemReviewTest::run(controller, root.path());
+    return passed ? 0 : 1;
+}

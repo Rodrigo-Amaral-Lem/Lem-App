@@ -36,6 +36,12 @@ void Lem::applyClosedIdentity(const QJsonObject &report) {
     if (report["status"] != "closed") return;
     const auto snapshot = report["snapshot"].toObject()["charger"].toObject();
     const auto authoritative = report["station_update"].toObject();
+    if (!authoritative["updated"].toString().isEmpty()) {
+        applyStationRecords(QJsonArray{QJsonObject{{"id", authoritative["station_id"]},
+            {"external_id", authoritative["external_id"]}, {"details", authoritative["details"]},
+            {"updated", authoritative["updated"]}}});
+        return;
+    }
     // Explicitly corrected legacy reports can receive a canonical server update.
     if (authoritative.isEmpty() && report["template"].toObject()["version"].toInt() < 4) return;
     const auto answers = report["payload"].toObject()["answers"].toObject();
@@ -52,11 +58,11 @@ void Lem::applyClosedIdentity(const QJsonObject &report) {
     if (changes.isEmpty()) return;
     const auto stationId = authoritative.isEmpty() ? snapshot["station_id"].toString() : authoritative["station_id"].toString();
     const auto externalId = authoritative.isEmpty() ? snapshot["external_id"].toString() : authoritative["external_id"].toString();
-    auto patch = [&](QJsonArray rows) {
+    auto patch = [&](QJsonArray rows, const QString &stationKey) {
         for (int i = 0; i < rows.size(); ++i) {
             auto row = rows[i].toObject();
-            const bool same = !stationId.isEmpty() && !row["station_id"].toString().isEmpty()
-                ? row["station_id"].toString() == stationId : !externalId.isEmpty() && row["external_id"].toString() == externalId;
+            const bool same = !stationId.isEmpty() && !row[stationKey].toString().isEmpty()
+                ? row[stationKey].toString() == stationId : !externalId.isEmpty() && row["external_id"].toString() == externalId;
             if (!same) continue;
             auto details = row["details"].toObject();
             for (auto it = changes.begin(); it != changes.end(); ++it) details[it.key()] = it.value();
@@ -64,8 +70,9 @@ void Lem::applyClosedIdentity(const QJsonObject &report) {
         }
         return rows;
     };
-    m_chargers = patch(m_chargers);
-    for (auto key : m_catalogues.keys()) m_catalogues[key] = patch(m_catalogues[key].toArray());
+    m_stations = patch(m_stations, "id");
+    m_chargers = patch(m_chargers, "station_id");
+    for (auto key : m_catalogues.keys()) m_catalogues[key] = patch(m_catalogues[key].toArray(), "station_id");
 }
 
 QVariantList Lem::qveCopySources() const { return groupCopySources("QVE"); }
