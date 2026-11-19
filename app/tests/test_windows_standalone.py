@@ -98,11 +98,12 @@ class PortableAudit(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("cmake"), "CMake is required")
 class CMakeGuard(unittest.TestCase):
-    def configure(self, kind, windows=True, msvc=False, missing_plugin=False, enabled=True):
+    def configure(self, kind, windows=True, msvc=False, missing_plugin=None, enabled=True):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             module = (APP/"cmake/WindowsStandalone.cmake").as_posix()
-            targets = "\n".join(f"add_library(Qt6::{p} STATIC IMPORTED)" for p in ["QWindowsIntegrationPlugin", "QOffscreenIntegrationPlugin", "QJpegPlugin", "QSchannelBackendPlugin"] if not (missing_plugin and p == "QSchannelBackendPlugin"))
+            plugins = ["QWindowsIntegrationPlugin", "QOffscreenIntegrationPlugin", "QJpegPlugin", "QSchannelBackendPlugin", "QSvgPlugin"]
+            targets = "\n".join(f"add_library(Qt6::{p} STATIC IMPORTED)" for p in plugins if p != missing_plugin)
             (root/"dummy.cpp").write_text("int main(){return 0;}")
             (root/"CMakeLists.txt").write_text(f'''cmake_minimum_required(VERSION 3.25)
 project(Guard LANGUAGES CXX)
@@ -132,10 +133,12 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/properties.txt" "${{opts}};${{crt}}")
         self.assertNotEqual(rc, 0)
         self.assertIn("requires STATIC Qt", output)
 
-    def test_missing_tls_and_other_platform_rejected(self):
-        rc, output, _ = self.configure("STATIC", missing_plugin=True)
-        self.assertNotEqual(rc, 0)
-        self.assertIn("QSchannelBackendPlugin", output)
+    def test_missing_required_plugins_and_other_platform_rejected(self):
+        for plugin in ("QSchannelBackendPlugin", "QSvgPlugin"):
+            with self.subTest(plugin=plugin):
+                rc, output, _ = self.configure("STATIC", missing_plugin=plugin)
+                self.assertNotEqual(rc, 0)
+                self.assertIn(plugin, output)
         rc, output, _ = self.configure("STATIC", windows=False)
         self.assertNotEqual(rc, 0)
         self.assertIn("only supported on Windows", output)

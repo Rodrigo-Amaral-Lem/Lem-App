@@ -153,9 +153,7 @@ ApplicationWindow {
     }
     property bool splashActive: true
     readonly property var reportBrandCatalogue: lem.reportBrands()
-    property url logoSource: "qrc:/branding/lem-logo.png"
-    // Same visible bounds as shared/branding/lem-logo-tight.svg.
-    readonly property rect logoBounds: Qt.rect(247, 171, 764, 890)
+    property url logoSource: "qrc:/branding/lem-logo-tight.svg"
     // One random draw per process: mutually exclusive 5% / 5% / 1% / 89%.
     // Keep the draw separate so boundary cases can be exercised deterministically.
     property real startupDraw: Math.random()
@@ -186,7 +184,8 @@ ApplicationWindow {
         }
         Rectangle {
             anchors.fill: parent
-            color: win.pageSurface
+            // The static mark is transparent, so give it a white canvas.
+            color: win.startupUsesAnimation ? win.pageSurface : "#ffffff"
         }
         MouseArea {
             anchors.fill: parent
@@ -203,7 +202,6 @@ ApplicationWindow {
             height: parent.height * 0.8
             visible: !win.startupUsesAnimation
             source: visible ? win.logoSource : ""
-            sourceClipRect: win.logoBounds
             fillMode: Image.PreserveAspectFit
             asynchronous: false
             cache: true
@@ -1386,10 +1384,13 @@ ApplicationWindow {
                 Image {
                     objectName: "headerLogo"
                     source: win.logoSource
-                    sourceClipRect: win.logoBounds
-                    Layout.preferredWidth: 44 * win.logoBounds.width / win.logoBounds.height
-                    Layout.preferredHeight: 44
-                    Layout.leftMargin: 4
+                    // The SVG is tightly cropped. Leave white space above and below it,
+                    // including the two pixels occupied by the toolbar's bottom rule.
+                    Layout.preferredWidth: 36
+                    Layout.preferredHeight: 34
+                    Layout.leftMargin: win.compact ? 6 : 10
+                    Layout.topMargin: 4
+                    Layout.bottomMargin: 6
                     fillMode: Image.PreserveAspectFit
                     Accessible.name: "Logótipo Lem"
                 }

@@ -334,7 +334,7 @@ notify_report_models()
 lem.changed.connect(lem.chargersChanged.emit)
 engine = QQmlApplicationEngine()
 engine.setInitialProperties(
-    {"startupDraw": 0.5, "logoSource": QUrl.fromLocalFile(str(PROJECT_ROOT / "shared/branding/lem-logo.png"))}
+    {"startupDraw": 0.5, "logoSource": QUrl.fromLocalFile(str(PROJECT_ROOT / "shared/branding/lem-logo-tight.svg"))}
 )
 engine.rootContext().setContextProperty("lem", lem)
 errors = []
@@ -411,7 +411,13 @@ def run_tests():
             "text"
         ), "Cached identity must not look signed in"
         assert find_visual(w.contentItem(), "accountStatusIcon").property("kind") == "warning"
-        assert account.width() <= 48 and find_visual(w.contentItem(), "appHeader").height() <= 60
+        header = find_visual(w.contentItem(), "appHeader")
+        assert account.width() <= 48 and header.height() <= 60
+        logo = find_visual(header, "headerLogo")
+        assert logo.property("sourceSize").height() > 0 and logo.property("paintedWidth") > 0
+        origin = logo.mapToItem(header, QPoint(0, 0))
+        assert origin.x() >= 6 and origin.y() >= 4, "Logo needs clearance from the top and leading edges"
+        assert header.height() - origin.y() - logo.height() >= 6, "Logo needs clearance above the toolbar rule"
         trigger("accountButton")
         assert js("loginDialog.opened")
         trigger("clearLocalCopiesButton")
@@ -927,6 +933,7 @@ def check_splash():
     assert js("startupSplash.width") >= w.width() - 1
     assert js("startupSplash.height") >= w.height() - 1
     assert js("startupLogo.status") == 1
+    assert w.grabWindow().pixelColor(5, 5).name() == "#ffffff"
     splash_checks.append(True)
 
 

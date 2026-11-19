@@ -31,7 +31,7 @@ class InstalledBuild(unittest.TestCase):
         for name in ('Tools/CMake_64/bin/cmake.exe', 'Tools/Ninja/ninja.exe', 'Tools/mingw1510_64/bin/g++.exe',
                      'Tools/mingw1510_64/bin/gcc.exe', 'Tools/mingw1510_64/bin/windres.exe'):
             self.file(self.sdk / name)
-        for name in ('qtbase', 'qtshadertools', 'qtdeclarative'):
+        for name in builder.SOURCE_MODULES:
             self.file(self.source / name / 'CMakeLists.txt')
         self.file(self.source / 'configure.bat')
         self.file(self.source / 'qtbase/.cmake.conf', 'set(QT_REPO_MODULE_VERSION "6.12.0")')
