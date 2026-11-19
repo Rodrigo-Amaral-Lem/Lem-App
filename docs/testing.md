@@ -31,6 +31,7 @@ locate fonts, point `QT_QPA_FONTDIR` to the system font directory for that test 
 | `server-settings`, `catalogue-notifications`, `report-projection-performance` | Preference migration, notification scope and projection behavior |
 | `network-security`, `evidence-crop-video` | Redirect/reply bounds, paths, cropping and media validation |
 | `download-recovery` | Real loopback interruptions, byte-range resume, old-server fallback, bounded retries, permanent-item batch failure and staged ZIP reception |
+| `windows-background` | Windows tray close during an evidence download, hidden catalogue refresh, shortcut activation and explicit exit |
 | `presentation-save` | Independent settings write/read-back, failed/lost replies, conflicts, local restart and saving during evidence downloads |
 | `contract-export` | Closed-only PDF/ZIP batches, local/server evidence, stale observer drafts, pending closures, duplicate filenames, independent devices, interrupted downloads, scoped cancellation, trash/session guards and password-reset client actions |
 | `connector-checklist`, `measurement-rules` | Shared connector and numeric cases |

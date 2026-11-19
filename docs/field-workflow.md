@@ -112,6 +112,15 @@ group is conserved. The pending copy is not a durable queue across an applicatio
 
 ## Synchronization, recovery and ownership
 
+On Windows, closing the window keeps Lem in the notification area. Open the icon or
+launch the shortcut to restore the same session. Choose **Sair** from the icon to quit.
+On Android, an evidence download started in the app continues after Home. With
+notifications enabled, tapping the transfer notification brings the app back.
+While signed in and in the background, the client refreshes accessible contracts,
+the selected contract's chargers and the PCVE database. Android schedules these
+checks when a network is available. If the OS ends the process, reopen Lem and
+request any missing originals again.
+
 Use manual synchronization when ready to send deferred evidence. A lost network acknowledgement is
 retried using the report's durable revision/fingerprint data; do not recreate or delete the report
 just because a request failed.

@@ -19,7 +19,7 @@ import threading
 
 APP = Path(__file__).resolve().parents[1]
 DEFAULT_BUILD = Path('build/windows-static')
-MODULES = ('', 'Core', 'Gui', 'Network', 'Concurrent', 'Qml', 'Quick', 'QuickControls2', 'QuickDialogs2', 'ShaderTools', 'Svg')
+MODULES = ('', 'Core', 'Gui', 'Widgets', 'Network', 'Concurrent', 'Qml', 'Quick', 'QuickControls2', 'QuickDialogs2', 'ShaderTools', 'Svg')
 SOURCE_MODULES = ('qtbase', 'qtshadertools', 'qtdeclarative', 'qtsvg')
 # The builder runs CMake explicitly before shortening paths. Ninja must use
 # that edited manifest for the whole build. This does not change the cache ABI.

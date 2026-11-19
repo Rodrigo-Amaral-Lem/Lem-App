@@ -246,6 +246,8 @@ O relatório fechado passa a ser consultado como registo da intervenção. Um ad
 
 A app guarda as alterações no dispositivo e organiza o envio em segundo plano. Respostas e ficheiros podem ser enviados em momentos diferentes. Utilize o botão **Sinc.**, identificado pelo símbolo de sincronização, para pedir o envio manual e acompanhe as mensagens da operação.
 
+No Windows, pode fechar a janela pelo **X** durante um descarregamento. A Lem continua na área de notificação. Com sessão iniciada, atualiza a lista de contratos, os carregadores do contrato selecionado e a base de IDs de PCVEs ao fechar a janela e depois a cada 15 minutos, enquanto o computador estiver ativo. Para voltar ao mesmo relatório, abra a Lem pelo atalho ou pelo ícone junto ao relógio. Para terminar o processo, clique nesse ícone com o botão direito e escolha **Sair**.
+
 | Indicação | O que significa e o que fazer |
 | --- | --- |
 | A guardar no dispositivo… | A gravação local ainda está em curso. Aguarde. |

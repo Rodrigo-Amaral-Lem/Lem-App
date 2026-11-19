@@ -20,13 +20,24 @@
 #include "Lem.h"
 #include "Theme.h"
 #include "AppStorage.h"
+#ifdef Q_OS_WIN
+#include "WindowsBackground.h"
+#include <optional>
+#endif
+#ifdef Q_OS_ANDROID
+#include "AndroidBackground.h"
+#endif
 int main(int argc, char **argv) {
 #ifdef Q_OS_ANDROID
     // Must run before any Qt Network use. These names match the packaged libraries.
     qputenv("ANDROID_OPENSSL_SUFFIX", "_3");
 #endif
     QQuickStyle::setStyle("Fusion");
+#ifdef Q_OS_WIN
+    QApplication app(argc, argv);
+#else
     QGuiApplication app(argc, argv);
+#endif
     app.setOrganizationName("Lem");
     app.setApplicationName("Lem");
     app.setApplicationDisplayName("Lem");
@@ -68,6 +79,17 @@ int main(int argc, char **argv) {
     QTemporaryDir temp;
     // Screenshot/demo validation must never read or overwrite the user's drafts.
     const bool screenshot = app.arguments().contains("--screenshot");
+#ifdef Q_OS_WIN
+    std::optional<WindowsInstance> instance;
+    if (!smoke && !screenshot) {
+        instance.emplace();
+        if (!instance->event) {
+            qCritical() << "Não foi possível verificar a instância de Lem em execução.";
+            return 1;
+        }
+        if (instance->existing) return 0;
+    }
+#endif
     Lem lem(smoke || screenshot ? temp.path() : AppStorage::prepare());
     if (smoke || app.arguments().contains("--demo"))
         lem.demo();
@@ -87,6 +109,13 @@ int main(int argc, char **argv) {
     engine.loadFromModule("Lem", "Main");
     if (engine.rootObjects().isEmpty())
         return 1;
+#ifdef Q_OS_WIN
+    std::optional<WindowsBackground> background;
+    if (instance)
+        background.emplace(qobject_cast<QWindow *>(engine.rootObjects().first()), lem, instance->event);
+#elif defined(Q_OS_ANDROID)
+    AndroidBackground background(lem);
+#endif
     if (engine.rootObjects().first()->property("interfaceRevision").toString() != "bounds032-safearea1") {
         qCritical() << "Interface QML desatualizada: reconfigure e compile num diretório de build novo.";
         return 4;

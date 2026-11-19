@@ -10,6 +10,10 @@ Part of LEM. See the accompanying LICENSE for license terms and warranty disclai
     android:versionName="-- %%INSERT_VERSION_NAME%% --">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <!-- %%INSERT_PERMISSIONS -->
     <!-- %%INSERT_FEATURES -->
@@ -47,11 +51,18 @@ Part of LEM. See the accompanying LICENSE for license terms and warranty disclai
           <meta-data
                 android:name="android.app.lib_name"
                 android:value="-- %%INSERT_APP_LIB_NAME%% --" />
+          <!-- Keep Qt network callbacks and durable writes running after Home. -->
+          <meta-data android:name="android.app.background_running" android:value="true" />
 
           <meta-data
                 android:name="android.app.arguments"
                 android:value="-- %%INSERT_APP_ARGUMENTS%% --" />
         </activity>
+
+        <service android:name=".TransferService" android:exported="false"
+            android:foregroundServiceType="dataSync" android:stopWithTask="true" />
+        <service android:name=".CatalogueJob" android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

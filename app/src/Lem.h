@@ -111,6 +111,12 @@ class Lem : public QObject {
         return !m_token.isEmpty() && !m_server.startsWith("demo:");
     }
     bool sessionPending() const { return !m_pendingSessionToken.isEmpty(); }
+    bool evidenceDownloadActive() const { return downloadingPhotos() || !m_downloads.isEmpty(); }
+    bool backgroundTransferActive() const {
+        return m_syncing || m_refreshing || m_stationCatalogueLoading ||
+               evidenceDownloadActive();
+    }
+    bool refreshBackgroundCatalogues();
     QVariantMap reportPresentationSave() const { return m_reportPresentationSave.toVariantMap(); }
     bool canSaveReportPresentation() const {
         return authenticated() && m_user["role"] == "admin" && !m_contract.isEmpty() &&
@@ -394,7 +400,7 @@ class Lem : public QObject {
     mutable QVariantMap m_currentProjection, m_photoProjection;
     mutable QJsonArray m_projectedPhotos;
     QJsonArray m_notifiedContracts;
-    void refreshContracts(bool fromManualSync);
+    void refreshContracts(bool fromManualSync, bool includeStations = false);
     void refreshCatalogue(QString id, bool force = false);
     void resetStationCatalogue();
     static QJsonArray currentPcveRows(QJsonArray rows);
