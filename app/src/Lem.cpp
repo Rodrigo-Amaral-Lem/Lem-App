@@ -1639,10 +1639,15 @@ void Lem::removePhoto(QString photoId) {
     if (!deleted.contains(photoId))
         deleted.append(photoId);
     auto payload = m_current["payload"].toObject();
-    auto signatures = payload["signatures"].toObject();
-    for (auto key : signatures.keys())
-        if (signatures[key].toObject()["photo_id"].toString() == photoId) signatures.remove(key);
-    payload["signatures"] = signatures;
+    // A migrated correction can contain a historical signature at a renamed
+    // checkpoint. Identify it by the cloned evidence ID, even with no local file.
+    for (const auto field : {"signatures", "legacy_signatures"}) {
+        const auto references = payload.value(field).toObject();
+        auto kept = references;
+        for (auto it = references.begin(); it != references.end(); ++it)
+            if (it.value().toObject()["photo_id"] == photoId) kept.remove(it.key());
+        if (kept != references) payload[field] = kept;
+    }
     m_current["payload"] = payload;
     m_current["photos"] = photos;
     m_current["deleted_photos"] = deleted;

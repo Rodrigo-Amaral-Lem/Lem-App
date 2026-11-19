@@ -131,6 +131,10 @@ recover when the read proves the desired state. `test_report_presentation_ui.py`
 feedback even when the global message becomes “Catálogo atualizado”, saved/unsaved selections,
 mobile/desktop widths and session/administrator gates.
 
+The offline runner corrects a technician's closed report with an empty administrator evidence
+cache. It checks the replacement's retained photograph, signature, new attachment and edited
+notes, and counts the evidence requests across deletion, commit and lost-acknowledgement recovery.
+
 The offline runner also deletes/edits a second draft while another report downloads, checks that
 callbacks cannot reopen the deleted draft, and exercises contract retention from a second device:
 saved/unsent drafts stay pending across restart, other contracts still sync, and recovery resumes

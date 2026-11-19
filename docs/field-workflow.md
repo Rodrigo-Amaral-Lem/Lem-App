@@ -192,7 +192,9 @@ contract format before rendering. Selecting an issuer in the list still requires
 dos reports**; an explicit notice identifies unsaved choices.
 
 On Windows/Linux desktop, an administrator can use **Corrigir report fechado…** on a synchronized
-closed report. Edit the working copy's answers, observations and evidence as with a draft. Use
+closed report. The server copies the existing evidence into the working draft. You can edit answers
+and observations, remove an attachment or add a new one with an empty local evidence cache. Only new
+attachments are uploaded. Download an individual file if you want to inspect its contents. Use
 **Editar início e fim…** for the intervention dates (including timezone). At review, choose
 **Guardar correção e substituir original…** and confirm. The original remains available until the
 server accepts the complete replacement, which preserves the technician's ownership. Cancelling

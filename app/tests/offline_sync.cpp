@@ -1106,6 +1106,9 @@ int main(int argc, char **argv) {
         for (const auto &item : section.toMap()["items"].toList())
             owner.answer(item.toMap()["id"].toString(), "NA", "Sem conector/veículo disponível");
     owner.answer("FIN.03", "", "fecho confirmado pelo proprietário");
+    owner.answer("EST.01", "OK", "");
+    owner.attach("EST.01", QUrl::fromLocalFile(source)); // Required photograph to retain.
+    owner.attach("SITE.02", QUrl::fromLocalFile(source)); // Optional photograph to remove.
     CHECK(addTestSignature(owner));
     owner.finish(); CHECK(settled(owner));
     CHECK(owner.current()["status"] == "closed" && !owner.current()["dirty"].toBool());
@@ -1284,6 +1287,8 @@ int main(int argc, char **argv) {
     const auto originalOwner = administrator.current()["owner_id"];
     const auto originalIdentifier = administrator.current()["identifier"];
     const auto originalPhotoCount = administrator.current()["photos"].toList().size();
+    CHECK(originalPhotoCount == 3);
+    CHECK(administrator.photoDownloadSummary()["missing"].toInt() == originalPhotoCount);
     const auto originalPayload = LemReviewTest::persistedReport(administrator, sharedId).value("payload");
     CHECK(originalPayload.isObject());
     administrator.beginReportCorrection(); CHECK(settled(administrator));
@@ -1291,6 +1296,17 @@ int main(int argc, char **argv) {
     CHECK(correctionId != sharedId && administrator.current()["status"] == "draft");
     CHECK(administrator.current()["correction"].toMap()["source_id"] == sharedId);
     CHECK(administrator.current()["photos"].toList().size() == originalPhotoCount);
+    CHECK(administrator.photoDownloadSummary()["missing"].toInt() == originalPhotoCount);
+    const auto inherited = administrator.current()["photos"].toList();
+    QString removedId;
+    for (const auto &entry : inherited) {
+        const auto photo = entry.toMap();
+        CHECK(photo["uploaded"].toBool() && photo["path"].toString().isEmpty());
+        if (photo["checkpoint"] == "SITE.02") removedId = photo["id"].toString();
+    }
+    CHECK(!removedId.isEmpty());
+    administrator.removePhoto(removedId);
+    CHECK(administrator.current()["deleted_photos"].toList().contains(removedId));
     CHECK(administrator.current()["owner_id"] == administrator.user()["id"]);
     CHECK(!administrator.setCorrectionTimes("2026-11-16T12:00:00Z", "2026-11-16T10:00:00Z"));
     CHECK(!administrator.setCorrectionTimes("2026-11-16T09:00:00", "2026-11-16T10:00:00Z"));
@@ -1299,8 +1315,9 @@ int main(int argc, char **argv) {
     administrator.answer("EST.02", "Fabricante corrigido pelo administrador", "");
     administrator.answer("EST.03", "Modelo corrigido pelo administrador", "");
     administrator.answer("EST.04", "SN-CORRECAO-ADMIN", "");
-    administrator.attach("EST.01", QUrl::fromLocalFile(source));
-    CHECK(administrator.current()["photos"].toList().size() == originalPhotoCount + 1);
+    administrator.attach("SITE.03", QUrl::fromLocalFile(source));
+    const auto addedId = administrator.current()["photos"].toList().last().toMap()["id"].toString();
+    CHECK(administrator.current()["photos"].toList().size() == originalPhotoCount);
     administrator.finish(); CHECK(settled(administrator));
     // The test API first returns the pre-fix 409. Manual Sync must revalidate
     // this saved, protected copy without deleting either local report.
@@ -1331,7 +1348,10 @@ int main(int argc, char **argv) {
     CHECK(retainedDraft["dirty"].toBool() && retainedDraft["payload"] == otherSample["payload"]);
     CHECK(administrator.current()["dirty"].toBool()); // Commit succeeded; its ACK was deliberately lost.
     CHECK(LemReviewTest::persistedReport(administrator, sharedId)["payload"] == originalPayload);
-    CHECK(contractOperator.openReport("", correctionId) && settled(contractOperator));
+    // This separate device last exported a legacy report without a selected
+    // contract. Open the replacement through its actual catalogue.
+    contractOperator.selectContract(contract); CHECK(settled(contractOperator));
+    CHECK(contractOperator.openReport(charger, correctionId) && settled(contractOperator));
     CHECK(contractOperator.current()["status"] == "closed");
     CHECK(!administrator.prepareExport("pdf"));
     qInfo() << "PASS: a different contract's HTTP 423 does not interrupt a manual correction retry";
@@ -1359,7 +1379,7 @@ int main(int argc, char **argv) {
     CHECK(LemReviewTest::persistedReport(administrator, sharedId).isEmpty());
     CHECK(administrator.current()["correction"].toMap()["state"] == "committed");
     CHECK(administrator.current()["owner_id"] == originalOwner);
-    CHECK(administrator.current()["photos"].toList().size() == originalPhotoCount + 1);
+    CHECK(administrator.current()["photos"].toList().size() == originalPhotoCount);
     CHECK(administrator.current()["identifier"] == originalIdentifier);
     CHECK(administrator.current()["payload"].toMap()["started"] == "2026-10-01T08:00:00Z");
     CHECK(administrator.current()["payload"].toMap()["finished"] == "2026-10-01T10:30:12Z");
@@ -1375,6 +1395,22 @@ int main(int argc, char **argv) {
     owner.sync(); CHECK(settled(owner));
     owner.openReport(charger, correctionId); CHECK(settled(owner));
     CHECK(owner.current()["status"] == "closed" && owner.current()["owner_id"] == originalOwner);
+    CHECK(notes(owner, "FIN.03") == "LOSE_CORRECTION_ACK");
+    const auto finalPhotos = owner.current()["photos"].toList();
+    QMap<QString, QVariantMap> confirmed;
+    for (const auto &entry : finalPhotos)
+        confirmed.insert(entry.toMap()["id"].toString(), entry.toMap());
+    CHECK(confirmed.size() == originalPhotoCount && !confirmed.contains(removedId));
+    CHECK(confirmed.value(addedId)["checkpoint"] == "SITE.03");
+    for (const auto &entry : inherited) {
+        const auto photo = entry.toMap();
+        const auto id = photo["id"].toString();
+        if (id != removedId) {
+            CHECK(confirmed.contains(id) && !photo["digest"].toString().isEmpty());
+            CHECK(confirmed.value(id)["digest"] == photo["digest"]);
+            CHECK(confirmed.value(id)["checkpoint"] == photo["checkpoint"]);
+        }
+    }
     viewer.sync(); CHECK(settled(viewer));
     viewer.openReport(charger, sharedId); CHECK(settled(viewer));
     CHECK(viewer.current()["dirty"].toBool() && viewer.current()["_conflict"].toBool());

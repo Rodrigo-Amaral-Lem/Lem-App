@@ -313,6 +313,14 @@ struct LemReviewTest {
         reloaded.demo();
         reloaded.openReport("demo-charger", copied["id"].toString());
         CHECK(reloaded.m_current["payload"] == copied["payload"]);
+        // Removing the image from the copy must also retire its historical
+        // signature reference. The original keeps both references and its file.
+        reloaded.removePhoto(photo["id"].toString());
+        const auto removedPayload = reloaded.m_current["payload"].toObject();
+        CHECK(!removedPayload["signatures"].toObject().contains("FIN.02"));
+        CHECK(!removedPayload["legacy_signatures"].toObject().contains("PC99.01"));
+        CHECK(reloaded.m_reports[originalId].toObject()["payload"] == original["payload"]);
+        CHECK(read(QUrl(original["photos"].toArray()[0].toObject()["path"].toString()).toLocalFile()) == png);
         // Invalid source references must not produce a misleading 'complete' backup.
         client.m_current = original;
         auto payload = original["payload"].toObject();

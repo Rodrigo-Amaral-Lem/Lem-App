@@ -230,6 +230,22 @@ def delete_ack_stats():
                     assert stats["lost_delete"], stats
                     assert stats["legacy_identity_conflict"], stats
                     assert stats["lost_correction"], stats
+                    # The technician uploaded the original fixtures. Only the new attachment
+                    # should cross the wire during the administrator's correction.
+                    posts = [key.removeprefix("POST ") for key in counts if key.startswith("POST ")]
+                    sources = {path.removesuffix("/corrections") for path in posts if path.endswith("/corrections")}
+                    copies = {path.removesuffix("/correction/commit") for path in posts if path.endswith("/correction/commit")}
+                    assert sources and len(copies) == 1
+                    media_writes = {}
+                    for key, count in counts.items():
+                        method, path = key.split(" ", 1)
+                        report, separator, _ = path.partition("/photos/")
+                        if separator and report in sources | copies:
+                            assert method != "GET", key
+                            if report in copies:
+                                media_writes[method] = media_writes.get(method, 0) + count
+                    assert media_writes == {"PUT": 1, "DELETE": 1}, media_writes
+                    print("PASS: correction used zero evidence GETs, one new upload and one removal")
                     downloads = sum(
                         v for k, v in counts.items() if k.startswith("GET ") and "/photos/" in k
                     )
