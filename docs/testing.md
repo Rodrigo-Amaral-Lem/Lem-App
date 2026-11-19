@@ -63,6 +63,7 @@ python app/tests/test_suggested_notes_ui.py
 python app/tests/test_photo_delegate_stability.py
 python app/tests/test_report_groups_054.py
 python -X utf8 -B app/tests/test_checkpoint_save_ui.py
+python -X utf8 -B app/tests/test_pcve_catalogue_ui.py
 ```
 
 `test_checkpoint_save_ui.py` exercises failed draft creation, visible save errors, exact
@@ -73,6 +74,11 @@ the runner. It disables the QML disk cache and prints results to the console.
 The wider `app/tests/test_*.py` collection covers navigation, scroll bounds, Android margins, import
 preview, feedback, export visibility and accounts. Most are standalone runners; do not assume
 `pytest app/tests` is their entry point. Read each runner's header and argument handling.
+
+`test_pcve_catalogue_ui.py` covers the contract-independent lookup, live details, offline navigation
+and the desktop administrator's edit and Excel controls. The `station-identity` native test checks
+canonical details across memberships. The Android emulator should also exercise the shared catalogue
+on a signed-in account and after restarting without a server connection.
 
 ## Integration runners and build-helper checks
 

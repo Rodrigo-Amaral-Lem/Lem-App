@@ -61,6 +61,10 @@ Em **Gestão → Contas e acessos**, selecione a conta de um técnico e escolha 
 
 4. **Abra a intervenção.** Toque em **Nova intervenção** ou no **Rascunho** que pretende continuar. Deslize verticalmente para consultar os restantes carregadores.
 
+### Consultar IDs de PCVEs
+
+Abra **IDs de PCVEs** no menu. A lista reúne os IDs dos contratos a que tem acesso e cada PCVE aparece uma só vez. Toque num ID para ver a ficha usada nos contratos e os dados do último Excel importado. Use **Atualizar** para guardar a lista no dispositivo e consultá-la sem rede.
+
 ### Evitar registos duplicados
 
 Antes de criar uma intervenção, confirme se já existe um rascunho para o trabalho em curso. Uma falha de rede, por si só, não exige a criação de outro relatório.

@@ -20,6 +20,7 @@
 #include <QCryptographicHash>
 #include <QNetworkInformation>
 #include <algorithm>
+#include <utility>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QThread>
 #include <QUuid>
@@ -847,6 +848,61 @@ void Lem::syncPhotos(int index, QJsonObject r, int photoIndex) {
 }
 
 // Use the local catalogue for 15 minutes unless explicitly forced.
+// Station revisions are UTC ISO timestamps from the server. Reconcile racing
+// responses before updating the membership projections and the offline station list.
+void Lem::applyStationRecords(const QJsonArray &records, bool complete, QJsonArray *memberships) {
+    const auto canonical = [](const QJsonObject &row) -> QJsonObject {
+        return {{"id", row["station_id"]}, {"external_id", row["external_id"]},
+                {"details", row["details"]}, {"updated", row["station_updated"]}};
+    };
+    QHash<QString, QJsonObject> latest;
+    for (const auto &value : records) {
+        const auto row = value.toObject();
+        const auto id = row["id"].toString();
+        if (!id.isEmpty() && !row["updated"].toString().isEmpty() && row["details"].isObject())
+            latest.insert(id, row);
+    }
+    if (!latest.isEmpty()) {
+        const auto keepNewer = [&latest](const QJsonObject &row) {
+            auto current = latest.find(row["id"].toString());
+            if (current != latest.end() && row["details"].isObject() &&
+                row["updated"].toString() > current->value("updated").toString())
+                current.value() = row;
+        };
+        for (const auto &value : m_stations) keepNewer(value.toObject());
+        for (const auto &value : m_chargers) keepNewer(canonical(value.toObject()));
+        for (const auto &catalogue : std::as_const(m_catalogues))
+            for (const auto &value : catalogue.toArray()) keepNewer(canonical(value.toObject()));
+
+        const auto patchMemberships = [&latest](QJsonArray &rows) {
+            for (qsizetype i = 0; i < rows.size(); ++i) {
+                auto row = rows.at(i).toObject();
+                const auto station = latest.constFind(row["station_id"].toString());
+                if (station == latest.cend()) continue;
+                row["external_id"] = station->value("external_id");
+                row["details"] = station->value("details");
+                row["station_updated"] = station->value("updated");
+                rows[i] = row;
+            }
+        };
+        patchMemberships(m_chargers);
+        for (const auto &id : m_catalogues.keys()) {
+            auto rows = m_catalogues[id].toArray();
+            patchMemberships(rows);
+            m_catalogues[id] = rows;
+        }
+        if (memberships) patchMemberships(*memberships);
+    }
+
+    // Only a complete GET can establish visibility of new IDs or remove old ones.
+    auto stations = complete ? records : m_stations;
+    for (qsizetype i = 0; i < stations.size(); ++i) {
+        const auto station = latest.constFind(stations.at(i).toObject()["id"].toString());
+        if (station != latest.cend()) stations[i] = station.value();
+    }
+    m_stations = stations;
+}
+
 // Server deletion markers remove stale local copies before installing fresh summaries.
 void Lem::refreshCatalogue(QString id, bool force) {
     if (id.isEmpty() || m_token.isEmpty() || m_catalogueLoading)
@@ -860,7 +916,7 @@ void Lem::refreshCatalogue(QString id, bool force) {
     request(
         "GET", "/api/contracts/" + id + "/chargers", {},
         [this, id](QByteArray data) {
-            const auto rows = QJsonDocument::fromJson(data).array();
+            auto rows = QJsonDocument::fromJson(data).array();
             for (auto row : rows)
                 for (auto removed : row.toObject()["deleted_reports"].toArray())
                     if (m_reports.contains(removed.toString()))
@@ -872,6 +928,14 @@ void Lem::refreshCatalogue(QString id, bool force) {
                             emit changed();
                             return;
                         }
+            QJsonArray stations;
+            for (const auto &value : std::as_const(rows)) {
+                const auto row = value.toObject();
+                if (!row["station_updated"].toString().isEmpty())
+                    stations.append(QJsonObject{{"id", row["station_id"]}, {"external_id", row["external_id"]},
+                                                {"details", row["details"]}, {"updated", row["station_updated"]}});
+            }
+            applyStationRecords(stations, false, &rows);
             m_catalogues[id] = rows;
             m_catalogueTimes[id] = double(QDateTime::currentSecsSinceEpoch());
             if (m_contract == id)

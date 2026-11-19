@@ -112,6 +112,10 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
                 emit chargersChanged();
             }
         }
+        if (m_notifiedStations != m_stations) {
+            m_notifiedStations = m_stations;
+            emit stationsChanged();
+        }
         if (m_notifiedTemplate != m_template) {
             m_notifiedTemplate = m_template;
             emit sectionsChanged();
@@ -207,6 +211,10 @@ void Lem::setServer(QString s) {
     if (!flushEdits())
         return;
     m_server = s;
+    resetStationCatalogue();
+    m_importInfo = {};
+    m_preview = {};
+    m_excel.clear();
     m_reportPresentationSave = {};
     m_clientCompatibility = {};
     emit compatibilityChanged();
@@ -236,6 +244,7 @@ QString Lem::cacheDir() const {
 // Restore the full checkpoint, then replay only newer journals owned by this user.
 // Deleted report IDs prevent an older journal from resurrecting a deleted report.
 void Lem::loadUser() {
+    resetStationCatalogue();
     m_manualSyncRequested = false;
     m_localReadError = false;
     m_localSaveError = false;
@@ -272,6 +281,11 @@ void Lem::loadUser() {
         m_contract = o["contract"].toString();
         m_catalogues = o["catalogues"].toObject();
         m_catalogueTimes = o["catalogue_times"].toObject();
+        const auto stationCache = o["station_catalogue"].toObject();
+        if (stationCache["role"] == m_user["role"] && stationCache["rows"].isArray()) {
+            m_stations = stationCache["rows"].toArray();
+            m_stationCatalogueLoaded = true;
+        }
         for (auto id : o["deleted_reports"].toArray())
             m_deletedReports.insert(id.toString());
         // Earlier versions could store null/ID-less placeholders (see releasePhotoSync).
@@ -354,13 +368,17 @@ QString Lem::writeCheckpoint(const QJsonObject &reports) {
     QJsonArray removed;
     for (const auto &id : m_deletedReports)
         removed.append(id);
+    QJsonObject stationCache;
+    if (m_stationCatalogueLoaded)
+        stationCache = {{"role", m_user["role"]}, {"rows", m_stations}};
     const auto bytes = json({{"deleted_reports", removed},
                              {"contracts", m_contracts},
                              {"chargers", m_chargers},
                              {"reports", reports},
                              {"contract", m_contract},
                              {"catalogues", m_catalogues},
-                             {"catalogue_times", m_catalogueTimes}});
+                             {"catalogue_times", m_catalogueTimes},
+                             {"station_catalogue", stationCache}});
     if (f.write(bytes) != bytes.size() || !f.commit())
         return "Não foi possível gravar a cache local: " + f.errorString();
     for (auto it = reports.constBegin(); it != reports.constEnd(); ++it)
@@ -705,6 +723,10 @@ void Lem::logout() {
             "POST", "/api/logout", "{}", [](QByteArray) {}, "application/json",
             [](int, QString) {});
     m_token.clear();
+    resetStationCatalogue();
+    m_importInfo = {};
+    m_preview = {};
+    m_excel.clear();
     m_reportPresentationSave = {};
     m_passwordReset = {};
     m_contractExportState = {};
@@ -744,6 +766,18 @@ void Lem::refreshContracts(bool fromManualSync) {
             }
             applyContractPresentations();
             reconcileContractSync(fromManualSync);
+            bool updateStations = false;
+            if (m_user["role"] == "tech" && (m_stationCatalogueLoaded || m_stationCatalogueLoading)) {
+                QSet<QString> accessible;
+                for (const auto &value : m_contracts)
+                    accessible.insert(value.toObject()["id"].toString());
+                QSet<QString> previous;
+                for (const auto &value : previousContracts)
+                    previous.insert(value.toObject()["id"].toString());
+                updateStations = previous != accessible;
+                if (updateStations && !previous.subtract(accessible).isEmpty())
+                    resetStationCatalogue();
+            }
             // A deleted/unassigned contract must not remain the active catalogue.
             // Preserve report journals and local photographs for offline recovery.
             bool stillAccessible = false;
@@ -755,10 +789,11 @@ void Lem::refreshContracts(bool fromManualSync) {
                 m_catalogueTimes.remove(m_contract);
                 m_contract.clear();
                 m_chargers = {};
-                m_preview = {};
+                if (!m_importInfo["station_catalogue"].toBool()) m_preview = {};
             }
             m_refreshing = false;
             persist();
+            if (updateStations) refreshStations();
             if (!m_contract.isEmpty())
                 refreshCatalogue(m_contract, true);
             else
@@ -779,7 +814,7 @@ void Lem::selectContract(QString id) {
         m_contract = id;
         m_chargers = m_catalogues[id].toArray();
         m_current = {};
-        m_preview = {};
+        if (!m_importInfo["station_catalogue"].toBool()) m_preview = {};
         persist();
         emit changed();
     }
@@ -1622,6 +1657,110 @@ bool Lem::desktopCorrections() const {
     return NetworkSecurity::clientPlatform() == "windows" || NetworkSecurity::clientPlatform() == "linux";
 }
 
+bool Lem::desktopStationManagement() const {
+    return desktopCorrections() || NetworkSecurity::clientPlatform() == "macos";
+}
+
+bool Lem::canManageStations() const {
+    return desktopStationManagement() && authenticated() && m_user["role"] == "admin";
+}
+
+void Lem::resetStationCatalogue() {
+    ++m_stationRequest;
+    m_stations = {};
+    m_stationCatalogueLoaded = false;
+    m_stationCatalogueLoading = false;
+    m_stationCatalogueMessage.clear();
+    m_stationEditResult = {};
+}
+
+void Lem::refreshStations() {
+    if (!authenticated()) return;
+    const auto generation = ++m_stationRequest;
+    m_stationCatalogueLoading = true;
+    m_stationCatalogueMessage.clear();
+    emit changed();
+    request("GET", "/api/stations", {}, [this, generation](QByteArray data) {
+        if (generation != m_stationRequest) return;
+        m_stationCatalogueLoading = false;
+        if (!authenticated()) {
+            emit changed();
+            return;
+        }
+        const auto document = QJsonDocument::fromJson(data);
+        const auto rows = document.array();
+        QSet<QString> ids;
+        bool valid = document.isArray();
+        for (const auto &value : rows) {
+            const auto row = value.toObject();
+            const auto id = row["id"].toString();
+            if (id.isEmpty() || ids.contains(id) || row["external_id"].toString().isEmpty() ||
+                row["updated"].toString().isEmpty() || !row["details"].isObject()) {
+                valid = false;
+                break;
+            }
+            ids.insert(id);
+        }
+        if (valid) {
+            applyStationRecords(rows, true);
+            m_stationCatalogueLoaded = true;
+            persist();
+        } else {
+            m_stationCatalogueMessage = "A resposta da base de IDs de PCVEs é inválida.";
+        }
+        emit changed();
+    }, "application/json", [this, generation](int code, QString) {
+        if (generation != m_stationRequest) return;
+        m_stationCatalogueLoading = false;
+        if (code == 403) {
+            resetStationCatalogue();
+            persist();
+        }
+        if (code == 404)
+            m_stationCatalogueMessage = "Atualize o servidor para consultar a base de IDs de PCVEs.";
+        else if (m_stationCatalogueLoaded)
+            m_stationCatalogueMessage = "Sem ligação à base de IDs de PCVEs. A mostrar os dados guardados.";
+        else
+            m_stationCatalogueMessage = "Não foi possível carregar a base de IDs de PCVEs.";
+        emit changed();
+    });
+}
+
+void Lem::saveStation(QString id, QString baseUpdated, QVariantMap fields) {
+    if (!canManageStations() || m_busy || id.isEmpty() || baseUpdated.isEmpty() || fields.isEmpty()) return;
+    m_busy = true;
+    m_stationEditResult = {{"id", id}, {"state", "saving"}};
+    emit changed();
+    const auto fail = [this, id](const QString &message) {
+        m_busy = false;
+        m_stationEditResult = {{"id", id}, {"state", "error"}, {"message", message}};
+        emit changed();
+    };
+    request("PATCH", "/api/stations/" + QString::fromLatin1(QUrl::toPercentEncoding(id)),
+            json({{"base_updated", baseUpdated}, {"fields", QJsonObject::fromVariantMap(fields)}}),
+            [this, id, fail](QByteArray data) {
+                const auto row = QJsonDocument::fromJson(data).object();
+                if (row["id"] != id || row["external_id"].toString().isEmpty() ||
+                    row["updated"].toString().isEmpty() || !row["details"].isObject()) {
+                    fail("A confirmação do servidor é inválida. Atualize a ficha antes de repetir.");
+                    return;
+                }
+                applyStationRecords(QJsonArray{row});
+                persist();
+                m_busy = false;
+                m_stationEditResult = {{"id", id}, {"state", "saved"}};
+                status("Ficha PCVE guardada.");
+            }, "application/json", [this, fail](int code, const QString &body) {
+                const auto detail = QJsonDocument::fromJson(body.toUtf8()).object()["detail"].toString();
+                if (code == 409) {
+                    fail("A ficha foi atualizada entretanto. Reveja a versão atual antes de guardar de novo.");
+                    refreshStations();
+                } else {
+                    fail(detail.isEmpty() ? QString("Não foi possível guardar a ficha PCVE.") : detail);
+                }
+            });
+}
+
 bool Lem::correctionAllowed(const QJsonObject &report) const {
     if (report["status"] == "draft" && report["template"].toObject()["frozen_upload"].toBool()) return false;
     const auto correction = report["correction"].toObject();
@@ -1792,6 +1931,7 @@ void Lem::finish() {
     const auto previousReports = m_reports;
     const auto previousChargers = m_chargers;
     const auto previousCatalogues = m_catalogues;
+    const auto previousStations = m_stations;
     m_current.remove("_defer_photo_sync");
     m_current["status"] = "closed";
     auto payload = m_current["payload"].toObject();
@@ -1827,6 +1967,7 @@ void Lem::finish() {
         m_reports = previousReports;
         m_chargers = previousChargers;
         m_catalogues = previousCatalogues;
+        m_stations = previousStations;
         emit changed();
         return;
     }
@@ -2317,24 +2458,46 @@ void Lem::restoreContract(QString id) {
 
 // Keep the workbook bytes in memory for analysis, preview and eventual commit.
 void Lem::analyseExcel(QUrl url) {
-    if (m_busy || !online())
+    beginExcelImport(url, false);
+}
+
+void Lem::analyseStationExcel(QUrl url) {
+    if (canManageStations()) beginExcelImport(url, true);
+}
+
+void Lem::beginExcelImport(QUrl url, bool stationsOnly) {
+    if (m_busy || m_user["role"] != "admin" || !online())
         return;
     QFile f(localPath(url));
     if (!f.open(QIODevice::ReadOnly)) {
         status("Não foi possível abrir o Excel.");
         return;
     }
-    m_excel = f.read(20 * 1024 * 1024 + 1);
-    if (m_excel.size() > 20 * 1024 * 1024) {
+    const auto excel = f.read(20 * 1024 * 1024 + 1);
+    if (excel.size() > 20 * 1024 * 1024) {
         status("Máximo 20 MB.");
         return;
     }
+    if (excel.isEmpty() || f.error() != QFile::NoError) {
+        status("Não foi possível ler o Excel.");
+        return;
+    }
+    m_excel = excel;
     m_excelName = "import.xlsx";
+    m_excelImportPath.clear();
+    m_importInfo = {};
     m_preview = {};
     m_busy = true;
-    emit changed();
-    multipart("POST", "/api/imports/analyse", {}, m_excelName, m_excel, [this](QByteArray data) {
+    status("A analisar o Excel…");
+    multipart("POST", "/api/imports/analyse", {}, m_excelName, m_excel, [this, stationsOnly](QByteArray data) {
         m_importInfo = QJsonDocument::fromJson(data).object();
+        if (stationsOnly) {
+            m_importInfo["station_catalogue"] = true;
+            m_importInfo["batch_id"] = uuid();
+            m_busy = false;
+            status("Excel analisado. Pré-visualize os IDs antes de importar.");
+            return;
+        }
         QString company;
         for (auto c : m_contracts)
             if (c.toObject()["id"].toString() == m_contract)
@@ -2486,42 +2649,66 @@ QVariantList Lem::reportBrands() const {
 }
 
 void Lem::previewExcel(QString sheet, int row, QVariantMap columns, QString primary, QString secondary, QString issuer, int brandingRevision) {
-    if (m_busy || m_user["role"] != "admin" || !online() || m_contract.isEmpty() || m_excel.isEmpty())
-        return;
-    m_mapping = {
+    if (m_contract.isEmpty() || m_importInfo["station_catalogue"].toBool()) return;
+    QJsonObject mapping{
         {"sheet", sheet}, {"header_row", row}, {"columns", QJsonObject::fromVariantMap(columns)}};
     QJsonArray logos;
     if (!primary.isEmpty()) logos.append(primary);
     if (!secondary.isEmpty()) logos.append(secondary);
-    m_mapping["report_logos"] = logos;
-    if (!issuer.isEmpty()) m_mapping["report_issuer"] = issuer;
-    if (brandingRevision >= 0) m_mapping["branding_revision"] = brandingRevision;
+    mapping["report_logos"] = logos;
+    if (!issuer.isEmpty()) mapping["report_issuer"] = issuer;
+    if (brandingRevision >= 0) mapping["branding_revision"] = brandingRevision;
+    previewImport("/api/contracts/" + m_contract + "/import", mapping);
+}
+
+void Lem::previewStationExcel(QString sheet, int row, QVariantMap columns) {
+    if (!canManageStations() || !m_importInfo["station_catalogue"].toBool()) return;
+    previewImport("/api/stations/import",
+                  {{"sheet", sheet}, {"header_row", row}, {"columns", QJsonObject::fromVariantMap(columns)}});
+}
+
+void Lem::previewImport(const QString &path, QJsonObject mapping) {
+    if (m_busy || m_user["role"] != "admin" || m_excel.isEmpty() || !online()) return;
+    m_mapping = mapping;
+    m_excelImportPath = path;
+    m_preview = {};
     m_busy = true;
-    emit changed();
-    multipart("POST", "/api/contracts/" + m_contract + "/import",
-              {{"mapping", QString::fromUtf8(json(m_mapping))}, {"commit", "false"}}, m_excelName,
-              m_excel, [this](QByteArray data) {
-                  m_preview = QJsonDocument::fromJson(data).object();
+    status("A preparar a pré-visualização…");
+    multipart("POST", path, {{"mapping", QString::fromUtf8(json(m_mapping))}, {"commit", "false"}},
+              m_excelName, m_excel, [this](QByteArray data) {
                   m_busy = false;
+                  const auto preview = QJsonDocument::fromJson(data).object();
+                  if (!preview["records"].isArray() || !preview["errors"].isArray()) {
+                      status("O servidor devolveu uma pré-visualização inválida.");
+                      return;
+                  }
+                  m_preview = preview;
                   status("Pré-visualização pronta. Confira os IDs antes de importar.");
               });
 }
 
-// Commit the previously previewed import and invalidate the catalogue cache afterwards.
 void Lem::commitExcel() {
-    if (m_busy || !online() || m_preview.isEmpty() || !m_preview["errors"].toArray().isEmpty())
+    const bool stationsOnly = m_importInfo["station_catalogue"].toBool();
+    const auto path = stationsOnly ? QString("/api/stations/import") : "/api/contracts/" + m_contract + "/import";
+    if (m_busy || m_user["role"] != "admin" || m_excelImportPath != path ||
+        (stationsOnly ? !canManageStations() : m_contract.isEmpty()) ||
+        m_preview["records"].toArray().isEmpty() || !m_preview["errors"].toArray().isEmpty() || !online())
         return;
     m_busy = true;
-    emit changed();
-    multipart("POST", "/api/contracts/" + m_contract + "/import",
-              {{"mapping", QString::fromUtf8(json(m_mapping))}, {"commit", "true"}}, m_excelName,
-              m_excel, [this](QByteArray data) {
+    status("A importar o Excel…");
+    multipart("POST", path, {{"mapping", QString::fromUtf8(json(m_mapping))}, {"commit", "true"}},
+              m_excelName, m_excel, [this, stationsOnly](QByteArray data) {
                   m_busy = false;
                   m_preview = {};
                   m_importInfo = {};
+                  m_excelImportPath.clear();
                   m_excel.clear();
-                  status("Importação concluída: " + QString::fromUtf8(data));
-                  refresh();
+                  m_catalogueTimes = {};
+                  const auto outcome = QJsonDocument::fromJson(data).object();
+                  status(QString("Importação concluída. %1 criados, %2 atualizados.")
+                         .arg(outcome["created"].toInt()).arg(outcome["updated"].toInt()));
+                  refreshStations();
+                  if (!stationsOnly) refresh();
               });
 }
 void Lem::createUser(QString email, QString name, QString password, QString role) {
@@ -2620,6 +2807,10 @@ void Lem::demo() {
                                                        {"power", "60 kW"}}},
                                {"reports", QJsonArray{}}}};
     m_catalogues[cid] = m_chargers;
+    const auto charger = m_chargers.first().toObject();
+    m_stations = QJsonArray{QJsonObject{{"id", "demo-station"}, {"external_id", charger["external_id"]},
+                                       {"details", charger["details"]}}};
+    m_stationCatalogueLoaded = true;
     if (openReport(chargerId, ""))
         status("DEMONSTRAÇÃO LOCAL • dados fictícios; sem ligação ao servidor.");
 }

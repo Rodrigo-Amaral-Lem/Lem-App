@@ -11,9 +11,19 @@ assigned contracts and can open cached work offline. The charger list combines s
 summaries with local report state, so a locally created or changed report remains visible before
 upload.
 
-A physical station may belong to several contracts. Manufacturer/model/serial corrections entered in
-a report are applied to the canonical station when closure succeeds, with conflict checks. An older
-report keeps its historical snapshot.
+Open **PCVEs** in the toolbar or **IDs de PCVEs** in the compact menu to search by ID or field values.
+Each PCVE appears once.
+Technicians see the IDs from all their active assigned contracts. Administrators can also see IDs
+awaiting a contract. **Atualizar** downloads the catalogue for offline consultation.
+
+Importing a contract workbook creates or updates the central station and links that ID to the
+contract. Every linked contract uses the same station details. On desktop, administrators can use
+**Importar Excel** from **IDs de PCVEs** to create or update station records independently. Open a
+station and choose **Editar ficha** to save changes to individual fields. The station view also
+shows the values from the last workbook.
+
+Manufacturer, model and serial corrections entered in a report are applied to the central station
+when closure succeeds, with conflict checks. Earlier reports retain their historical snapshots.
 
 Excel import accepts empty model, serial number, energy supply, power and power-limit cells.
 Model (EST.03) and serial number (EST.04) must be filled before closing a report, both offline
