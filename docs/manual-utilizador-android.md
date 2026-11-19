@@ -40,6 +40,10 @@ Instale a versão disponibilizada pela Lem. Tenha as credenciais da sua conta e 
 
 Ao fechar e reabrir a app, a sessão é retomada quando o servidor a confirma. Se estiver sem rede, pode continuar a usar os dados locais enquanto a app aguarda ligação. O servidor pede novo login após 365 dias ou quando a administração revoga a sessão. Num dispositivo partilhado, escolha **Terminar sessão** quando acabar.
 
+### Alterar a minha password
+
+Com sessão iniciada e ligação ao servidor, abra o **ícone da conta** e escolha **Alterar a minha password**. Introduza a password atual, escreva a nova (12 a 200 caracteres), repita-a e escolha **Guardar password**. A sessão continua ativa neste dispositivo. Nos outros dispositivos, entre com a nova password.
+
 ### Repor a password de um técnico (administrador)
 
 Em **Gestão → Contas e acessos**, selecione a conta de um técnico e escolha **Repor password do técnico…**. Introduza a nova password duas vezes (12 a 200 caracteres) e confirme. É necessária ligação e servidor atualizado. O técnico deve voltar a entrar em cada dispositivo; os seus reports e acessos mantêm-se. Esta opção não permite alterar passwords de administradores.
