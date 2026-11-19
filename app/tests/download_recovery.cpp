@@ -13,6 +13,10 @@
 #include <QFile>
 #include <QDir>
 #include <QDebug>
+#ifdef Q_OS_WIN
+#include "WindowsBackground.h"
+#include <QProcess>
+#endif
 #define CHECK(x) do { if (!(x)) { qCritical() << "FAILED" << #x << __LINE__; return 1; } } while(false)
 struct LemReviewTest {
     static void session(Lem &c, QString server) { c.m_server = server; c.m_token = "test-only"; }
@@ -40,7 +44,16 @@ static bool until(std::function<bool()> predicate) {
     return predicate();
 }
 int main(int argc, char **argv) {
-    QGuiApplication app(argc, argv); app.setApplicationVersion("0.3.0");
+#ifdef Q_OS_WIN
+    QApplication app(argc, argv);
+    if (app.arguments().contains("--restore-test-window")) {
+        WindowsInstance second(app.arguments().last().toStdWString().c_str());
+        return second.existing ? 0 : 1;
+    }
+#else
+    QGuiApplication app(argc, argv);
+#endif
+    app.setApplicationVersion("0.3.0");
     QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
     QTemporaryDir temp; Lem client(temp.filePath("client"));
     const QByteArray original(6*1024*1024, 'E');
@@ -59,7 +72,13 @@ int main(int argc, char **argv) {
             socket->setProperty("sent",true);
             const auto name = QString::fromLatin1(buffer->split(' ')[1]); const auto n=++requests[name];
             QByteArray response, payload; const auto offset=262144;
-            if (name=="/api/contracts/test-contract/presentation") {
+            if (name == "/api/contracts" || name == "/api/stations") {
+                payload = name == "/api/contracts"
+                    ? R"([{"id":"test-contract","name":"Updated contract"}])"
+                    : R"([{"id":"station","external_id":"PCVE-01","updated":"now","details":{}}])";
+                response = "HTTP/1.1 200 OK\r\nContent-Length: " + QByteArray::number(payload.size())
+                         + "\r\n\r\n" + payload;
+            } else if (name=="/api/contracts/test-contract/presentation") {
                 payload = presentationFailure ? "{}" : "{\"issuer\":\"CSMTEC\",\"revision\":1,\"client_logos\":[]}";
                 const QByteArray status = presentationFailure == 1 ? "404 Not Found" :
                                           presentationFailure == 2 ? "403 Forbidden" : "200 OK";
@@ -91,6 +110,38 @@ int main(int argc, char **argv) {
             bytes[name]+=payload.size(); socket->write(response); socket->disconnectFromHost();
         });
     });
+#ifdef Q_OS_WIN
+    if (app.arguments().contains("--windows-background")) {
+        QWindow window;
+        const auto name = QStringLiteral("Local\\Lem-background-test-%1").arg(app.applicationPid());
+        WindowsInstance instance(name.toStdWString().c_str());
+        CHECK(instance.event && !instance.existing && QSystemTrayIcon::isSystemTrayAvailable());
+        WindowsBackground background(&window, client, instance.event);
+        window.show();
+        batchRecovered = true;
+        LemReviewTest::report(client, "batch", {QJsonObject{{"id","photo-0"},{"mime","image/png"},
+            {"size",double(original.size())},{"uploaded",true},{"digest",digest}}});
+        client.downloadReportPhotos();
+        CHECK(client.downloadingPhotos());
+        CHECK(!window.close() && !window.isVisible());
+        CHECK(until([&] { return !client.downloadingPhotos() && client.stationCatalogueLoaded(); }));
+        CHECK(!window.isVisible() && client.photoDownloadSummary()["missing"].toInt() == 0);
+        CHECK(client.contracts().value(0).toMap()["name"] == "Updated contract");
+        CHECK(QProcess::execute(app.applicationFilePath(), {"--restore-test-window", name}) == 0);
+        CHECK(until([&] { return window.isVisible(); }));
+        CHECK(!window.close());
+        for (auto *widget : QApplication::allWidgets()) {
+            if (auto *menu = qobject_cast<QMenu *>(widget))
+                for (auto *action : menu->actions())
+                    if (action->text() == "Sair")
+                        QTimer::singleShot(0, action, &QAction::trigger);
+        }
+        QTimer::singleShot(3000, &app, [&] { app.exit(7); });
+        CHECK(app.exec() == 0);
+        qInfo() << "PASS: closed window, authenticated catalogue and evidence received, second launch restored window, tray exit";
+        return 0;
+    }
+#endif
     for (const auto &name : {QString("/resume"),QString("/legacy"),QString("/bad-range"),QString("/denied"),QString("/busy"),QString("/persistent")}) {
         const auto destination=temp.filePath("result.bin");
         { QFile previous(destination); CHECK(previous.open(QIODevice::WriteOnly)); previous.write("KEEP"); }
@@ -111,13 +162,21 @@ int main(int argc, char **argv) {
     for (int i=0;i<9;++i) photos.append(QJsonObject{{"id","photo-"+QString::number(i)}, {"checkpoint","EST.01"},
         {"mime","image/png"},{"digest",digest},{"size",double(original.size())},{"uploaded",true}});
     LemReviewTest::report(client,"batch",photos);
-    client.downloadReportPhotos(); CHECK(until([&] { return !client.downloadingPhotos(); }));
+    client.downloadReportPhotos();
+    CHECK(client.backgroundTransferActive() && !client.refreshBackgroundCatalogues());
+    CHECK(until([&] { return !client.downloadingPhotos(); }));
     CHECK(client.photoDownloadSummary()["missing"].toInt()==1);
     CHECK(client.photoDownloadState().contains("missing original for test"));
     for (int i=0;i<9;++i) CHECK(requests["/api/reports/batch/photos/photo-"+QString::number(i)]==1);
     batchRecovered=true; client.downloadReportPhotos(); CHECK(until([&] { return !client.downloadingPhotos(); }));
     CHECK(client.photoDownloadSummary()["missing"].toInt()==0);
     for (int i=1;i<9;++i) CHECK(requests["/api/reports/batch/photos/photo-"+QString::number(i)]==1);
+    CHECK(client.refreshBackgroundCatalogues());
+    CHECK(until([&] { return !client.backgroundTransferActive(); }));
+    CHECK(requests["/api/contracts"] == 1 && requests["/api/stations"] == 1);
+    CHECK(client.contracts().value(0).toMap()["name"] == "Updated contract");
+    CHECK(client.stations().value(0).toMap()["external_id"] == "PCVE-01");
+    CHECK(client.photoDownloadSummary()["missing"].toInt() == 0);
     LemReviewTest::report(client,"export-test",photos);
     const auto zipPath=temp.filePath("downloaded.zip");
     client.exportReport("bundle",QUrl::fromLocalFile(zipPath)); CHECK(until([&] { return !client.busy(); }));

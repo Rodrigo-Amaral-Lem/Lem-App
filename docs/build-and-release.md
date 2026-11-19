@@ -13,7 +13,8 @@ Prepare detailed messages and user-executed `git commit -S` commands under the
 ## Prerequisites and kit selection
 
 The project requires CMake **3.25+**, C++17 and Qt **6.12+**, with Core, Gui, Qml, Quick,
-QuickControls2, QuickDialogs2, Network, Concurrent and Svg. The header and static startup screen
+QuickControls2, QuickDialogs2, Network, Concurrent and Svg. Windows also uses Qt Widgets
+for the notification-area icon and its menu. The header and static startup screen
 use Qt's SVG image plugin. Build Qt and the application with compatible compiler/runtime versions.
 
 Select the compiler supplied for your Qt kit. Check its `mkspecs/qconfig.pri` metadata rather

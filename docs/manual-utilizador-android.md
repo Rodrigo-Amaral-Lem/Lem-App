@@ -240,6 +240,8 @@ O relatório fechado passa a ser consultado como registo da intervenção. Um ad
 
 A app guarda as alterações no dispositivo e organiza o envio em segundo plano. Respostas e ficheiros podem ser enviados em momentos diferentes. Utilize o botão **Sinc.**, identificado pelo símbolo de sincronização, para pedir o envio manual e acompanhe as mensagens da operação.
 
+Pode voltar ao ecrã inicial ou mudar de aplicação enquanto descarrega evidências. Permita as notificações para acompanhar a transferência e tocar na notificação para regressar à Lem. Com sessão iniciada, o Android agenda a atualização dos contratos, dos carregadores do contrato selecionado e da base de IDs de PCVEs. A rede e a poupança de bateria podem adiar a atualização. Se encerrar a Lem ou se o sistema terminar o processo, reabra a app e repita o descarregamento para obter as evidências em falta.
+
 | Indicação | O que significa e o que fazer |
 | --- | --- |
 | A guardar no dispositivo… | A gravação local ainda está em curso. Aguarde. |

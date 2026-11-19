@@ -831,7 +831,18 @@ void Lem::refresh() {
     refreshContracts(false);
 }
 
-void Lem::refreshContracts(bool fromManualSync) {
+// An automatic receive pass must not release photo-upload holds, retry a conflict
+// as a manual send, or race the user's download or another catalogue operation.
+bool Lem::refreshBackgroundCatalogues() {
+    if (!authenticated() || localSaveError())
+        return true;
+    if (switchingBlocked() || m_stationCatalogueLoading || saving())
+        return false;
+    refreshContracts(false, true);
+    return true;
+}
+
+void Lem::refreshContracts(bool fromManualSync, bool includeStations) {
     const bool restoring = sessionPending();
     if (m_refreshing)
         return;
@@ -846,15 +857,15 @@ void Lem::refreshContracts(bool fromManualSync) {
     emit changed();
     request(
         "GET", "/api/contracts", {},
-        [this, fromManualSync, restoring](QByteArray data) {
+        [this, fromManualSync, includeStations, restoring](QByteArray data) {
             const auto document = QJsonDocument::fromJson(data);
+            if (!document.isArray()) {
+                m_refreshing = false;
+                if (restoring) m_sessionRetry.start(30000);
+                status("Resposta de contratos inválida. Os dados locais continuam disponíveis.");
+                return;
+            }
             if (restoring) {
-                if (!document.isArray()) {
-                    m_refreshing = false;
-                    m_sessionRetry.start(30000);
-                    status("Não foi possível validar a sessão. Os dados locais continuam disponíveis.");
-                    return;
-                }
                 // The catalogue uses the same authentication dependency as other
                 // protected requests. Only now may the saved token authorize sync.
                 m_token = std::exchange(m_pendingSessionToken, {});
@@ -901,7 +912,7 @@ void Lem::refreshContracts(bool fromManualSync) {
             }
             m_refreshing = false;
             persist();
-            if (updateStations) refreshStations();
+            if (updateStations || includeStations) refreshStations();
             if (restoring) scheduleSync(1500);
             if (!m_contract.isEmpty())
                 refreshCatalogue(m_contract, true);
