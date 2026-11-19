@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para desktop
 
-Desktop · Aplicação 0.4.1 · Edição 2.7 · 18 de novembro de 2026
+Desktop · Aplicação 0.4.1 · Edição 2.8 · 18 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-desktop.pdf](manual-utilizador-desktop.pdf).
 
@@ -37,6 +37,8 @@ Instale a versão disponibilizada pela Lem. Tenha as credenciais da sua conta e 
 3. Preencha **Email** e **Password** e escolha **Entrar**. Se não tiver conta ou acesso ao contrato, contacte o administrador.
 
 4. Em **Contratos**, selecione o contrato e escolha **Atualizar** para obter a informação disponível no servidor.
+
+Ao fechar e reabrir a app, a sessão é retomada quando o servidor a confirma. Se estiver sem rede, pode continuar a usar os dados locais enquanto a app aguarda ligação. O servidor pede novo login após 365 dias ou quando a administração revoga a sessão. Num computador partilhado, escolha **Terminar sessão** quando acabar.
 
 ### Repor a password de um técnico (administrador)
 

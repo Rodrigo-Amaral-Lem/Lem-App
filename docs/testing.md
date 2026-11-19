@@ -109,6 +109,12 @@ for its native harness. Its seven scenarios exercise current login, compatible u
 blocked clients, missing/malformed/wrong-version policy replies and a policy change during login.
 On Windows it terminates the disposable API process tree before removing logs/databases.
 
+Append `--sessions` to the compatibility runner on a platform with a working credential store.
+It starts a fresh client process for each step and checks session restoration, update notices,
+recovery after an unavailable API, server revocation, changing the server and explicit logout.
+`test_version_notice.py` checks the account dialog while a saved session is pending, including
+narrow portrait and short landscape layouts.
+
 They need available local sockets/ports. The offline runner uses port 18765 and also requires
 `pypdf` to inspect its generated PDFs. Do not point either runner at production.
 

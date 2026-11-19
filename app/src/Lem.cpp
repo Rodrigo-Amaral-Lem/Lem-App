@@ -9,8 +9,10 @@
 #include "Lem.h"
 #include "NetworkSecurity.h"
 #include "SafeStorage.h"
+#include "SessionStore.h"
 #include "EvidenceMedia.h"
 #include <cmath>
+#include <utility>
 #include "Measurements.h"
 #include "ReportPdf.h"
 #include "ReportBundle.h"
@@ -65,6 +67,11 @@ bool readableReport(const QJsonObject &report) {
 QString uuid() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
+QString sessionDigest(const QString &token) {
+    return QString::fromLatin1(QCryptographicHash::hash(token.toUtf8(), QCryptographicHash::Sha256).toHex());
+}
+const QString sessionEnded = QStringLiteral(
+    "Sessão expirada ou terminada. Entre novamente. Os rascunhos locais foram conservados.");
 } // namespace
 
 // Connect independent notification channels before loading cached data.
@@ -143,11 +150,16 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
 #endif
     m_autoSync.setSingleShot(true);
     connect(&m_autoSync, &QTimer::timeout, this, [this]() { startSync(false); });
+    m_sessionRetry.setSingleShot(true);
+    connect(&m_sessionRetry, &QTimer::timeout, this, [this] {
+        if (sessionPending()) refresh();
+    });
     if (QNetworkInformation::loadDefaultBackend()) {
         connect(QNetworkInformation::instance(), &QNetworkInformation::reachabilityChanged, this,
                 [this](QNetworkInformation::Reachability r) {
                     if (r == QNetworkInformation::Reachability::Online) {
                         m_retryNotBefore = 0;
+                        if (sessionPending()) m_sessionRetry.start(0);
                         scheduleSync(1500);
                     }
                 });
@@ -156,6 +168,7 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
         connect(qGuiApp, &QGuiApplication::applicationStateChanged, this,
                 [this](Qt::ApplicationState state) {
                     if (state == Qt::ApplicationActive) {
+                        if (sessionPending()) m_sessionRetry.start(0);
                         scheduleSync(1500);
 #ifdef Q_OS_ANDROID
                         // CaptureActivity publishes the result before returning to Qt.
@@ -167,15 +180,29 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
                 });
     QSettings settings;
     m_server = ServerSettings::load(settings);
-    QFile session(m_root + "/last-user.json");
-    if (session.open(QIODevice::ReadOnly)) {
-        auto o = QJsonDocument::fromJson(session.readAll()).object();
-        if (o["server"].toString() == m_server)
-            m_user = o["user"].toObject();
+    QFile identityFile(m_root + "/last-user.json");
+    QJsonObject identity;
+    if (identityFile.open(QIODevice::ReadOnly)) {
+        identity = QJsonDocument::fromJson(identityFile.readAll()).object();
+        if (identity["server"].toString() == m_server)
+            m_user = identity["user"].toObject();
     }
     if (!m_user.isEmpty()) {
+        const auto digest = identity["session_digest"].toString();
+        if (!digest.isEmpty()) {
+            const auto record = QJsonDocument::fromJson(SessionStore::load(m_root)).object();
+            const auto token = record["token"].toString();
+            if (!token.isEmpty() && record["server"].toString() == m_server &&
+                record["user_id"] == m_user["id"] && sessionDigest(token) == digest) {
+                m_pendingSessionToken = token;
+                m_sessionPersisted = true;
+                m_sessionRetry.start(0);
+            }
+        }
         loadUser();
-        if (!m_localReadError) m_message = "Dados locais disponíveis. Entre para sincronizar.";
+        if (!m_localReadError)
+            m_message = sessionPending() ? "A verificar a sessão guardada…"
+                                        : "Dados locais disponíveis. Entre para sincronizar.";
     }
 }
 Lem::~Lem() {
@@ -210,6 +237,7 @@ void Lem::setServer(QString s) {
         return;
     if (!flushEdits())
         return;
+    clearSession();
     m_server = s;
     resetStationCatalogue();
     m_importInfo = {};
@@ -218,7 +246,6 @@ void Lem::setServer(QString s) {
     m_reportPresentationSave = {};
     m_clientCompatibility = {};
     emit compatibilityChanged();
-    m_token.clear();
     m_users = {};
     m_deletedContracts = {};
     emit contractTrashChanged();
@@ -418,8 +445,12 @@ void Lem::status(QString s) {
 // Check for a session token, not actual network reachability. HTTP can still fail.
 bool Lem::online() {
     if (m_token.isEmpty()) {
-        status(
-            "Entre com email e password para comunicar com o servidor. Os rascunhos locais foram conservados.");
+        if (sessionPending()) {
+            m_sessionRetry.start(0);
+            status("Sessão guardada. A aguardar validação no servidor.");
+        } else {
+            status("Entre com email e password para comunicar com o servidor. Os rascunhos locais foram conservados.");
+        }
         return false;
     }
     return true;
@@ -428,35 +459,39 @@ bool Lem::online() {
 // Send JSON or another single-body HTTP request and track its operation progress.
 // A caller-supplied failure handler owns recovery; otherwise release the busy UI state.
 QNetworkReply *Lem::request(QString method, QString path, QByteArray body, Callback cb, QString content,
-                  Failure error) {
+                  Failure error, bool restoring) {
     QNetworkRequest req(QUrl(m_server + path));
     NetworkSecurity::restrictRedirects(req);
     req.setRawHeader("X-Lem-Client-Version", QCoreApplication::applicationVersion().toUtf8());
     req.setRawHeader("X-Lem-Client-Platform", NetworkSecurity::clientPlatform());
     // The server sends nothing while it renders a PDF/ZIP with many photographs.
     const bool exporting = path.endsWith("/pdf") || path.endsWith("/bundle");
-    req.setTransferTimeout(exporting ? 180000 : 30000);
+    req.setTransferTimeout(restoring ? 8000 : exporting ? 180000 : 30000);
     req.setHeader(QNetworkRequest::ContentTypeHeader, content);
-    if (!m_token.isEmpty())
-        req.setRawHeader("Authorization", "Bearer " + m_token.toUtf8());
-    const auto requestToken = m_token;
+    const auto requestToken = restoring ? m_pendingSessionToken : m_token;
+    const bool sentBearer = !requestToken.isEmpty() &&
+                            path != "/api/client-compatibility" && path != "/api/login";
+    if (sentBearer)
+        req.setRawHeader("Authorization", "Bearer " + requestToken.toUtf8());
     const auto requestServer = m_server;
     auto reply = net.sendCustomRequest(req, method.toUtf8(), body);
     auto responseBody = NetworkSecurity::boundReply(reply, NetworkSecurity::responseLimit(path));
     trackReply(reply, method, path, !body.isEmpty());
-    connect(reply, &QNetworkReply::finished, this, [this, reply, cb, error, requestToken, requestServer, responseBody]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, cb, error, requestToken, requestServer,
+            responseBody, restoring, sentBearer]() {
         responseBody->consume(reply);
         auto data = responseBody->data;
         auto code = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (responseBody->exceeded || reply->error() != QNetworkReply::NoError) {
             // Logout can complete locally before its response. Do not revoke a
             // newer session or another server's policy from an obsolete reply.
-            const bool sameSession = m_server == requestServer && m_token == requestToken;
+            const bool sameSession = m_server == requestServer &&
+                (restoring ? m_pendingSessionToken : m_token) == requestToken;
             if (code == 426 && sameSession)
                 rejectIncompatibleReply(data);
-            if (code == 401 && sameSession) {
-                m_token.clear();
-                emit changed();
+            if (code == 401 && sameSession && sentBearer) {
+                clearSession();
+                status(sessionEnded);
             }
             QString detail = responseBody->exceeded ? QStringLiteral("Resposta do servidor demasiado grande.") : QString::fromUtf8(data);
             if (detail.isEmpty())
@@ -513,7 +548,10 @@ void Lem::requestPhoto(QString path, QString destination, qint64 limit,
             error(401, "A sessão mudou durante a transferência."); reply->deleteLater(); return;
         }
         if (code == 426) rejectIncompatibleReply(body->errorData);
-        if (code == 401) { m_token.clear(); emit changed(); }
+        if (code == 401) {
+            clearSession();
+            status(sessionEnded);
+        }
         const bool failed = reply->error() != QNetworkReply::NoError || code >= 400;
         const bool transient = code == 0 || code == 408 || code == 429 || code == 500 || code == 502 || code == 503 || code == 504 || (code == 200 || code == 206);
         if (failed && transient && attempt < 3 && !body->exceeded && !body->writeFailed && !body->invalidRange &&
@@ -589,9 +627,9 @@ void Lem::multipart(QString method, QString path, QList<QPair<QString, QString>>
             const bool sameSession = m_server == requestServer && m_token == requestToken;
             if (code == 426 && sameSession)
                 rejectIncompatibleReply(data);
-            if (code == 401 && sameSession) {
-                m_token.clear();
-                emit changed();
+            if (code == 401 && sameSession && !requestToken.isEmpty()) {
+                clearSession();
+                status(sessionEnded);
             }
             const auto detail = responseBody->exceeded ? QStringLiteral("Resposta do servidor demasiado grande.") : QString::fromUtf8(data) + " " + reply->errorString();
             if (error)
@@ -634,20 +672,61 @@ bool Lem::applyClientPolicy(const QJsonObject &policy) {
         if (url.scheme() != "https" || url.host().isEmpty() || !url.userInfo().isEmpty())
             m_clientCompatibility["update_url"] = "";
     }
-    if (!m_clientCompatibility["compatible"].toBool()) {
-        m_token.clear();
-        m_autoSync.stop();
-    }
     emit compatibilityChanged();
     return m_clientCompatibility["checked"].toBool() &&
            m_clientCompatibility["compatible"].toBool();
 }
 
 void Lem::rejectIncompatibleReply(const QByteArray &body) {
+    clearSession();
     applyClientPolicy(QJsonDocument::fromJson(body).object()["detail"].toObject());
-    m_token.clear();
-    m_autoSync.stop();
     emit changed();
+}
+
+void Lem::checkRestoredClientPolicy() {
+    const auto token = m_token, server = m_server;
+    request("GET", "/api/client-compatibility", {}, [this, token, server](QByteArray data) {
+        if (m_token != token || m_server != server)
+            return;
+        if (!applyClientPolicy(QJsonDocument::fromJson(data).object()) &&
+            m_clientCompatibility["checked"].toBool()) {
+            clearSession();
+            status(m_clientCompatibility["message"].toString());
+        }
+    }, "application/json", [](int, QString) {});
+}
+
+bool Lem::saveLastUser(const QString &digest) const {
+    QSaveFile file(m_root + "/last-user.json");
+    QJsonObject identity{{"server", m_server}, {"user", m_user}};
+    if (!digest.isEmpty())
+        identity["session_digest"] = digest;
+    const auto bytes = json(identity);
+    return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size() && file.commit();
+}
+
+bool Lem::saveSession() {
+    const auto record = json({{"server", m_server}, {"user_id", m_user.value("id")}, {"token", m_token}});
+    const bool stored = SessionStore::save(m_root, record);
+    // The identity marker matches only this exact token. A partial write must
+    // never restore a prior account/session from a different record.
+    const bool recorded = saveLastUser(stored ? sessionDigest(m_token) : QString{});
+    if (!(stored && recorded) && (stored || m_sessionPersisted))
+        SessionStore::remove(m_root);
+    m_sessionPersisted = stored && recorded;
+    return m_sessionPersisted;
+}
+
+void Lem::clearSession() {
+    m_token.clear();
+    m_pendingSessionToken.clear();
+    m_sessionRetry.stop();
+    m_autoSync.stop();
+    // If the OS store cannot remove the credential, invalidate its local marker.
+    // Keep the identity needed for offline access and for recovering its drafts.
+    if (m_sessionPersisted && !SessionStore::remove(m_root))
+        saveLastUser();
+    m_sessionPersisted = false;
 }
 
 // Recheck the server on every login attempt, before sending credentials. Cached
@@ -681,6 +760,8 @@ void Lem::login(QString email, QString password) {
                             return;
                         }
                         m_token = o["token"].toString();
+                        m_pendingSessionToken.clear();
+                        m_sessionRetry.stop();
                         m_user = o["user"].toObject();
                         m_users = {};
                         m_deletedContracts = {};
@@ -689,15 +770,13 @@ void Lem::login(QString email, QString password) {
                         m_preview = {};
                         m_excel.clear();
                         loadUser();
-                        QSaveFile f(m_root + "/last-user.json");
-                        if (f.open(QIODevice::WriteOnly)) {
-                            f.write(json({{"server", m_server}, {"user", m_user}}));
-                            f.commit();
-                        }
+                        const bool remembered = saveSession();
                         m_busy = false;
                         if (m_localReadError) { emit changed(); return; }
                         refresh();
                         scheduleSync(1500);
+                        if (!remembered)
+                            status("Sessão iniciada. O dispositivo não guardou a sessão para a próxima abertura.");
                     });
         },
         "application/json",
@@ -717,12 +796,11 @@ void Lem::login(QString email, QString password) {
 void Lem::logout() {
     if (switchingBlocked() || !flushEdits())
         return;
-    m_autoSync.stop();
-    if (!m_token.isEmpty())
+    if (authenticated() || sessionPending())
         request(
             "POST", "/api/logout", "{}", [](QByteArray) {}, "application/json",
-            [](int, QString) {});
-    m_token.clear();
+            [](int, QString) {}, sessionPending());
+    clearSession();
     resetStationCatalogue();
     m_importInfo = {};
     m_preview = {};
@@ -750,15 +828,41 @@ void Lem::refresh() {
 }
 
 void Lem::refreshContracts(bool fromManualSync) {
-    if (m_busy || !m_qveCopyTarget.isEmpty() || attachingFiles() || m_refreshing || m_catalogueLoading || !online())
+    const bool restoring = sessionPending();
+    if (m_refreshing)
         return;
+    if (m_busy || !m_qveCopyTarget.isEmpty() || attachingFiles() || m_catalogueLoading) {
+        if (restoring) m_sessionRetry.start(30000);
+        return;
+    }
+    if (!restoring && !online())
+        return;
+    m_sessionRetry.stop();
     m_refreshing = true;
     emit changed();
     request(
         "GET", "/api/contracts", {},
-        [this, fromManualSync](QByteArray data) {
+        [this, fromManualSync, restoring](QByteArray data) {
+            const auto document = QJsonDocument::fromJson(data);
+            if (restoring) {
+                if (!document.isArray()) {
+                    m_refreshing = false;
+                    m_sessionRetry.start(30000);
+                    status("Não foi possível validar a sessão. Os dados locais continuam disponíveis.");
+                    return;
+                }
+                // The catalogue uses the same authentication dependency as other
+                // protected requests. Only now may the saved token authorize sync.
+                m_token = std::exchange(m_pendingSessionToken, {});
+                checkRestoredClientPolicy();
+                if (m_localReadError) {
+                    m_refreshing = false;
+                    emit changed();
+                    return;
+                }
+            }
             const auto previousContracts = m_contracts;
-            m_contracts = QJsonDocument::fromJson(data).array();
+            m_contracts = document.array();
             // An older catalogue reply must not undo an acknowledged settings save.
             for (auto value : previousContracts) {
                 const auto contract = value.toObject();
@@ -794,16 +898,26 @@ void Lem::refreshContracts(bool fromManualSync) {
             m_refreshing = false;
             persist();
             if (updateStations) refreshStations();
+            if (restoring) scheduleSync(1500);
             if (!m_contract.isEmpty())
                 refreshCatalogue(m_contract, true);
             else
                 status("Contratos atualizados.");
         },
         "application/json",
-        [this](int, QString) {
+        [this, restoring](int code, QString) {
             m_refreshing = false;
-            status("Sem atualização do catálogo. Os dados locais continuam disponíveis.");
-        });
+            if (code == 401) {
+                status(sessionEnded);
+            } else if (code == 426) {
+                status(m_clientCompatibility["message"].toString());
+            } else if (restoring) {
+                m_sessionRetry.start(30000);
+                status("Sessão guardada. A aguardar ligação ao servidor. Os dados locais continuam disponíveis.");
+            } else {
+                status("Sem atualização do catálogo. Os dados locais continuam disponíveis.");
+            }
+        }, restoring);
 }
 
 // Show a cached catalogue immediately, then request a refresh when needed.
@@ -2776,7 +2890,7 @@ void Lem::assignUser(QString id) {
 void Lem::demo() {
     if (switchingBlocked() || !flushEdits())
         return;
-    m_token.clear();
+    clearSession();
     m_server = "demo://local";
     m_clientCompatibility = {};
     emit compatibilityChanged();

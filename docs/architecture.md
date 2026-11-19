@@ -35,15 +35,23 @@ catalogue summaries, while `m_user` and `m_token` describe the local account/ses
 | `changed` | General state reconciliation; avoid using it for every transfer byte |
 | `saving`, `busy`, `syncing`, `refreshing` | Different operations with different edit/navigation guards |
 
-`online()` checks for a token; it does not prove reachability. Background synchronization can
+`online()` checks for an active session token. Requests can still fail after a successful login
+or restoration. Background synchronization can
 coexist with typing. Identity changes, cleanup, closure and group-copy operations have stricter
 guards.
 
 ## Durable local state
 
-`AppStorage::prepare()` selects the application data root. `last-user.json` stores reopening
-identity/server data, not the bearer token. The server preference is stored in QSettings. The
-account cache is scoped by a server-URL hash and user UUID.
+`AppStorage::prepare()` selects the application data root. `last-user.json` stores the server,
+local identity and a digest that matches the credential saved by `SessionStore`. The token is
+protected by Android Keystore, Windows DPAPI, Apple Keychain or Linux Secret Service. The server
+preference is stored in QSettings. The account cache is scoped by a server-URL hash and user UUID.
+
+On startup the cache opens immediately. A saved token for that server and account becomes active
+after a successful authenticated catalogue request, then the client checks for version notices
+and resumes pending synchronization. A failed connection leaves the token pending for retry.
+HTTP 401 or 426, explicit logout and switching servers clear the saved credential while preserving
+report files. Session validity and expiration are enforced by the server.
 
 | File | Purpose |
 | --- | --- |

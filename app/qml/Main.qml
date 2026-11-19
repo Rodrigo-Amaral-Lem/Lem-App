@@ -1699,7 +1699,9 @@ ApplicationWindow {
                     Layout.preferredHeight: win.touchHeight
                     enabled: !lem.busy
                     property bool demoSession: lem.server.indexOf("demo:") === 0
-                    text: demoSession ? "Demonstração · sem sessão no servidor" : lem.authenticated ? "Sessão iniciada · " + (lem.user.name || lem.user.email || "Conta") : "Sem sessão iniciada · Entrar"
+                    text: demoSession ? "Demonstração · sem sessão no servidor"
+                          : lem.authenticated ? "Sessão iniciada · " + (lem.user.name || lem.user.email || "Conta")
+                          : lem.sessionPending ? "Sessão guardada · por validar" : "Sem sessão iniciada · Entrar"
                     Accessible.name: text + ". Abrir conta"
                     onClicked: win.openAccount()
                     contentItem: Item {
@@ -3430,25 +3432,35 @@ ApplicationWindow {
         width: Math.min(win.width - 24, 440)
         padding: 16
         height: Math.min(win.height - 32, 600)
-        contentItem: ScrollView {
+        contentItem: Flickable {
             id: loginScroll
-            contentWidth: availableWidth
+            // The viewport owns the width on narrow screens and after rotation.
+            // The form can grow vertically while labels and fields stay inside it.
+            contentWidth: width
+            contentHeight: loginForm.implicitHeight
+            flickableDirection: Flickable.VerticalFlick
+            boundsBehavior: Flickable.StopAtBounds
             clip: true
-            ColumnLayout {
-                width: loginScroll.availableWidth
+            ScrollBar.vertical: ScrollBar {
+                id: loginScrollbar
+                policy: ScrollBar.AsNeeded
+            }
+            Column {
+                id: loginForm
+                width: Math.max(0, loginScroll.width - loginScrollbar.width)
                 spacing: 8
                 UiLabel {
                     objectName: "interfaceRevisionLabel"
                     visible: win.debugToolsEnabled
                     text: "Interface R1 · " + win.interfaceRevision
                     wrapMode: Text.Wrap
-                    Layout.fillWidth: true
+                    width: parent.width
                 }
                 UiButton {
                     objectName: "openScrollDiagnosticButton"
                     visible: win.debugToolsEnabled
                     text: "Diagnóstico da página"
-                    Layout.fillWidth: true
+                    width: parent.width
                     onClicked: {
                         if (!win.capturedPageDiagnostic)
                             win.capturePageDiagnostic();
@@ -3458,6 +3470,8 @@ ApplicationWindow {
                 UiLabel {
                     text: "Lem • Versão " + Qt.application.version
                     color: win.mutedInk
+                    width: parent.width
+                    wrapMode: Text.Wrap
                 }
                 UiLabel {
                     id: accountVersionStatus
@@ -3467,25 +3481,29 @@ ApplicationWindow {
                     color: lem.clientCompatibility.compatible ? win.mutedInk : win.danger
                     font.bold: true
                     wrapMode: Text.Wrap
-                    Layout.fillWidth: true
+                    width: parent.width
                 }
                 UiLabel {
-                    text: lem.authenticated ? "Sessão iniciada: " + (lem.user.name || "") + (lem.user.role === "admin" ? " • Administrador" : " • Técnico") + "\n" + (lem.user.email || "") : "Sem sessão iniciada"
+                    id: accountSessionStatus
+                    text: lem.authenticated ? "Sessão iniciada: " + (lem.user.name || "") + (lem.user.role === "admin" ? " • Administrador" : " • Técnico") + "\n" + (lem.user.email || "")
+                          : lem.sessionPending ? "Sessão guardada · por validar" : "Sem sessão iniciada"
                     font.bold: true
                     wrapMode: Text.Wrap
-                    Layout.fillWidth: true
+                    width: parent.width
                 }
                 UiLabel {
+                    id: accountOfflineNote
                     visible: !lem.authenticated && !!lem.user.id
-                    text: "Existem dados locais desta conta, mas é necessário entrar para comunicar com o servidor."
+                    text: lem.sessionPending ? "Os dados locais continuam disponíveis. A app valida a sessão quando consegue ligar ao servidor."
+                                             : "Existem dados locais desta conta, mas é necessário entrar para comunicar com o servidor."
                     wrapMode: Text.Wrap
-                    Layout.fillWidth: true
+                    width: parent.width
                 }
                 UiLabel {
                     text: "Ligação ao servidor"
                     font.bold: true
                     color: win.brandPrimary
-                    Layout.topMargin: 12
+                    topPadding: 12
                 }
                 UiTextField {
                     id: serverField
@@ -3493,13 +3511,13 @@ ApplicationWindow {
                     objectName: "serverField"
                     Accessible.name: "Servidor HTTPS"
                     text: lem.server
-                    Layout.fillWidth: true
+                    width: parent.width
                     selectByMouse: true
                 }
                 UiButton {
                     objectName: "defaultServerButton"
                     text: "Usar servidor Lem"
-                    Layout.fillWidth: true
+                    width: parent.width
                     enabled: !win.networkActivity
                     onClicked: {
                         win.recordDebugTap();
@@ -3507,9 +3525,10 @@ ApplicationWindow {
                         serverField.text = lem.server;
                     }
                 }
-                ColumnLayout {
+                Column {
                     visible: !lem.authenticated
-                    Layout.fillWidth: true
+                    width: parent.width
+                    spacing: 5
                     UiLabel {
                         text: "Email"
                     }
@@ -3517,7 +3536,7 @@ ApplicationWindow {
                         id: emailField
                         implicitHeight: win.touchHeight
                         Accessible.name: "Email"
-                        Layout.fillWidth: true
+                        width: parent.width
                         inputMethodHints: Qt.ImhEmailCharactersOnly
                         selectByMouse: true
                     }
@@ -3528,19 +3547,19 @@ ApplicationWindow {
                         id: passwordField
                         implicitHeight: win.touchHeight
                         Accessible.name: "Password"
-                        Layout.fillWidth: true
+                        width: parent.width
                         echoMode: TextInput.Password
                     }
                     UiLabel {
                         text: "Os dados descarregados e os rascunhos ficam disponíveis neste dispositivo sem rede."
                         wrapMode: Text.Wrap
-                        Layout.fillWidth: true
+                        width: parent.width
                     }
                     UiButton {
                         primary: true
                         implicitHeight: win.touchHeight
                         text: "Entrar"
-                        Layout.fillWidth: true
+                        width: parent.width
                         enabled: !win.networkActivity
                         onClicked: {
                             lem.server = serverField.text;
@@ -3575,28 +3594,28 @@ ApplicationWindow {
                     text: "Dados neste dispositivo"
                     font.bold: true
                     color: win.brandPrimary
-                    Layout.topMargin: 12
+                    topPadding: 12
                 }
                 UiLabel {
                     text: "Fotografias locais: " + lem.photoCacheMB.toFixed(1) + " MB • os rascunhos e envios pendentes são protegidos na limpeza."
                     wrapMode: Text.Wrap
-                    Layout.fillWidth: true
+                    width: parent.width
                 }
                 UiButton {
                     objectName: "clearLocalCopiesButton"
                     text: "Limpar cópias locais"
-                    Layout.fillWidth: true
+                    width: parent.width
                     enabled: !win.networkActivity
                     onClicked: clearLocalCopiesDialog.open()
                 }
                 UiLabel {
                     text: lem.message
                     wrapMode: Text.Wrap
-                    Layout.fillWidth: true
+                    width: parent.width
                 }
                 UiButton {
                     text: "Fechar"
-                    Layout.fillWidth: true
+                    width: parent.width
                     onClicked: {
                         Qt.inputMethod.hide();
                         loginDialog.close();

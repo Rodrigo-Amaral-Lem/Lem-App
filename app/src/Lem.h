@@ -45,6 +45,7 @@ class Lem : public QObject {
     Q_PROPERTY(QVariantMap reportPresentationSave READ reportPresentationSave NOTIFY changed)
     Q_PROPERTY(bool canSaveReportPresentation READ canSaveReportPresentation NOTIFY changed)
     Q_PROPERTY(bool authenticated READ authenticated NOTIFY changed)
+    Q_PROPERTY(bool sessionPending READ sessionPending NOTIFY changed)
     Q_PROPERTY(bool syncing READ syncing NOTIFY changed)
     Q_PROPERTY(int pendingReports READ pendingCount NOTIFY changed)
     Q_PROPERTY(bool refreshing READ refreshing NOTIFY changed)
@@ -108,6 +109,7 @@ class Lem : public QObject {
     bool authenticated() const {
         return !m_token.isEmpty() && !m_server.startsWith("demo:");
     }
+    bool sessionPending() const { return !m_pendingSessionToken.isEmpty(); }
     QVariantMap reportPresentationSave() const { return m_reportPresentationSave.toVariantMap(); }
     bool canSaveReportPresentation() const {
         return authenticated() && m_user["role"] == "admin" && !m_contract.isEmpty() &&
@@ -313,6 +315,10 @@ class Lem : public QObject {
     bool m_rowsBuilt = false;
     bool applyClientPolicy(const QJsonObject &policy);
     void rejectIncompatibleReply(const QByteArray &body);
+    void checkRestoredClientPolicy();
+    bool saveLastUser(const QString &sessionDigest = {}) const;
+    bool saveSession();
+    void clearSession();
     QJsonObject m_clientCompatibility;
     void trackReply(QNetworkReply *reply, QString method, QString path, bool upload);
     // Operation presentation only; this is not the durable synchronization queue.
@@ -332,7 +338,7 @@ class Lem : public QObject {
     using Failure = std::function<void(int, QString)>;
     using Callback = std::function<void(QByteArray)>;
     QNetworkReply *request(QString method, QString path, QByteArray body, Callback cb,
-                 QString content = "application/json", Failure error = {});
+                 QString content = "application/json", Failure error = {}, bool restoring = false);
     void multipart(QString method, QString path, QList<QPair<QString, QString>> fields,
                    QString filename, QByteArray data, Callback cb, Failure error = {}, QFile *file = nullptr);
     void requestPhoto(QString path, QString destination, qint64 limit,
@@ -405,6 +411,10 @@ class Lem : public QObject {
     QString localPath(QUrl url) const;
     QNetworkAccessManager net;
     QString m_root, m_server = ServerSettings::defaultUrl(), m_message, m_token, m_contract;
+    // Startup can show local work while the server decides whether the saved token is valid.
+    QString m_pendingSessionToken;
+    bool m_sessionPersisted = false;
+    QTimer m_sessionRetry;
     QString m_localOperationTitle;
     bool m_busy = false, m_syncing = false, m_refreshing = false;
     bool m_catalogueLoading = false, m_manualSync = false, m_manualSyncRequested = false;

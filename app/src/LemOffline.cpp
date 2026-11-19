@@ -384,7 +384,6 @@ void Lem::syncFailed(int code, QString message) {
         continueAfterRejection(m_syncState + ": " + message);
     } else if (code == 401) {
         m_syncing = false;
-        m_token.clear();
         m_autoSync.stop();
         m_syncState = "Entre novamente para enviar · dados locais conservados";
         status(m_syncState);
