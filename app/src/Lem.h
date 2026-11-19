@@ -64,6 +64,7 @@ class Lem : public QObject {
     Q_PROPERTY(bool stationCatalogueLoading READ stationCatalogueLoading NOTIFY changed)
     Q_PROPERTY(QString stationCatalogueMessage READ stationCatalogueMessage NOTIFY changed)
     Q_PROPERTY(bool desktopStationManagement READ desktopStationManagement CONSTANT)
+    Q_PROPERTY(QVariantMap stationReports READ stationReports NOTIFY changed)
     Q_PROPERTY(QVariantMap stationEditResult READ stationEditResult NOTIFY changed)
     Q_PROPERTY(QVariantMap current READ current NOTIFY currentChanged)
     Q_PROPERTY(QVariantMap photosByCheckpoint READ photosByCheckpoint NOTIFY photosChanged)
@@ -153,6 +154,9 @@ class Lem : public QObject {
     QString stationCatalogueMessage() const { return m_stationCatalogueMessage; }
     bool desktopStationManagement() const;
     QVariantMap stationEditResult() const { return m_stationEditResult.toVariantMap(); }
+    QVariantMap stationReports() const { return m_stationReports.toVariantMap(); }
+    Q_INVOKABLE void loadStationReports(QString stationId);
+    Q_INVOKABLE void detachCharger(QString contractId, QString chargerId);
     Q_INVOKABLE void refreshStations();
     Q_INVOKABLE void saveStation(QString id, QString baseUpdated, QVariantMap fields);
     QVariantMap current() const;
@@ -230,6 +234,8 @@ class Lem : public QObject {
     Q_INVOKABLE void loadDeletedContracts();
     Q_INVOKABLE void restoreContract(QString id);
     Q_INVOKABLE void analyseExcel(QUrl file);
+    Q_INVOKABLE void analyseContractIds(QUrl file, QString contractId);
+    Q_INVOKABLE void previewContractIds(QString contractId, QString sheet, int row, QVariantMap columns);
     Q_INVOKABLE void analyseStationExcel(QUrl file);
     Q_INVOKABLE void previewStationExcel(QString sheet, int row, QVariantMap columns);
     Q_INVOKABLE QVariantList reportBrands() const;
@@ -259,6 +265,7 @@ class Lem : public QObject {
     void contractTrashChanged();
     void chargersChanged();
     void stationsChanged();
+    void excelImported(QString summary);
     void currentChanged();
     void photosChanged();
     void contractExportCancelled();
@@ -288,6 +295,7 @@ class Lem : public QObject {
     void setPresentationSaveState(const QString &cid, const QString &state, const QString &message);
     QJsonObject m_reportPresentationSave;
     void exportPreparedReport(QString kind, QUrl target);
+    static QJsonObject stationIdentity(const QJsonObject &details);
     void applyClosedIdentity(const QJsonObject &report);
     QVariantList groupCopySources(QString scope) const;
     void copyReportGroup(QString sourceId, QString scope);
@@ -387,9 +395,10 @@ class Lem : public QObject {
     void refreshContracts(bool fromManualSync);
     void refreshCatalogue(QString id, bool force = false);
     void resetStationCatalogue();
+    static QJsonArray currentPcveRows(QJsonArray rows);
     void applyStationRecords(const QJsonArray &records, bool complete = false, QJsonArray *memberships = nullptr);
     bool canManageStations() const;
-    void beginExcelImport(QUrl file, bool stationsOnly);
+    void beginExcelImport(QUrl file, bool stationsOnly, QString idsContract = {});
     void previewImport(const QString &path, QJsonObject mapping);
     void fetchPhotoForReport(QString reportId, QString photoId);
     void pumpPhotoBatch();
@@ -440,7 +449,8 @@ class Lem : public QObject {
     QJsonObject m_user, m_template, m_current, m_reports, m_importInfo, m_preview, m_mapping;
     QJsonArray m_contracts, m_chargers, m_users, m_deletedContracts;
     QJsonArray m_stations, m_notifiedStations;
-    QJsonObject m_stationEditResult;
+    QJsonObject m_stationEditResult, m_stationReports;
+    quint64 m_stationReportRequest = 0;
     QString m_stationCatalogueMessage, m_excelImportPath, m_excelName;
     quint64 m_stationRequest = 0;
     bool m_stationCatalogueLoaded = false, m_stationCatalogueLoading = false;

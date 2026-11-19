@@ -21,7 +21,10 @@ def checks():
         QTest.keyClick(w, Qt.Key.Key_Backspace)
         QTest.qWait(100)
         assert js("page") == "report"
-        QTest.keyClick(w, Qt.Key.Key_Back)
+        js('reportScroll.forceActiveFocus()')
+        QTest.keyPress(w, Qt.Key.Key_Back)
+        assert js("page") == "report"
+        QTest.keyRelease(w, Qt.Key.Key_Back)
         QTest.qWait(150)
         assert js("page") == "catalog"
         assert not errors, errors

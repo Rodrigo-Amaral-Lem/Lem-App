@@ -26,6 +26,16 @@ copy is not a durable edit.
 collection after edits. `m_template` supplies the selected checklist. `m_catalogues` caches contract
 catalogue summaries, while `m_user` and `m_token` describe the local account/session.
 
+Opening an uncached report clears the previous editing target. The catalogue or PCVE sheet
+stays visible until the requested report UUID is available. If the report has since been
+removed, the sheet refreshes its history. Offline history uses the physical station UUID,
+then the cached membership link. A historical report with neither link can still be matched
+by the station's immutable spreadsheet ID within the user's accessible contracts.
+
+The PCVE sheet is sized and centred within the application window’s content item.
+On Android the popup overlay can retain its old dimensions after a live density change.
+Only the details and report history scroll, keeping the Close action within reach.
+
 | Signal/state | Contract |
 | --- | --- |
 | `currentChanged`, `photosChanged` | Report and photo projections; answer edits must not recreate unchanged thumbnail delegates |

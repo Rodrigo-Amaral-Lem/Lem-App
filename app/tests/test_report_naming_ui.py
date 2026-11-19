@@ -8,8 +8,10 @@ exec(compile(source.read_text(encoding="utf-8").partition("def run_tests():")[0]
 identifier = "ESTAÇÃO-001_Contrato-Norte-" + "Longo-" * 12
 values["current"]["identifier"] = identifier
 values["chargers"][0]["reports"] = [
-    {"id": "report-demo", "status": "closed", "identifier": identifier, "finished": "2026-11-16T17:35:08Z"},
-    {"id": "report-earlier", "status": "closed", "identifier": identifier, "finished": "2026-11-15T12:08:00Z"},
+    {"id": "report-demo", "status": "closed", "identifier": identifier, "finished": "2026-03-30T16:35:08"},
+    {"id": "report-earlier", "status": "closed", "identifier": identifier, "finished": "2026-03-09T02:08:00"},
+    {"id": "no-finish", "status": "closed", "identifier": "Histórico"},
+    {"id": "draft", "status": "draft", "identifier": "Em curso", "dirty": True, "started": "2026-03-30T14:15:16"},
 ]
 lem.changed.emit()
 js('splashActive=false')
@@ -21,9 +23,12 @@ for width in (320, 390, 1100):
     button = find_visual(w.contentItem(), "catalogReport_report-demo")
     assert button is not None and button.isVisible()
     assert identifier in button.property("text")
-    assert "\nFim " in button.property("text")
+    assert button.property("text") == "Fechado 30_03_16 • " + identifier
     other = find_visual(w.contentItem(), "catalogReport_report-earlier")
-    assert other is not None and other.property("text") != button.property("text")
+    assert other is not None and other.property("text") == "Fechado 09_03_02 • " + identifier
+    assert find_visual(w.contentItem(), "catalogReport_no-finish").property("text") == "Fechado • Histórico"
+    assert find_visual(w.contentItem(), "catalogReport_draft").property("text") == (
+        "Rascunho • Em curso · por enviar\nInício 30/03/2026 14:15:16")
     assert button.mapToScene(QPoint(int(button.width()), 0)).x() <= width, (width, button.width(), button.x(), button.parentItem().width())
     content = button.property("contentItem")
     label = next(child for child in content.childItems() if child.property("text") == button.property("text"))

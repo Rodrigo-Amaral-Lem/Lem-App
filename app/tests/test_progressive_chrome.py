@@ -18,20 +18,45 @@ assert abs(view.height()-js("win.contentItem.height"))<1, "No fixed blank vertic
 device=QTest.createTouchDevice()
 start=view.mapToScene(QPoint(int(view.width())-24,int(view.height())-120)).toPoint()
 QTest.touchEvent(w,device).press(0,start,w).commit();QTest.qWait(25)
-samples=[]
-previous_y=js("pageScrollOffset()"); previous_p=js("chromeProgress")
-for distance in [20,40,60,80,100,120,140,160,180,200,180,160,140,120,100]:
-    QTest.touchEvent(w,device).move(0,start-QPoint(0,distance),w).commit()
+travel = js("chromeTravel")
+step = max(1, round(travel / 10))
+initial_y = js("pageScrollOffset()")
+samples = [(initial_y, js("chromeProgress"))]
+
+
+def move_and_check(distance):
+    point = start - QPoint(0, distance)
+    QTest.touchEvent(w, device).move(0, point, w).commit()
     QTest.qWait(25)
-    y=js("pageScrollOffset()");p=js("chromeProgress")
-    expected=max(0,min(1,previous_p-(y-previous_y)/js("chromeTravel")))
-    assert abs(p-expected)<.015,(distance,y,p,expected)
-    assert all(abs(a-b)<.01 for a,b in zip(baseline,[view.height(),view.property("contentHeight"),js("pagePositionBar.size"),js("header.height")]))
-    samples.append(p);previous_y=y;previous_p=p
-assert len({round(p,2) for p in samples if 0<p<1})>=5,samples
-assert min(samples)==0 and samples[-1]>0,samples
+    y = js("pageScrollOffset()")
+    progress = js("chromeProgress")
+    previous_y, previous_progress = samples[-1]
+    expected = max(0, min(1, previous_progress - (y - previous_y) / travel))
+    assert abs(progress - expected) < .015, (distance, y, progress, expected)
+    geometry = [view.height(), view.property("contentHeight"), js("pagePositionBar.size"), js("header.height")]
+    assert all(abs(a - b) < .01 for a, b in zip(baseline, geometry)), (baseline, geometry)
+    samples.append((y, progress))
+    return y
+
+
+# Touch recognition takes up part of the finger's travel. Measure the page
+# displacement so each direction exercises the intended part of the animation.
+for distance in range(step, start.y(), step):
+    bottom_y = move_and_check(distance)
+    if bottom_y - initial_y > travel:
+        break
+else:
+    raise AssertionError(("Page did not scroll a toolbar height", travel, samples))
+assert samples[-1][1] == 0, samples
+assert len({round(p, 2) for _, p in samples if 0 < p < 1}) >= 5, samples
+for reverse in range(distance - step, -1, -step):
+    if bottom_y - move_and_check(reverse) >= travel / 2:
+        break
+else:
+    raise AssertionError(("Reverse gesture did not scroll half a toolbar height", samples))
+assert 0 < samples[-1][1] < 1, samples
 # Leave a partially revealed state at rest: no queued animation snaps it open.
-QTest.touchEvent(w,device).release(0,start-QPoint(0,100),w).commit()
+QTest.touchEvent(w, device).release(0, start - QPoint(0, reverse), w).commit()
 js('reportScroll.cancelFlick()');QTest.qWait(30)
 p=js("chromeProgress");QTest.qWait(250)
 assert abs(js("chromeProgress")-p)<.001

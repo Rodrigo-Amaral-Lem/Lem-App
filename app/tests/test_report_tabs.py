@@ -40,6 +40,7 @@ values = {
     "stationCatalogueLoading": False,
     "stationCatalogueMessage": "",
     "stationEditResult": {},
+    "stationReports": {},
     "contractExport": {},
     "passwordReset": {},
     "pendingReports": 1,
@@ -98,7 +99,7 @@ values = {
     "importPreview": {},
 }
 values["photosByCheckpoint"] = {}
-attrs = {"currentChanged": Signal(), "photosChanged": Signal(), "changed": Signal(), "chargersChanged": Signal(), "operationChanged": Signal(), "compatibilityChanged": Signal()}
+attrs = {"excelImported": Signal(str), "currentChanged": Signal(), "photosChanged": Signal(), "changed": Signal(), "chargersChanged": Signal(), "operationChanged": Signal(), "compatibilityChanged": Signal()}
 for name, value in values.items():
     typ = (
         bool
@@ -140,6 +141,8 @@ attrs["contractId"] = Slot(result=str)(contractId)
 attrs["canSaveReportPresentation"] = Property(bool, lambda self:
     values['authenticated'] and values['user'].get('role') == 'admin'
     and not any(values[key] for key in ('busy', 'syncing', 'refreshing')), notify=attrs['changed'])
+attrs["loadStationReports"] = Slot(str)(lambda self, station: None)
+attrs["detachCharger"] = Slot(str, str)(lambda self, contract, charger: None)
 attrs["refreshStations"] = Slot()(lambda self: None)
 attrs["useDefaultServer"] = Slot()(lambda self: None)
 attrs["prepareExport"] = Slot(str, result=bool)(lambda self, kind: True)

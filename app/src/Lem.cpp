@@ -303,14 +303,16 @@ void Lem::loadUser() {
         if (o.contains("contract") && !o.value("contract").isString()) valid = false;
         if (!valid) { m_localReadError = true; o = {}; }
         m_contracts = o["contracts"].toArray();
-        m_chargers = o["chargers"].toArray();
+        m_chargers = currentPcveRows(o["chargers"].toArray());
         m_reports = o["reports"].toObject();
         m_contract = o["contract"].toString();
         m_catalogues = o["catalogues"].toObject();
+        for (const auto &key : m_catalogues.keys())
+            m_catalogues[key] = currentPcveRows(m_catalogues.value(key).toArray());
         m_catalogueTimes = o["catalogue_times"].toObject();
         const auto stationCache = o["station_catalogue"].toObject();
         if (stationCache["role"] == m_user["role"] && stationCache["rows"].isArray()) {
-            m_stations = stationCache["rows"].toArray();
+            m_stations = currentPcveRows(stationCache["rows"].toArray());
             m_stationCatalogueLoaded = true;
         }
         for (auto id : o["deleted_reports"].toArray())
@@ -718,6 +720,8 @@ bool Lem::saveSession() {
 }
 
 void Lem::clearSession() {
+    ++m_stationReportRequest;
+    m_stationReports = {};
     m_token.clear();
     m_pendingSessionToken.clear();
     m_sessionRetry.stop();
@@ -1079,12 +1083,27 @@ bool Lem::openReport(QString chargerId, QString reportId) {
         }
         if (!online())
             return false;
+        // The previous report is already checkpointed. It must never remain an
+        // editable target while a different report is loading or after a failed GET.
+        m_current = {};
+        m_template = {};
         m_busy = true;
         emit changed();
-        request("GET", "/api/reports/" + reportId, {}, [this](QByteArray data) {
+        const auto contractId = m_contract, token = m_token;
+        request("GET", "/api/reports/" + reportId, {}, [this, reportId, chargerId, contractId, token](QByteArray data) {
             auto report = QJsonDocument::fromJson(data).object();
+            if (token != m_token || contractId != m_contract || report["id"] != reportId ||
+                (!chargerId.isEmpty() && report["charger_id"] != chargerId) || report["contract_id"] != contractId) {
+                m_busy = false;
+                status("Não foi possível abrir o relatório selecionado.");
+                return;
+            }
             report["dirty"] = false;
             getPhotos(report, 0);
+        }, "application/json", [this](int code, QString) {
+            m_busy = false;
+            status(code == 410 || code == 404 ? "O relatório selecionado já não está disponível."
+                                               : "Não foi possível abrir o relatório selecionado.");
         });
         return true;
     }
@@ -1786,6 +1805,8 @@ void Lem::resetStationCatalogue() {
     m_stationCatalogueLoading = false;
     m_stationCatalogueMessage.clear();
     m_stationEditResult = {};
+    ++m_stationReportRequest;
+    m_stationReports = {};
 }
 
 void Lem::refreshStations() {
@@ -1838,6 +1859,112 @@ void Lem::refreshStations() {
             m_stationCatalogueMessage = "Não foi possível carregar a base de IDs de PCVEs.";
         emit changed();
     });
+}
+
+void Lem::loadStationReports(QString stationId) {
+    const auto requestId = ++m_stationReportRequest;
+    m_stationReports = {{"id", stationId}};
+    if (stationId.isEmpty()) {
+        emit changed();
+        return;
+    }
+    QSet<QString> contracts;
+    for (const auto &value : m_contracts) contracts.insert(value.toObject()["id"].toString());
+    // Physical and membership UUIDs are distinct. Older cached reports can
+    // predate both the top-level station link and its copy in the frozen snapshot.
+    QHash<QString, QString> membershipStations;
+    for (const auto &cid : contracts) {
+        for (const auto &value : m_catalogues.value(cid).toArray()) {
+            const auto row = value.toObject();
+            if (!row["station_id"].toString().isEmpty())
+                membershipStations.insert(row["id"].toString(), row["station_id"].toString());
+        }
+    }
+    QString externalId;
+    for (const auto &value : m_stations) {
+        const auto row = value.toObject();
+        if (row["id"] == stationId) { externalId = row["external_id"].toString(); break; }
+    }
+    QJsonArray cached, pending;
+    for (const auto &value : std::as_const(m_reports)) {
+        const auto report = value.toObject();
+        const auto snapshot = report["snapshot"].toObject();
+        const auto contract = snapshot["contract"].toObject();
+        const auto cid = report["contract_id"].toString(contract["id"].toString());
+        if (!contracts.contains(cid) || !correctionAllowed(report) ||
+            m_deletedReports.contains(report["id"].toString())) continue;
+        const auto charger = snapshot["charger"].toObject();
+        auto physicalId = report["station_id"].toString(charger["station_id"].toString());
+        if (physicalId.isEmpty())
+            physicalId = membershipStations.value(report["charger_id"].toString());
+        // Use the immutable spreadsheet ID only when all UUID links are missing.
+        const bool belongs = physicalId.isEmpty()
+            ? !externalId.isEmpty() && charger["external_id"] == externalId
+            : physicalId == stationId;
+        if (!belongs) continue;
+        const QJsonObject row{{"id", report["id"]}, {"charger_id", report["charger_id"]},
+                              {"contract_id", cid}, {"contract", contract["name"]},
+                              {"status", report["status"]}, {"started", report["started"]},
+                              {"identifier", ReportNaming::identifier(report)}};
+        cached.append(row);
+        if (report["dirty"].toBool() && !report["revision"].toInt() && report["owner_id"] == m_user["id"])
+            pending.append(row);
+    }
+    if (!authenticated()) {
+        m_stationReports["rows"] = cached;
+        m_stationReports["message"] = "Sem ligação validada. A mostrar os relatórios guardados neste dispositivo.";
+        emit changed();
+        return;
+    }
+    m_stationReports["message"] = "A carregar relatórios…";
+    emit changed();
+    request("GET", "/api/stations/" + QString::fromLatin1(QUrl::toPercentEncoding(stationId)) + "/reports", {},
+            [this, requestId, pending](QByteArray data) {
+                if (requestId != m_stationReportRequest) return;
+                const auto doc = QJsonDocument::fromJson(data);
+                auto rows = doc.array();
+                QSet<QString> ids;
+                for (const auto &entry : rows) ids.insert(entry.toObject()["id"].toString());
+                for (const auto &entry : pending)
+                    if (!ids.contains(entry.toObject()["id"].toString())) rows.append(entry);
+                m_stationReports["rows"] = rows;
+                m_stationReports["message"] = !doc.isArray() ? "Resposta inválida do servidor."
+                    : rows.isEmpty() ? "Sem relatórios associados." : "";
+                emit changed();
+            }, "application/json", [this, requestId, cached](int code, QString) {
+                if (requestId != m_stationReportRequest) return;
+                if (!code || code >= 500) m_stationReports["rows"] = cached;
+                m_stationReports["message"] = (!code || code >= 500) && !cached.isEmpty()
+                    ? "Servidor indisponível. A mostrar os relatórios guardados neste dispositivo."
+                    : code == 404 ? "Ficha indisponível ou servidor sem suporte para o histórico."
+                                                          : "Não foi possível consultar os relatórios.";
+                emit changed();
+            });
+}
+
+void Lem::detachCharger(QString contractId, QString chargerId) {
+    if (!authenticated() || m_user["role"] != "admin" || contractId != m_contract ||
+        contractId.isEmpty() || chargerId.isEmpty() || m_busy || m_catalogueLoading) return;
+    m_busy = true;
+    emit changed();
+    request("DELETE", "/api/contracts/" + QString::fromLatin1(QUrl::toPercentEncoding(contractId)) +
+            "/chargers/" + QString::fromLatin1(QUrl::toPercentEncoding(chargerId)), {},
+            [this, contractId, chargerId](QByteArray) {
+                m_busy = false;
+                auto rows = m_catalogues[contractId].toArray();
+                for (qsizetype i = rows.size(); i-- > 0;)
+                    if (rows.at(i).toObject()["id"] == chargerId) rows.removeAt(i);
+                m_catalogues[contractId] = rows;
+                if (m_contract == contractId) m_chargers = rows;
+                m_catalogueTimes.remove(contractId);
+                persist();
+                if (m_contract == contractId) refreshCatalogue(contractId, true);
+                refreshStations();
+                status("PCVE retirado do contrato.");
+            }, "application/json", [this](int, QString) {
+                m_busy = false;
+                status("Não foi possível retirar o PCVE. Atualize o contrato e tente novamente.");
+            });
 }
 
 void Lem::saveStation(QString id, QString baseUpdated, QVariantMap fields) {
@@ -2068,6 +2195,8 @@ void Lem::finish() {
     if (m_template["version"].toInt() >= 4) {
         auto snapshot = m_current["snapshot"].toObject();
         auto details = snapshot["charger"].toObject();
+        if (!m_current["revision"].toInt() && !correction)
+            m_current["_station_identity_at_start"] = stationIdentity(details);
         for (auto it = identityFields.begin(); it != identityFields.end(); ++it) {
             const auto value = answers[it.key()].toObject()["value"].toString().trimmed();
             if (!value.isEmpty() && !Measurements::notApplicable(value)) details[it.value()] = value;
@@ -2579,7 +2708,12 @@ void Lem::analyseStationExcel(QUrl url) {
     if (canManageStations()) beginExcelImport(url, true);
 }
 
-void Lem::beginExcelImport(QUrl url, bool stationsOnly) {
+void Lem::analyseContractIds(QUrl url, QString contractId) {
+    if (!contractId.isEmpty() && contractId == m_contract)
+        beginExcelImport(url, false, contractId);
+}
+
+void Lem::beginExcelImport(QUrl url, bool stationsOnly, QString idsContract) {
     if (m_busy || m_user["role"] != "admin" || !online())
         return;
     QFile f(localPath(url));
@@ -2603,10 +2737,11 @@ void Lem::beginExcelImport(QUrl url, bool stationsOnly) {
     m_preview = {};
     m_busy = true;
     status("A analisar o Excel…");
-    multipart("POST", "/api/imports/analyse", {}, m_excelName, m_excel, [this, stationsOnly](QByteArray data) {
+    multipart("POST", "/api/imports/analyse", {}, m_excelName, m_excel, [this, stationsOnly, idsContract](QByteArray data) {
         m_importInfo = QJsonDocument::fromJson(data).object();
-        if (stationsOnly) {
-            m_importInfo["station_catalogue"] = true;
+        if (stationsOnly || !idsContract.isEmpty()) {
+            if (stationsOnly) m_importInfo["station_catalogue"] = true;
+            else m_importInfo["ids_contract"] = idsContract;
             m_importInfo["batch_id"] = uuid();
             m_busy = false;
             status("Excel analisado. Pré-visualize os IDs antes de importar.");
@@ -2775,6 +2910,12 @@ void Lem::previewExcel(QString sheet, int row, QVariantMap columns, QString prim
     previewImport("/api/contracts/" + m_contract + "/import", mapping);
 }
 
+void Lem::previewContractIds(QString contractId, QString sheet, int row, QVariantMap columns) {
+    if (contractId.isEmpty() || contractId != m_contract || m_importInfo["ids_contract"] != contractId) return;
+    previewImport("/api/contracts/" + contractId + "/import",
+                  {{"sheet", sheet}, {"header_row", row}, {"columns", QJsonObject::fromVariantMap(columns)}});
+}
+
 void Lem::previewStationExcel(QString sheet, int row, QVariantMap columns) {
     if (!canManageStations() || !m_importInfo["station_catalogue"].toBool()) return;
     previewImport("/api/stations/import",
@@ -2819,8 +2960,10 @@ void Lem::commitExcel() {
                   m_excel.clear();
                   m_catalogueTimes = {};
                   const auto outcome = QJsonDocument::fromJson(data).object();
-                  status(QString("Importação concluída. %1 criados, %2 atualizados.")
-                         .arg(outcome["created"].toInt()).arg(outcome["updated"].toInt()));
+                  const auto summary = QString("Importação concluída. %1 criados, %2 atualizados.")
+                         .arg(outcome["created"].toInt()).arg(outcome["updated"].toInt());
+                  status(summary);
+                  emit excelImported(summary);
                   refreshStations();
                   if (!stationsOnly) refresh();
               });
@@ -2914,7 +3057,6 @@ void Lem::demo() {
                                {"external_id", "PCVE-DEMO-001"},
                                {"details", QJsonObject{{"model", "DC 60 kW"},
                                                        {"serial", "000012"},
-                                                       {"location", "Local de demonstração"},
                                                        {"address", "Dados fictícios"},
                                                        {"cpe", "CPE-DEMO"},
                                                        {"manufacturer", "Exemplo"},

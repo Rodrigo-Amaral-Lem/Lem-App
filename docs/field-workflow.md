@@ -11,16 +11,19 @@ assigned contracts and can open cached work offline. The charger list combines s
 summaries with local report state, so a locally created or changed report remains visible before
 upload.
 
-Open **PCVEs** in the toolbar or **IDs de PCVEs** in the compact menu to search by ID or field values.
+Open **PCVEs** in the toolbar or compact menu to search by ID or field values.
 Each PCVE appears once.
 Technicians see the IDs from all their active assigned contracts. Administrators can also see IDs
 awaiting a contract. **Atualizar** downloads the catalogue for offline consultation.
 
 Importing a contract workbook creates or updates the central station and links that ID to the
 contract. Every linked contract uses the same station details. On desktop, administrators can use
-**Importar Excel** from **IDs de PCVEs** to create or update station records independently. Open a
-station and choose **Editar ficha** to save changes to individual fields. The station view also
-shows the values from the last workbook.
+**Importar Excel** from **PCVEs** to create or update station records independently. Open a
+station and choose **Editar ficha** to change its current fields. The PCVE ID is permanent.
+**Relatórios associados** lists reports in contracts you can access and opens the selected report. Back returns to the same PCVE and scroll position. Offline, it shows reports saved on this device.
+Select a contract and open **Gestão → Contratos → Gerir IDs do contrato**. Use **Adicionar ou atualizar por Excel** to add memberships and update the central PCVE records shared by every linked contract. On desktop, **Editar** opens the same central record. **Retirar** removes the association and preserves existing reports. Importing the ID again restores the association.
+A closed report on the contract equipment card shows its local closing day, month and hour. For example, `30_03_16` means 30 March at 16:00–16:59.
+Use the postal address and coordinates for navigation. The site-name field is omitted.
 
 Manufacturer, model and serial corrections entered in a report are applied to the central station
 when closure succeeds, with conflict checks. Earlier reports retain their historical snapshots.

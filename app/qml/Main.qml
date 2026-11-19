@@ -846,7 +846,7 @@ ApplicationWindow {
     component UiIconButton: UiButton {
         implicitWidth: win.touchHeight
         implicitHeight: win.touchHeight
-        ToolTip.visible: hovered
+        ToolTip.visible: hovered && text.length > 0
         ToolTip.text: text
     }
     // Keep 48 px hit targets while making the header surfaces visually smaller.
@@ -989,7 +989,7 @@ ApplicationWindow {
         };
     }
     function addressLine(details) {
-        const base = String(details.address || details.location || "").trim();
+        const base = String(details.address || "").trim();
         const postal = String(details.postal_code || "").trim();
         // Some imports already include the postal code in the address.
         return postal && !base.includes(postal) ? [base, postal].filter(v => !!v).join(", ") : base;
@@ -1018,7 +1018,7 @@ ApplicationWindow {
     function navigationUrl(details) {
         const lat = coordinate(details.latitude, 90);
         const lon = coordinate(details.longitude, 180);
-        const hasAddress = String(details.address || details.location || "").trim().length > 0;
+        const hasAddress = String(details.address || "").trim().length > 0;
         const destination = lat !== null && lon !== null ? coordinateText(lat) + "," + coordinateText(lon) : hasAddress ? addressLine(details) : "";
         // A fixed HTTPS host and encoded destination keep imported text out of URL parameters.
         return destination ? "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(destination) : "";
@@ -1031,6 +1031,7 @@ ApplicationWindow {
         const parts = [String(charger.external_id || "")];
         const details = charger.details || {};
         for (const key in details) {
+            if (key === "source" || obsoletePcveField(key)) continue;
             const value = details[key];
             if (value !== null && typeof value === "object") {
                 for (const column in value)
@@ -1074,12 +1075,61 @@ ApplicationWindow {
             chargerList.returnToBounds();
         });
     }
-    function openCatalogReport(chargerId, reportId) {
-        rememberCatalogPosition();
+    property var stationReportOrigin: null
+    property var pendingReportOpen: null
+    function openStationReport(contractId, chargerId, reportId) {
+        const stationId = pcveDetailsDialog.stationId;
+        const index = pcveList.model.findIndex(row => row.id === stationId);
+        const card = pcveList.itemAtIndex(index);
+        const origin = {
+            stationId: stationId, userId: pcvePage.userId,
+            cardOffset: card ? card.y - pcveList.contentY : 0,
+            detailsY: pcveDetailsScroll.contentItem.contentY,
+            chrome: chromeReveal
+        };
+        if (lem.contractId() !== contractId)
+            lem.selectContract(contractId);
+        if (lem.contractId() === contractId)
+            openCatalogReport(chargerId, reportId, origin);
+    }
+    function leaveReport() {
+        const origin = stationReportOrigin;
+        if (page !== "report" || !origin || origin.userId !== pcvePage.userId) {
+            page = "catalog";
+            return;
+        }
+        page = "pcves";
+        Qt.callLater(function () {
+            if (win.page !== "pcves" || origin.userId !== pcvePage.userId)
+                return;
+            pcveList.forceLayout();
+            const index = pcveList.model.findIndex(row => row.id === origin.stationId);
+            if (index < 0)
+                return;
+            pcveList.positionViewAtIndex(index, ListView.Beginning);
+            const card = pcveList.itemAtIndex(index);
+            if (card)
+                pcveList.contentY = card.y - origin.cardOffset;
+            pcveList.returnToBounds();
+            win.chromeReveal = origin.chrome;
+            pcveDetailsDialog.stationId = origin.stationId;
+            pcveDetailsDialog.restoreY = origin.detailsY;
+            pcveDetailsDialog.open();
+        });
+    }
+    function openCatalogReport(chargerId, reportId, origin) {
+        if (!origin)
+            rememberCatalogPosition();
         openingCatalogReport = true;
         const opened = lem.openReport(chargerId, reportId);
-        if (opened !== false)
-            page = "report";
+        if (opened !== false) {
+            if (reportId && lem.current.id !== reportId) {
+                pendingReportOpen = {id: reportId, origin: origin || null, contractId: lem.contractId()};
+            } else {
+                stationReportOrigin = origin || null;
+                page = "report";
+            }
+        }
         openingCatalogReport = false;
         if (!reportId && opened === false) {
             win.showFeedback = false;
@@ -1088,6 +1138,7 @@ ApplicationWindow {
         }
     }
     onPageChanged: {
+        pendingReportOpen = null;
         if (page === "catalog")
             Qt.callLater(function () {
                 refreshCatalog(true);
@@ -1097,9 +1148,17 @@ ApplicationWindow {
             pcveEditDialog.close();
             pcveImportDialog.close();
         }
+        if (page !== "admin") {
+            contractIdsDialog.close();
+            detachPcveDialog.close();
+            if (pcveImportDialog.contractId)
+                pcveImportDialog.close();
+        }
         resetScrollChrome();
-        if (page !== "report")
+        if (page !== "report") {
+            stationReportOrigin = null;
             lem.reportSyncBoundary();
+        }
     }
     property int selectedSection: 0
     property string sectionReportId: win.reportData.id || ""
@@ -1249,6 +1308,12 @@ ApplicationWindow {
             return item.optional || (answer && String(answer.value || "").trim().length > 0);
         }).length;
     }
+    function navigateBack() {
+        if (Qt.inputMethod.visible)
+            Qt.inputMethod.hide();
+        else
+            win.leaveReport();
+    }
     Shortcut {
         id: reportBackShortcut
         objectName: "reportBackShortcut"
@@ -1260,12 +1325,7 @@ ApplicationWindow {
                  && !photoPreview.opened && !cropDialog.opened && !removePhotoDialog.opened && !deleteReportDialog.opened
                  && !removeNotesDialog.opened && !photoDownloadDialog.opened && !statusDialog.opened && !loginDialog.opened
                  && !clearLocalCopiesDialog.opened && !reportMenu.opened && !navMenu.opened
-        onActivated: {
-            if (Qt.inputMethod.visible)
-                Qt.inputMethod.hide();
-            else
-                win.page = "catalog";
-        }
+        onActivated: win.navigateBack()
     }
     readonly property var pcveRecords: lem.stations || []
     readonly property bool canManagePcves: !!lem.desktopStationManagement && lem.authenticated && lem.user.role === "admin"
@@ -1280,7 +1340,7 @@ ApplicationWindow {
     property var fields: [
         {
             key: "external_id",
-            label: "ID do carregador / Station ID"
+            label: "ID do PCVE"
         },
         {
             key: "address",
@@ -1333,16 +1393,15 @@ ApplicationWindow {
         {
             key: "connectors",
             label: "Tomadas / fichas"
-        },
-        {
-            key: "location",
-            label: "Localização / nome do local"
-        },
-        {
-            key: "site_id",
-            label: "ID do site"
         }
     ]
+    function obsoletePcveField(key) {
+        const field = key.replace(/^extra\./, "").replace(/_/g, " ").trim().toLowerCase();
+        if (key.startsWith("extra.") && ["id", "external id", "station id", "id do pcve", "id de pcve", "identificador"].includes(field))
+            return true;
+        return ["location", "localização", "localizacao", "nome do local", "local", "site name",
+                "localização / nome do local", "localizacao / nome do local", "site id", "id do site"].includes(field);
+    }
     function previewDetails(record) {
         const details = record.details || {};
         const source = details.source || {};
@@ -1361,7 +1420,7 @@ ApplicationWindow {
         }
         for (const key of Object.keys(details)) {
             const value = details[key];
-            if (key.startsWith("extra.") && value != null && String(value).trim() !== "")
+            if (key.startsWith("extra.") && !obsoletePcveField(key) && value != null && String(value).trim() !== "")
                 rows.push({label: key.slice(6), value: String(value)});
         }
         return rows;
@@ -1369,12 +1428,12 @@ ApplicationWindow {
     function pcveEditFields(details) {
         return fields.filter(field => field.key !== "external_id").concat(
             [{key: "power_unit", label: "Unidade de potência"}],
-            Object.keys(details).filter(key => key.startsWith("extra.")).map(key => ({key: key, label: key.slice(6)})));
+            Object.keys(details).filter(key => key.startsWith("extra.") && !obsoletePcveField(key)).map(key => ({key: key, label: key.slice(6)})));
     }
     function previewPcveSheet(sheet) {
         const recommended = sheet.recommended_mapping;
         if (recommended) {
-            lem.previewStationExcel(sheet.name, recommended.header_row, recommended.columns);
+            pcveImportDialog.previewSheet(sheet.name, recommended.header_row, recommended.columns);
             return;
         }
         const headers = (sheet.sample || [])[0] || [];
@@ -1382,23 +1441,24 @@ ApplicationWindow {
         const aliases = {
             "id": "external_id", "identificador": "external_id", "id de pcve": "external_id",
             "id do carregador": "external_id", "série": "serial", "nº(s) série": "serial",
-            "cpe": "cpe", "fornecimento": "energy_supply", "tomadas": "connectors",
-            "localização": "location"
+            "station id": "external_id", "id do pcve": "external_id",
+            "cpe": "cpe", "fornecimento": "energy_supply", "tomadas": "connectors"
         };
         for (const raw of headers) {
             const header = raw.trim();
-            if (!header)
+            if (!header || obsoletePcveField(header))
                 continue;
             const lower = header.toLowerCase();
             const field = fields.find(entry => entry.key === lower || entry.label.toLowerCase() === lower);
             const key = Object.prototype.hasOwnProperty.call(aliases, lower) ? aliases[lower] : (field || {}).key;
+            if (key === "external_id" && columns.external_id) continue;
             columns[key && !Object.prototype.hasOwnProperty.call(columns, key) ? key : "extra." + header] = header;
         }
         if (!columns.external_id) {
             pcveImportDialog.importNotice = "Use ID ou Identificador na primeira linha, ou o formato Stations.";
             return;
         }
-        lem.previewStationExcel(sheet.name, 1, columns);
+        pcveImportDialog.previewSheet(sheet.name, 1, columns);
     }
     // Resolve answers from the active report projection; do not persist delegate-local copies.
     function answerFor(id) {
@@ -1437,13 +1497,13 @@ ApplicationWindow {
                 spacing: win.compact ? 2 : 10
                 UiHeaderButton {
                     objectName: "reportBackButton"
-                    visible: win.compact && win.page === "report"
+                    visible: win.page === "report" && (win.compact || !!win.stationReportOrigin)
                     symbol: "left"
                     implicitWidth: win.touchHeight
-                    Accessible.name: "Voltar aos contratos"
+                    Accessible.name: win.stationReportOrigin ? "Voltar ao PCVE" : "Voltar aos contratos"
                     onClicked: {
                         Qt.inputMethod.hide();
-                        win.page = "catalog";
+                        win.leaveReport();
                     }
                 }
                 Image {
@@ -1499,6 +1559,7 @@ ApplicationWindow {
                 UiHeaderButton {
                     implicitHeight: win.touchHeight
                     implicitWidth: win.touchHeight
+                    id: navigationButton
                     Accessible.name: "Abrir navegação"
                     objectName: "navigationButton"
                     symbol: "menu"
@@ -1528,7 +1589,7 @@ ApplicationWindow {
                             objectName: "pcveCatalogueMenuItem"
                             implicitHeight: visible ? win.touchHeight : 0
                             palette: lightPalette
-                            text: "IDs de PCVEs"
+                            text: "PCVEs"
                             visible: !!lem.user.id
                             enabled: !lem.busy
                             onTriggered: win.page = "pcves"
@@ -2413,14 +2474,19 @@ ApplicationWindow {
     component ExcelImportPanel: ColumnLayout {
         id: importPanel
         property bool stationsOnly: false
+        property string idsContract: ""
         readonly property bool matches: !!lem.importInfo.station_catalogue === stationsOnly
+                                        && (lem.importInfo.ids_contract || "") === idsContract
         readonly property var sheets: matches ? (lem.importInfo.sheets || []) : []
         readonly property var preview: matches ? lem.importPreview : ({})
         readonly property var selectedSheet: sheets[sheetBox.currentIndex] || ({})
         readonly property string batch: matches ? (lem.importInfo.batch_id || "") : ""
         property alias previewList: importPreviewList
+        property bool confirmInFooter: false
+        readonly property bool canConfirm: !lem.busy && preview.count > 0 && !!preview.records
+                                           && preview.records.length === preview.count && (preview.errors || []).length === 0
         signal previewRequested(var sheet)
-        objectName: stationsOnly ? "stationImportMappingBody" : "importMappingBody"
+        objectName: idsContract ? "contractIdsImportMappingBody" : stationsOnly ? "stationImportMappingBody" : "importMappingBody"
         visible: sheets.length > 0
         onBatchChanged: if (batch) Qt.callLater(chooseSheet)
         function chooseSheet() {
@@ -2441,7 +2507,7 @@ ApplicationWindow {
             implicitHeight: win.touchHeight
             text: "Pré-visualizar importação"
             enabled: !lem.busy && !!importPanel.selectedSheet.name
-            objectName: importPanel.stationsOnly ? "previewStationImportButton" : "previewImportButton"
+            objectName: importPanel.idsContract ? "contractIdsPreviewImportButton" : importPanel.stationsOnly ? "previewStationImportButton" : "previewImportButton"
             onClicked: importPanel.previewRequested(importPanel.selectedSheet)
         }
         UiLabel {
@@ -2459,7 +2525,7 @@ ApplicationWindow {
         }
         ListView {
             id: importPreviewList
-            objectName: importPanel.stationsOnly ? "stationImportPreviewList" : "importPreviewList"
+            objectName: importPanel.idsContract ? "contractIdsImportPreviewList" : importPanel.stationsOnly ? "stationImportPreviewList" : "importPreviewList"
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             Layout.preferredHeight: Math.min(640, Math.max(240, count * 180))
@@ -2540,9 +2606,132 @@ ApplicationWindow {
             primary: true
             implicitHeight: win.touchHeight
             text: "Confirmar importação"
-            objectName: importPanel.stationsOnly ? "confirmStationImportButton" : "confirmImportButton"
-            enabled: !lem.busy && importPanel.preview.count > 0 && !!importPanel.preview.records && importPanel.preview.records.length === importPanel.preview.count && (importPanel.preview.errors || []).length === 0
+            objectName: importPanel.confirmInFooter ? "" : "confirmImportButton"
+            visible: !importPanel.confirmInFooter
+            enabled: importPanel.canConfirm
             onClicked: lem.commitExcel()
+        }
+    }
+    Dialog {
+        id: contractIdsDialog
+        objectName: "contractIdsDialog"
+        popupType: Popup.Item
+        property string contractId: ""
+        readonly property bool valid: lem.authenticated && lem.user.role === "admin" && !!contractId && contractBox.selectedId === contractId
+        onValidChanged: if (visible && !valid) close()
+        onAboutToShow: {
+            contractIdSearch.clear();
+            if (win.canManagePcves)
+                lem.refreshStations();
+        }
+        title: "IDs do contrato"
+        modal: true
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(win.width - 24, 620)
+        height: Math.min(win.height - win.SafeArea.margins.top - win.SafeArea.margins.bottom - 24, 640)
+        contentItem: ColumnLayout {
+            UiLabel {
+                text: contractBox.selectedName
+                textFormat: Text.PlainText
+                font.bold: true
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            UiButton {
+                objectName: "importContractIds"
+                text: "Adicionar ou atualizar por Excel"
+                enabled: contractIdsDialog.valid && !lem.busy
+                Layout.fillWidth: true
+                onClicked: pcveImportDialog.start(contractIdsDialog.contractId)
+            }
+            UiTextField {
+                id: contractIdSearch
+                objectName: "contractIdSearch"
+                placeholderText: "Pesquisar um ID…"
+                Accessible.name: "Pesquisar IDs do contrato"
+                Layout.fillWidth: true
+            }
+            ListView {
+                id: managedIds
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                model: contractIdsDialog.visible && contractIdsDialog.valid
+                    ? lem.chargers.filter(row => row.external_id.toLowerCase().includes(contractIdSearch.text.trim().toLowerCase())) : []
+                ScrollBar.vertical: ScrollBar {}
+                delegate: RowLayout {
+                    required property var modelData
+                    width: managedIds.width
+                    UiLabel {
+                        text: modelData.external_id
+                        textFormat: Text.PlainText
+                        wrapMode: Text.WrapAnywhere
+                        Layout.fillWidth: true
+                    }
+                    UiButton {
+                        readonly property var station: win.canManagePcves
+                            ? win.pcveRecords.find(row => row.id === modelData.station_id) : null
+                        text: "Editar"
+                        Accessible.name: "Editar " + modelData.external_id
+                        objectName: "editContractPcve_" + modelData.id
+                        visible: win.canManagePcves
+                        enabled: !lem.busy && !!(station || {}).updated
+                        onClicked: pcveEditDialog.begin(station)
+                    }
+                    UiButton {
+                        text: "Retirar"
+                        Accessible.name: "Retirar " + modelData.external_id
+                        objectName: "detachPcve_" + modelData.id
+                        enabled: !lem.busy && !lem.refreshing
+                        onClicked: {
+                            detachPcveDialog.contractId = contractIdsDialog.contractId;
+                            detachPcveDialog.chargerId = modelData.id;
+                            detachPcveDialog.pcveId = modelData.external_id;
+                            detachPcveDialog.open();
+                        }
+                    }
+                }
+                UiLabel {
+                    visible: managedIds.count === 0
+                    width: parent.width
+                    wrapMode: Text.Wrap
+                    text: lem.refreshing ? "A carregar IDs…" : contractIdSearch.text.trim() ? "Nenhum ID corresponde à pesquisa." : "Sem IDs associados ao contrato."
+                }
+            }
+            UiButton { text: "Fechar"; Accessible.name: "Fechar gestão de IDs"; Layout.fillWidth: true; onClicked: contractIdsDialog.close() }
+        }
+    }
+    Dialog {
+        id: detachPcveDialog
+        objectName: "detachPcveDialog"
+        popupType: Popup.Item
+        property string contractId
+        property string chargerId
+        property string pcveId
+        title: "Retirar PCVE do contrato?"
+        modal: true
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(win.width - 24, 440)
+        contentItem: ColumnLayout {
+            UiLabel {
+                text: "O PCVE " + detachPcveDialog.pcveId + " continuará na base de dados. Os relatórios existentes serão conservados."
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+            }
+            RowLayout {
+                UiButton { text: "Cancelar"; onClicked: detachPcveDialog.reject() }
+                UiButton {
+                    text: "Retirar"
+                    objectName: "confirmDetachPcve"
+                    onClicked: {
+                        lem.detachCharger(detachPcveDialog.contractId, detachPcveDialog.chargerId);
+                        detachPcveDialog.accept();
+                    }
+                }
+            }
         }
     }
     component PcveField: Item {
@@ -2573,11 +2762,24 @@ ApplicationWindow {
         readonly property var station: stationId ? win.pcveRecords.find(row => row.id === stationId) : null
         readonly property var details: (station || {}).details || {}
         readonly property var currentFields: visible ? win.pcveFields(details) : []
-        readonly property var excelFields: {
-            const source = details.source || {};
-            return visible ? Object.keys(source).filter(key => source[key] != null && String(source[key]).trim().length > 0)
-                .map(key => ({label: key, value: String(source[key])})) : [];
+        readonly property var history: lem.stationReports && lem.stationReports.id === stationId ? lem.stationReports : ({})
+        property real restoreY: -1
+        function restoreHistoryPosition() {
+            if (restoreY < 0 || !opened || !history.rows)
+                return;
+            // The history arrives after the popup opens. Lay out the report
+            // buttons before clamping the saved offset to the new content height.
+            pcveDetailsColumn.ensurePolished();
+            const view = pcveDetailsScroll.contentItem;
+            const maximum = Math.max(0, view.contentHeight - view.height);
+            view.contentY = Math.min(restoreY, maximum);
+            restoreY = -1;
         }
+        onHistoryChanged: {
+            if (restoreY >= 0 && history.rows)
+                Qt.callLater(restoreHistoryPosition);
+        }
+        onOpened: lem.loadStationReports(stationId)
         onStationChanged: {
             if (!station && visible)
                 Qt.callLater(function () {
@@ -2585,14 +2787,28 @@ ApplicationWindow {
                         pcveDetailsDialog.close();
                 });
         }
-        onClosed: stationId = ""
+        onClosed: {
+            if (win.pendingReportOpen && win.pendingReportOpen.origin)
+                win.pendingReportOpen = null;
+            restoreY = -1;
+            stationId = "";
+            lem.loadStationReports("");
+            // A cached report can open inside the popup button's own click.
+            // Return key focus to the report after the popup releases its grab.
+            if (win.androidCamera && win.page === "report")
+                Qt.callLater(function () {
+                    if (win.page === "report" && !pcveDetailsDialog.visible)
+                        reportScroll.forceActiveFocus(Qt.OtherFocusReason);
+                });
+        }
         onAboutToShow: pcveDetailsScroll.contentItem.contentY = 0
         title: "Dados do PCVE"
         modal: true
-        parent: Overlay.overlay
+        // The Android overlay can retain its previous size after a density change.
+        parent: win.contentItem
         anchors.centerIn: parent
-        width: Math.min(win.width - 24, 580)
-        height: Math.min(win.height - win.SafeArea.margins.top - win.SafeArea.margins.bottom - 24, 600)
+        width: Math.max(0, Math.min(parent.width - 24, 580))
+        height: Math.max(0, Math.min(parent.height - 24, 600))
         palette: lightPalette
         background: Rectangle {
             color: "white"
@@ -2604,11 +2820,13 @@ ApplicationWindow {
             ScrollView {
                 id: pcveDetailsScroll
                 objectName: "pcveDetailsScroll"
+                Layout.minimumHeight: 0
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 contentWidth: availableWidth
                 clip: true
                 ColumnLayout {
+                    id: pcveDetailsColumn
                     width: pcveDetailsScroll.availableWidth
                     spacing: 10
                     UiLabel {
@@ -2625,21 +2843,38 @@ ApplicationWindow {
                         PcveField {}
                     }
                     UiLabel {
-                        visible: pcveDetailsDialog.excelFields.length > 0
-                        text: "Último Excel importado"
+                        visible: !pcveDetailsDialog.currentFields.length
+                        text: "Sem dados adicionais para este ID."
+                        Layout.fillWidth: true
+                    }
+                    UiLabel {
+                        text: "Relatórios associados"
                         font.bold: true
-                        Layout.topMargin: 6
+                        Layout.fillWidth: true
+                    }
+                    UiLabel {
+                        text: pcveDetailsDialog.history.message || ""
+                        visible: text.length > 0
+                        wrapMode: Text.Wrap
                         Layout.fillWidth: true
                     }
                     Repeater {
-                        model: pcveDetailsDialog.excelFields
-                        PcveField {}
-                    }
-                    UiLabel {
-                        visible: !pcveDetailsDialog.currentFields.length && !pcveDetailsDialog.excelFields.length
-                        text: "Sem dados adicionais para este ID."
-                        wrapMode: Text.Wrap
-                        Layout.fillWidth: true
+                        model: pcveDetailsDialog.history.rows || []
+                        UiButton {
+                            required property var modelData
+                            objectName: "pcveReport_" + modelData.id
+                            Layout.fillWidth: true
+                            text: modelData.contract + " · " + (modelData.status === "closed" ? "Fechado" : "Rascunho")
+                                  + " · " + Qt.formatDateTime(new Date(modelData.started), "dd/MM/yyyy HH:mm:ss") + "\n" + modelData.identifier
+                            enabled: !lem.busy
+                            implicitHeight: Math.max(win.touchHeight, implicitContentHeight + topPadding + bottomPadding)
+                            contentItem: UiLabel {
+                                text: parent.text
+                                textFormat: Text.PlainText
+                                wrapMode: Text.Wrap
+                            }
+                            onClicked: win.openStationReport(modelData.contract_id, modelData.charger_id, modelData.id)
+                        }
                     }
                 }
             }
@@ -2720,7 +2955,7 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             spacing: 10
             UiLabel {
-                text: pcveEditDialog.externalId
+                text: "ID do PCVE: " + pcveEditDialog.externalId
                 textFormat: Text.PlainText
                 font.pixelSize: 22
                 font.bold: true
@@ -2801,9 +3036,32 @@ ApplicationWindow {
     Dialog {
         id: pcveImportDialog
         objectName: "pcveImportDialog"
+        popupType: Popup.Item
         property string importNotice: ""
         property bool importStarted: false
-        title: "Importar IDs de PCVEs"
+        property string contractId: ""
+        readonly property bool allowed: contractId ? contractIdsDialog.valid && contractBox.selectedId === contractId : win.canManagePcves
+        onAllowedChanged: if (visible && !allowed) close()
+        function start(cid) {
+            contractId = cid;
+            importNotice = "";
+            importStarted = cid ? lem.importInfo.ids_contract === cid : !!lem.importInfo.station_catalogue;
+            open();
+        }
+        Connections {
+            target: lem
+            function onExcelImported(summary) {
+                if (pcveImportDialog.visible && pcveImportDialog.importStarted)
+                    pcveImportDialog.importNotice = summary;
+            }
+        }
+        function previewSheet(name, row, columns) {
+            if (contractId)
+                lem.previewContractIds(contractId, name, row, columns);
+            else
+                lem.previewStationExcel(name, row, columns);
+        }
+        title: contractId ? "Adicionar ou atualizar IDs" : "Importar IDs de PCVEs"
         modal: true
         closePolicy: lem.busy ? Popup.NoAutoClose : Popup.CloseOnEscape
         parent: Overlay.overlay
@@ -2814,14 +3072,16 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             spacing: 10
             UiLabel {
-                text: "Abra um Excel no formato Stations ou com ID ou Identificador no cabeçalho. A importação atualiza a ficha usada nos contratos."
+                text: pcveImportDialog.contractId
+                      ? "Contrato " + contractBox.selectedName + ". O Excel adiciona novos IDs e atualiza os dados dos existentes. Os IDs ausentes da folha continuam associados."
+                      : "Abra um Excel no formato Stations ou com ID ou Identificador no cabeçalho. A importação atualiza a ficha usada nos contratos."
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
             UiButton {
                 objectName: "openPcveExcel"
                 text: "Abrir Excel"
-                enabled: win.canManagePcves && !lem.busy
+                enabled: pcveImportDialog.allowed && !lem.busy
                 Layout.fillWidth: true
                 onClicked: stationExcelDialog.open()
             }
@@ -2844,7 +3104,9 @@ ApplicationWindow {
                     width: pcveImportScroll.availableWidth
                     ExcelImportPanel {
                         id: globalExcelPanel
-                        stationsOnly: true
+                        confirmInFooter: true
+                        stationsOnly: !pcveImportDialog.contractId
+                        idsContract: pcveImportDialog.contractId
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                         onPreviewRequested: sheet => {
@@ -2854,11 +3116,27 @@ ApplicationWindow {
                     }
                 }
             }
-            UiButton {
-                text: "Fechar"
-                enabled: !lem.busy
+            RowLayout {
                 Layout.fillWidth: true
-                onClicked: pcveImportDialog.close()
+                UiButton {
+                    objectName: pcveImportDialog.contractId ? "contractIdsConfirmImportButton" : "confirmStationImportButton"
+                    text: "Confirmar importação"
+                    primary: true
+                    wrapText: true
+                    implicitHeight: Math.max(win.touchHeight, implicitContentHeight + topPadding + bottomPadding)
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    visible: globalExcelPanel.sheets.length > 0
+                    enabled: globalExcelPanel.canConfirm
+                    onClicked: lem.commitExcel()
+                }
+                UiButton {
+                    text: "Fechar"
+                    Accessible.name: "Fechar importação"
+                    enabled: !lem.busy
+                    Layout.fillWidth: true
+                    onClicked: pcveImportDialog.close()
+                }
             }
         }
     }
@@ -3683,12 +3961,23 @@ ApplicationWindow {
                 deletedContractsDialog.close();
                 newPassword.clear();
             }
-            if (!win.canManagePcves) {
+            if (!win.canManagePcves)
                 pcveEditDialog.close();
-                pcveImportDialog.close();
+            const pending = win.pendingReportOpen;
+            if (pending && !lem.busy) {
+                win.pendingReportOpen = null;
+                if (lem.contractId() === pending.contractId &&
+                    (!pending.origin || (pcveDetailsDialog.visible && pcveDetailsDialog.stationId === pending.origin.stationId))) {
+                    if (lem.current.id === pending.id) {
+                        win.stationReportOrigin = pending.origin;
+                        win.page = "report";
+                    } else if (pending.origin) {
+                        lem.loadStationReports(pending.origin.stationId);
+                    }
+                }
             }
             if (win.page === "report" && !lem.current.id && !lem.busy)
-                win.page = "catalog";
+                win.leaveReport();
         }
     }
     PhotoCropDialog {
@@ -3740,7 +4029,10 @@ ApplicationWindow {
         onAccepted: {
             pcveImportDialog.importNotice = "";
             pcveImportDialog.importStarted = true;
-            lem.analyseStationExcel(selectedFile);
+            if (pcveImportDialog.contractId && pcveImportDialog.allowed)
+                lem.analyseContractIds(selectedFile, pcveImportDialog.contractId);
+            else if (!pcveImportDialog.contractId && pcveImportDialog.allowed)
+                lem.analyseStationExcel(selectedFile);
         }
     }
     FileDialog {
@@ -4060,7 +4352,7 @@ ApplicationWindow {
                         UiLabel {
                             objectName: "chargerExtra_" + chargerTile.modelData.id
                             visible: !win.androidCamera && text.length > 0
-                            text: [modelData.details.location || "", modelData.details.model || "", modelData.details.cpe ? "CPE: " + modelData.details.cpe : ""].filter(v => !!v).join(" · ")
+                            text: [modelData.details.model || "", modelData.details.cpe ? "CPE: " + modelData.details.cpe : ""].filter(v => !!v).join(" · ")
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
                         }
@@ -4113,15 +4405,18 @@ ApplicationWindow {
                                         const value = modelData.status === "closed" ? modelData.finished : modelData.started;
                                         if (!value) return "";
                                         const date = new Date(value);
-                                        return isNaN(date.getTime()) ? "" : Qt.formatDateTime(date, "dd/MM/yyyy HH:mm:ss");
+                                        if (isNaN(date.getTime())) return "";
+                                        return modelData.status === "closed" ? Qt.formatDateTime(date, "dd_MM_HH")
+                                                                           : "Início " + Qt.formatDateTime(date, "dd/MM/yyyy HH:mm:ss");
                                     }
-                                    // Keep long names and the intervention date inside narrow catalogue cards.
+                                    // Keep the full reference visible on narrow catalogue cards.
                                     wrapText: true
                                     implicitHeight: Math.max(win.touchHeight, implicitContentHeight + topPadding + bottomPadding)
                                     objectName: "catalogReport_" + modelData.id
                                     width: Math.min(implicitWidth, parent.width)
-                                    text: (modelData.status === "closed" ? "Fechado" : "Rascunho") + " • " + (modelData.identifier || "") + (modelData.dirty ? " · por enviar" : "") +
-                                          (interventionDate ? "\n" + (modelData.status === "closed" ? "Fim " : "Início ") + interventionDate : "")
+                                    text: (modelData.status === "closed" ? ["Fechado", interventionDate].filter(Boolean).join(" ") : "Rascunho")
+                                          + " • " + (modelData.identifier || "") + (modelData.dirty ? " · por enviar" : "")
+                                          + (modelData.status !== "closed" && interventionDate ? "\n" + interventionDate : "")
                                     ToolTip.visible: hovered
                                     ToolTip.text: catalogReportButton.text
                                     enabled: !lem.busy
@@ -4148,6 +4443,7 @@ ApplicationWindow {
             onVisibleChanged: refreshOnEntry()
             onSignedInChanged: refreshOnEntry()
             onUserIdChanged: {
+                win.stationReportOrigin = null;
                 pcveSearch.clear();
                 pcveDetailsDialog.close();
                 if (!userId && win.page === "pcves")
@@ -4160,7 +4456,7 @@ ApplicationWindow {
                 RowLayout {
                     Layout.fillWidth: true
                     UiLabel {
-                        text: "IDs de PCVEs"
+                        text: "PCVEs"
                         font.pixelSize: 23
                         font.bold: true
                         wrapMode: Text.Wrap
@@ -4180,11 +4476,7 @@ ApplicationWindow {
                     visible: win.canManagePcves
                     enabled: !lem.busy
                     Layout.fillWidth: true
-                    onClicked: {
-                        pcveImportDialog.importNotice = "";
-                        pcveImportDialog.importStarted = !!lem.importInfo.station_catalogue;
-                        pcveImportDialog.open();
-                    }
+                    onClicked: pcveImportDialog.start("")
                 }
                 RowLayout {
                     Layout.fillWidth: true
@@ -4320,6 +4612,21 @@ ApplicationWindow {
             id: reportPage
             visible: win.page === "report"
             anchors.fill: parent
+            // Consume the Android key press and release on the same page. Changing
+            // focus on press can let an unhandled release background the activity.
+            readonly property bool handlesSystemBack: win.androidCamera && reportBackShortcut.enabled
+            Keys.onShortcutOverride: event => {
+                if (event.key === Qt.Key_Back && handlesSystemBack)
+                    event.accepted = true;
+            }
+            Keys.onBackPressed: event => { event.accepted = handlesSystemBack; }
+            Keys.onReleased: event => {
+                if (event.key === Qt.Key_Back && handlesSystemBack) {
+                    event.accepted = true;
+                    if (!event.isAutoRepeat)
+                        win.navigateBack();
+                }
+            }
             ChromeBackdrop {}
             ScrollChrome {
                 id: reportChrome
@@ -5243,6 +5550,15 @@ ApplicationWindow {
                             Layout.minimumWidth: 0
                             spacing: 8
                             visible: lem.authenticated && lem.user.role === "admin"
+                            UiButton {
+                                objectName: "manageContractIds"
+                                text: "Gerir IDs do contrato"
+                                enabled: !win.networkActivity && !!contractBox.selectedId
+                                onClicked: {
+                                    contractIdsDialog.contractId = contractBox.selectedId;
+                                    contractIdsDialog.open();
+                                }
+                            }
                             UiButton {
                                 objectName: "deleteContractButton"
                                 text: "Apagar contrato selecionado"

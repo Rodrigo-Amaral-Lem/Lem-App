@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para desktop
 
-Desktop · Aplicação 0.4.1 · Edição 2.8 · 18 de novembro de 2026
+Desktop · Aplicação 0.5.0 · Edição 2.9 · 19 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-desktop.pdf](manual-utilizador-desktop.pdf).
 
@@ -20,7 +20,7 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. As ações são realizadas com o rato e o teclado. Clique nos botões e utilize a roda do rato ou a barra de deslocação para percorrer o relatório.
 
-Este manual descreve a versão 0.4.1 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
+Este manual descreve a versão 0.5.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
 
@@ -57,6 +57,8 @@ Em **Gestão → Contas e acessos**, selecione a conta de um técnico e escolha 
 
 Utilize o rato para selecionar contratos, carregadores e respostas. Pode introduzir os valores diretamente com o teclado e utilizar a tecla Tab para avançar entre controlos. Confirme sempre o campo ativo antes de escrever.
 
+Em **PCVEs**, os administradores podem escolher **Importar Excel** ou abrir uma ficha e escolher **Editar ficha**.
+
 Pode anexar fotografias, vídeos e uma imagem da assinatura a partir dos ficheiros do computador. Ajuste a largura da janela se os controlos estiverem demasiado juntos.
 
 ## 03 Escolher o contrato e o carregador
@@ -71,15 +73,15 @@ Pode anexar fotografias, vídeos e uma imagem da assinatura a partir dos ficheir
 
 ### Consultar IDs de PCVEs
 
-Abra **PCVEs** para consultar a ficha única usada pelos contratos. Os administradores podem **Importar Excel** e **Editar ficha** neste menu.
+Em **PCVEs**, abra um dos **Relatórios associados**. A seta de regresso volta ao mesmo ponto da ficha. O ID é permanente. Em **Gestão → Contratos → Gerir IDs do contrato**, o administrador pode **Adicionar ou atualizar por Excel**. Os dados ficam na ficha central e nos contratos associados. **Editar** abre a ficha central. **Retirar** conserva a ficha e os relatórios. No cartão, **Fechado 30_03_16** indica 30 de março entre as 16h00 e as 16h59, seguido do nome do relatório.
 
 ### Evitar registos duplicados
 
-Antes de criar uma intervenção, confirme se já existe um rascunho para o trabalho em curso. Uma falha de rede, por si só, não exige a criação de outro relatório.
+Retome o rascunho do trabalho em curso, mesmo que a ligação falhe.
 
 Se surgir **Falha ao criar rascunho**, verifique o armazenamento do dispositivo. Escolha **Voltar à lista** e selecione novamente **Nova intervenção**. A app abre o novo rascunho quando consegue guardá-lo.
 
-O estado **Concluído** no cartão indica que existe pelo menos uma intervenção fechada para esse carregador no contrato selecionado. Não confirma, por si só, que a intervenção que acabou de realizar está entregue. Confirme também o estado de sincronização dentro do relatório; o fecho local pode ainda estar por enviar.
+O cartão **Concluído** indica que esse PCVE tem uma intervenção fechada no contrato. Confirme a entrega no estado de sincronização do próprio relatório.
 
 ## 04 Preencher e navegar no relatório
 

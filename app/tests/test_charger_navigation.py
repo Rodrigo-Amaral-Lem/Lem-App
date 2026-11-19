@@ -74,7 +74,7 @@ def checks():
         )
         assert (
             target({"location": "Local de teste", "postal_code": "1000-001"})
-            == "Local de teste, 1000-001"
+            == ""
         )
         assert (
             target({"address": "Rua A & destination=other #?", "postal_code": "1000-001"})

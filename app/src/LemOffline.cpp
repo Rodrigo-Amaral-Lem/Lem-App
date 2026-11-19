@@ -8,6 +8,7 @@
 // See docs/architecture.md for ordering and failure cases.
 
 #include "Lem.h"
+#include <QRegularExpression>
 #include "Checklist.h"
 #include "SafeStorage.h"
 #include "NetworkSecurity.h"
@@ -570,8 +571,14 @@ void Lem::syncNext(int index, QString notice) {
             emit changed();
             return;
         }
+        // An unsent draft still has its original device snapshot. Local closure
+        // records those three source values before projecting the final answers.
+        QJsonValue identityAtStart = local.value("_station_identity_at_start");
+        if (local["revision"].toInt() == 0 && local["status"] == "draft")
+            identityAtStart = stationIdentity(local["snapshot"].toObject()["charger"].toObject());
         syncRequest("PUT", "/api/reports/" + id,
                     compact({{"charger_id", local["charger_id"]},
+                             {"station_identity_at_start", identityAtStart},
                              {"base_revision", local["revision"]},
                              {"checklist_version", local["template"].toObject()["version"]},
                              {"frozen_history", local["status"] == "closed" && local["template"].toObject()["version"].toInt() == 6 && local["correction"].toObject()["state"] != "editing"},
@@ -849,7 +856,42 @@ void Lem::syncPhotos(int index, QJsonObject r, int photoIndex) {
 // Use the local catalogue for 15 minutes unless explicitly forced.
 // Station revisions are UTC ISO timestamps from the server. Reconcile racing
 // responses before updating the membership projections and the offline station list.
-void Lem::applyStationRecords(const QJsonArray &records, bool complete, QJsonArray *memberships) {
+QJsonArray Lem::currentPcveRows(QJsonArray rows) {
+    // Clean live catalogue rows from older servers and offline caches only.
+    // Closed report snapshots and pending report payloads are separate data.
+    static const QSet<QString> obsolete = {"location", "localização", "localizacao", "local",
+        "nome do local", "site name", "localização / nome do local", "localizacao / nome do local",
+        "site id", "id do site"};
+    static const QRegularExpression lowerCedilla("(?<=[a-zà-öø-ÿ])Ý(?=[aouãõáàâóôú])");
+    static const QRegularExpression upperCedilla("Ý(?=[aouãõáàâóôúAOUÃÕÁÀÂÓÔÚ])");
+    static const QRegularExpression smallCedilla("ý(?=[aouãõáàâóôúAOUÃÕÁÀÂÓÔÚ])");
+    for (qsizetype i = 0; i < rows.size(); ++i) {
+        auto row = rows.at(i).toObject();
+        auto details = row["details"].toObject();
+        const auto previous = details;
+        details.remove("source");
+        for (const auto &key : details.keys()) {
+            QString name = key.startsWith("extra.") ? key.mid(6) : key;
+            if (obsolete.contains(name.replace('_', ' ').simplified().toLower())) details.remove(key);
+        }
+        for (const auto *field : {"address", "region", "manufacturer", "energy_supply"}) {
+            const auto value = details.value(field).toString();
+            if (value.contains(u'Ý') || value.contains(u'ý')) {
+                QString fixed = value;
+                details[field] = fixed.replace(lowerCedilla, "ç").replace(upperCedilla, "Ç").replace(smallCedilla, "ç");
+            }
+        }
+        if (details != previous) {
+            row["details"] = details;
+            rows[i] = row;
+        }
+    }
+    return rows;
+}
+
+void Lem::applyStationRecords(const QJsonArray &incoming, bool complete, QJsonArray *memberships) {
+    const auto records = currentPcveRows(incoming);
+    if (memberships) *memberships = currentPcveRows(*memberships);
     const auto canonical = [](const QJsonObject &row) -> QJsonObject {
         return {{"id", row["station_id"]}, {"external_id", row["external_id"]},
                 {"details", row["details"]}, {"updated", row["station_updated"]}};

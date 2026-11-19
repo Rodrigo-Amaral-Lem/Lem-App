@@ -29,7 +29,7 @@ def drag_past_end(view):
     assert abs(js("activePageScroll.contentY") - initial) < 1
 
 
-def check_end(page, last_name=None):
+def check_end(page):
     js(f'page="{page}"')
     QTest.qWait(160)
     if page == "catalog":
@@ -58,7 +58,9 @@ def check_end(page, last_name=None):
         QTest.qWait(240)
         assert js("pageAtRenderedEnd()")
         if page == "report":
-            last = find_visual(w.contentItem(), last_name)
+            section = values["sections"][int(js("selectedSection"))]
+            last_id = section["items"][-1]["id"]
+            last = find_visual(w.contentItem(), "checkpoint_" + last_id)
             bottom = last.mapToScene(QPoint(0, int(last.height()))).y()
         else:
             bottom = js(
@@ -91,7 +93,7 @@ def checks():
         w.setProperty("autoHideChrome", True)
         js('showFeedback=false;page="report";selectSection(5)')
         QTest.qWait(100)
-        check_end("report", "checkpoint_CARG.06")
+        check_end("report")
         template = copy.deepcopy(values["chargers"][0])
         values["chargers"] = []
         for i in range(30):
@@ -105,7 +107,13 @@ def checks():
         lem.changed.emit()
         check_end("catalog")
         # A single short group, a single ID and an empty catalogue do not scroll at all.
-        index = next(i for i, s in enumerate(values["sections"]) if len(s["items"]) == 1)
+        # Give the short-page case exactly one question, independently of
+        # how many questions the current production checklist has per group.
+        short_section = copy.deepcopy(values["sections"][-1])
+        short_section["items"] = short_section["items"][:1]
+        index = len(values["sections"]) - 1
+        values["sections"][index] = short_section
+        lem.changed.emit()
         js(f'page="report";selectSection({index})')
         QTest.qWait(250)
         js("activePageScroll.returnToBounds()")
@@ -126,7 +134,7 @@ def checks():
         w.setProperty("autoHideChrome", False)
         js('page="report";selectSection(5)')
         QTest.qWait(200)
-        check_end("report", "checkpoint_CARG.06")
+        check_end("report")
         assert not errors, errors
         print("PASS: short/empty pages and desktop; no QML warnings")
         app.exit(0)

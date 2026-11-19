@@ -30,6 +30,22 @@ def stop_scroll():
     QTest.qWait(40)
 
 
+def drag_page(device, start, travel, target):
+    # Flickable can consume several touch events before it moves the content.
+    initial_y = js("pageScrollOffset()")
+    step = max(1, round(travel / 10))
+    QTest.touchEvent(w, device).press(0, start, w).commit()
+    QTest.qWait(30)
+    for distance in range(step, start.y(), step):
+        point = start - QPoint(0, distance)
+        QTest.touchEvent(w, device).move(0, point, w).commit()
+        QTest.qWait(25)
+        scrolled = js("pageScrollOffset()") - initial_y
+        if scrolled > target:
+            return point, scrolled
+    raise AssertionError(("Page did not scroll the requested distance", scrolled, target))
+
+
 def check_page(name, panel_names):
     js(f'page="{name}"')
     QTest.qWait(100)
@@ -153,27 +169,25 @@ def run_checks():
         touch_device = QTest.createTouchDevice()
         view = find_visual(w.contentItem(), "reportScroll")
         start = view.mapToScene(QPoint(int(view.width()) - 5, int(view.height()) - 100)).toPoint()
-        QTest.touchEvent(w, touch_device).press(0, start, w).commit()
-        QTest.qWait(30)
-        for distance in [40, 80, 120, 160, 200]:
-            QTest.touchEvent(w, touch_device).move(0, start - QPoint(0, distance), w).commit()
-            QTest.qWait(25)
-        QTest.touchEvent(w, touch_device).release(0, start - QPoint(0, 200), w).commit()
+        travel = js("chromeTravel")
+        point, _ = drag_page(touch_device, start, travel, travel)
+        QTest.touchEvent(w, touch_device).release(0, point, w).commit()
         wait_for(lambda: js("chromeHidden"))
         stop_scroll()
         print("PASS: touch swipe hides page actions without hiding the main header")
         js("activePageScroll.contentY=0;resetScrollChrome()")
         QTest.qWait(240)
         start = view.mapToScene(QPoint(int(view.width()) - 5, int(view.height()) - 100)).toPoint()
-        QTest.touchEvent(w, touch_device).press(0, start, w).commit()
-        QTest.qWait(30)
-        for distance in [40, 80, 120]:
-            QTest.touchEvent(w, touch_device).move(0, start - QPoint(0, distance), w).commit()
-            QTest.qWait(25)
-        assert 0 < js("chromeProgress") < 1
-        QTest.touchEvent(w, touch_device).move(0, start - QPoint(0, 50), w).commit()
-        wait_for(lambda: not js("chromeHidden"))
-        QTest.touchEvent(w, touch_device).release(0, start - QPoint(0, 50), w).commit()
+        # Reverse the same touch while the bar is only partially hidden.
+        initial_y = js("pageScrollOffset()")
+        point, scrolled = drag_page(touch_device, start, travel, travel / 2)
+        collapsed = js("chromeProgress")
+        assert 0 < collapsed < 1, (scrolled, travel, collapsed)
+        reverse = point + QPoint(0, round(scrolled / 2))
+        QTest.touchEvent(w, touch_device).move(0, reverse, w).commit()
+        wait_for(lambda: collapsed < js("chromeProgress") < 1)
+        assert 0 < js("pageScrollOffset()") - initial_y < scrolled
+        QTest.touchEvent(w, touch_device).release(0, reverse, w).commit()
         stop_scroll()
         print("PASS: finger reversal smoothly reverses an in-progress collapse")
         check_page("report", ["reportChrome"])

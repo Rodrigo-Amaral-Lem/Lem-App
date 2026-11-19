@@ -13,6 +13,18 @@
 #include <utility>
 #define CHECK(x) do { if (!(x)) {qCritical()<<"FAIL"<<__LINE__<<#x; return false;} } while(false)
 struct LemReviewTest {
+    static bool cachedPcveFields() {
+        const QJsonObject legacy{{"address", "CALIÝOS, EstaÝão"}, {"serial", "Ý001"},
+                                 {"location", "Local antigo"}, {"site_id", "Outro"},
+                                 {"extra.Nome do local", "Legado"}, {"source", QJsonObject{{"Morada", "Antiga"}}}};
+        const QJsonObject row{{"external_id", "ID-Ý01"}, {"details", legacy}};
+        const auto cleaned = Lem::currentPcveRows(QJsonArray{row}).at(0).toObject();
+        const auto details = cleaned["details"].toObject();
+        CHECK(cleaned["external_id"] == "ID-Ý01" && details["serial"] == "Ý001");
+        CHECK(details["address"] == "CALIÇOS, Estação" && details.size() == 2);
+        return true;
+    }
+
     static bool waitUntil(const std::function<bool()> &done) {
         QElapsedTimer elapsed;
         elapsed.start();
@@ -39,7 +51,51 @@ struct LemReviewTest {
         return {};
     }
 
-    // Run against the disposable API fixture with real Windows HTTP and Excel.
+    // Start from the device cache and close before the first upload. Another client
+    // imports the same station in the meantime, while the original answer stays untouched.
+    static bool closedOffline(Lem &manager, const QString &server, const QString &file,
+                              const QString &contract, const QString &externalId) {
+        QTemporaryDir root;
+        Lem field(root.path());
+        field.setServer(server);
+        field.login("pcve-admin@example.invalid", qEnvironmentVariable("LEM_TEST_CATALOGUE_PASSWORD"));
+        CHECK(waitUntil([&] { return field.authenticated() && !field.refreshing(); }));
+        field.selectContract(contract);
+        CHECK(waitUntil([&] { return !field.refreshing() && !membership(field, contract, externalId).isEmpty(); }));
+        const auto charger = membership(field, contract, externalId);
+        const auto original = charger["details"].toObject()["model"].toString();
+        const auto token = std::exchange(field.m_token, QString{});
+        CHECK(field.openReport(charger["id"].toString()));
+        for (const auto &section : field.sections())
+            for (const auto &item : section.toMap()["items"].toList()) {
+                const auto key = item.toMap()["id"].toString();
+                if (key != "EST.03")
+                    field.answer(key, "NA", "Sem ensaio");
+            }
+        CHECK(addTestSignature(field));
+        field.finish();
+        CHECK(field.m_current["status"] == "closed" && field.m_current["revision"] == 0);
+
+        manager.analyseStationExcel(QUrl::fromLocalFile(file));
+        CHECK(waitUntil([&] { return !manager.busy() && manager.m_importInfo["station_catalogue"].toBool(); }));
+        manager.previewStationExcel("Manual", 1, {{"external_id", "ID"}, {"model", "Modelo"}});
+        CHECK(waitUntil([&] { return !manager.busy() && manager.m_preview["count"] == 2; }));
+        manager.commitExcel();
+        CHECK(waitUntil([&] { return !manager.busy() && station(manager, externalId)["details"].toObject()["model"] == "Imported model"; }));
+        CHECK(original != "Imported model");
+        field.m_token = token;
+        field.sync();
+        CHECK(waitUntil([&] { return !field.syncing() && !field.m_current["dirty"].toBool(); }));
+        CHECK(field.m_current["status"] == "closed" && field.m_current["revision"].toInt() >= 2);
+        CHECK(field.m_current["snapshot"].toObject()["charger"].toObject()["model"] == original);
+        manager.refreshStations();
+        CHECK(waitUntil([&] { return !manager.stationCatalogueLoading(); }));
+        CHECK(station(manager, externalId)["details"].toObject()["model"] == "Imported model");
+        qInfo() << "PASS: report closed offline kept its opening model, and first sync preserved the later Excel update";
+        return true;
+    }
+
+    // Run against the disposable API fixture with real native HTTP and Excel.
     static bool live(Lem &c, const QString &server, const QString &file) {
         const QString shared = "PCVE-DEMO-001";
         const QString created = "PCVE-DESKTOP-NEW-901";
@@ -70,7 +126,7 @@ struct LemReviewTest {
         CHECK(firstMembership["station_id"] == central["id"] && secondMembership["station_id"] == central["id"]);
         CHECK(firstMembership["id"] != secondMembership["id"]);
         CHECK(c.openReport(secondMembership["id"].toString(), ""));
-        const auto snapshot = c.m_current["snapshot"];
+        const auto snapshot = c.m_current.value("snapshot");
 
         c.analyseStationExcel(QUrl::fromLocalFile(file));
         CHECK(waitUntil([&] { return !c.busy() && c.m_importInfo["station_catalogue"].toBool(); }));
@@ -108,17 +164,41 @@ struct LemReviewTest {
         CHECK(restored.stationCatalogueLoaded() && !restored.authenticated());
         CHECK(station(restored, shared) == updated && !station(restored, created).isEmpty());
         CHECK(membership(restored, second, shared)["details"] == updated["details"]);
+        // Simulate a second session deleting the selected row between listing
+        // and opening it. The still-cached previous draft must keep its answers.
+        const auto removed = qEnvironmentVariable("LEM_TEST_REMOVED_REPORT");
+        if (!removed.isEmpty()) {
+            const auto previousId = c.m_current["id"].toString();
+            const auto original = c.m_reports.value(previousId).toObject().value("payload");
+            CHECK(c.openReport({}, removed));
+            CHECK(c.m_current.isEmpty());
+            CHECK(waitUntil([&] { return !c.busy(); }));
+            CHECK(c.message().contains("já não está disponível") && c.m_current.isEmpty());
+            c.answer("SEG.01", "OK", {});
+            CHECK(c.m_reports[previousId].toObject()["payload"] == original);
+            qInfo() << "PASS: selected deleted report never became editable and previous answers were preserved";
+        }
         qInfo() << "PASS: desktop Excel and edits over HTTP, canonical cache across contracts, stale conflict and offline checkpoint";
-        return true;
+        return closedOffline(c, server, file, second, shared);
     }
 
     static bool run(Lem &c, const QString &root) {
         c.demo();
+        const auto legacyReportId = c.m_current["id"].toString();
         auto primary=c.m_chargers[0].toObject(); primary["station_id"]="physical-station";
         c.m_chargers[0]=primary; c.m_catalogues[c.m_contract]=c.m_chargers;
         auto other=primary;other["id"]="another-membership";other["contract_id"]="other-contract";
         c.m_catalogues["other-contract"]=QJsonArray{other};
         c.openReport("demo-charger");
+        c.loadStationReports("physical-station");
+        const auto localHistory = c.m_stationReports["rows"].toArray();
+        QSet<QString> reportIds;
+        for (const auto &entry : localHistory) reportIds.insert(entry.toObject()["id"].toString());
+        // demo() created the first report before the fixture gained a station UUID.
+        CHECK(localHistory.size() == 2 && reportIds.contains(legacyReportId) &&
+              reportIds.contains(c.m_current["id"].toString()));
+        c.loadStationReports("unrelated-station");
+        CHECK(c.m_stationReports["rows"].toArray().isEmpty());
         auto a=c.m_current["payload"].toObject()["answers"].toObject();
         CHECK(a["EST.02"].toObject()["value"]=="Exemplo");
         CHECK(a["EST.03"].toObject()["value"]=="DC 60 kW");
@@ -190,12 +270,13 @@ int main(int argc, char **argv) {
     if (!root.isValid()) return 1;
     const auto args = app.arguments();
     const bool live = args.size() == 4 && args[1] == "--live-catalogue";
-    app.setApplicationVersion(live ? "0.4.1" : "0.1.55");
+    app.setApplicationVersion(live ? "0.5.0" : "0.1.55");
     if (live) {
         app.setOrganizationName("LemStationTest");
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, root.path());
     }
+    if (!LemReviewTest::cachedPcveFields()) return 1;
     Lem controller(root.path());
     const bool passed = live ? LemReviewTest::live(controller, args[2], args[3])
                              : LemReviewTest::run(controller, root.path());

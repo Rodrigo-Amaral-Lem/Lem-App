@@ -31,6 +31,11 @@ bool hasGroup(QJsonObject report, const QString &scope) {
 }
 }
 
+QJsonObject Lem::stationIdentity(const QJsonObject &details) {
+    return {{"manufacturer", details["manufacturer"].toString()}, {"model", details["model"].toString()},
+            {"serial", details["serial"].toString()}};
+}
+
 // Update cached catalogue projections, never the frozen snapshots of other reports.
 void Lem::applyClosedIdentity(const QJsonObject &report) {
     if (report["status"] != "closed") return;

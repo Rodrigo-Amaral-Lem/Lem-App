@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para Android
 
-Android · Aplicação 0.4.1 · Edição 2.8 · 18 de novembro de 2026
+Android · Aplicação 0.5.0 · Edição 2.9 · 19 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-android.pdf](manual-utilizador-android.pdf).
 
@@ -20,7 +20,7 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. Utilize o toque para selecionar opções e deslize o dedo para percorrer as perguntas. O botão de retrocesso do sistema permite regressar ao ecrã anterior quando aplicável.
 
-Este manual descreve a versão 0.4.1 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. As capturas mostram a app num emulador Android, em orientação vertical.
+Este manual descreve a versão 0.5.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. As capturas mostram a app num emulador Android, em orientação vertical.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
 
@@ -63,17 +63,17 @@ Em **Gestão → Contas e acessos**, selecione a conta de um técnico e escolha 
 
 4. **Abra a intervenção.** Toque em **Nova intervenção** ou no **Rascunho** que pretende continuar. Deslize verticalmente para consultar os restantes carregadores.
 
-### Consultar IDs de PCVEs
+### Consultar PCVEs
 
-Abra **IDs de PCVEs** no menu. A lista reúne os IDs dos contratos a que tem acesso e cada PCVE aparece uma só vez. Toque num ID para ver a ficha usada nos contratos e os dados do último Excel importado. Use **Atualizar** para guardar a lista no dispositivo e consultá-la sem rede.
+Em **PCVEs**, abra a ficha e escolha um dos **Relatórios associados**. **Voltar** regressa ao mesmo ponto da ficha. **Atualizar** guarda a ficha para consulta sem rede. Em **Gestão → Contratos → Gerir IDs do contrato**, o administrador pode **Adicionar ou atualizar por Excel**. Os dados ficam na ficha central e nos contratos associados. **Retirar** conserva a ficha e os relatórios. No cartão, **Fechado 30_03_16** indica 30 de março entre as 16h00 e as 16h59, seguido do nome do relatório.
 
 ### Evitar registos duplicados
 
-Antes de criar uma intervenção, confirme se já existe um rascunho para o trabalho em curso. Uma falha de rede, por si só, não exige a criação de outro relatório.
+Retome o rascunho do trabalho em curso, mesmo que a ligação falhe.
 
 Se surgir **Falha ao criar rascunho**, verifique o armazenamento do dispositivo. Escolha **Voltar à lista** e toque novamente em **Nova intervenção**. A app abre o novo rascunho quando consegue guardá-lo.
 
-O estado **Concluído** no cartão indica que existe pelo menos uma intervenção fechada para esse carregador no contrato selecionado. Não confirma, por si só, que a intervenção que acabou de realizar está entregue. Confirme também o estado de sincronização dentro do relatório; o fecho local pode ainda estar por enviar.
+O cartão **Concluído** indica que esse PCVE tem uma intervenção fechada no contrato. Confirme a entrega no estado de sincronização do próprio relatório.
 
 ## 04 Preencher e navegar no relatório
 
