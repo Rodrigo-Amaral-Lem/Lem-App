@@ -13,8 +13,8 @@ Prepare detailed messages and user-executed `git commit -S` commands under the
 ## Prerequisites and kit selection
 
 The project requires CMake **3.25+**, C++17 and Qt **6.12+**, with Core, Gui, Qml, Quick,
-QuickControls2, QuickDialogs2, Network and Concurrent. Build Qt and the application with compatible
-compiler/runtime versions.
+QuickControls2, QuickDialogs2, Network, Concurrent and Svg. The header and static startup screen
+use Qt's SVG image plugin. Build Qt and the application with compatible compiler/runtime versions.
 
 Select the compiler supplied for your Qt kit. Check its `mkspecs/qconfig.pri` metadata rather
 than choosing a compiler from an unrelated Qt installation. In the PowerShell examples, set
@@ -93,9 +93,9 @@ The tool does not download or install dependencies. Missing inputs produce an ac
 | `-Jobs` | Parallel jobs, 1–128; default 4 |
 
 Qt source/build/install paths must be space-free. The Qt build uses Schannel TLS and requires Windows,
-offscreen and JPEG plugins. Configuration markers reject incompatible compiler/Qt/source caches;
-an interrupted matching build resumes when rerun. Existing unknown caches are preserved: select a
-new build directory instead of mixing kits. External static kits are never rebuilt in place.
+offscreen, JPEG and SVG plugins. For a local cache created before Qt SVG was added, select a fresh
+build directory. Configuration markers reject incompatible compiler, Qt and source caches. Rerun
+an interrupted build to resume with the same configuration. External static kits are read-only.
 Only one build can use an output directory at a time. In a deeply nested checkout, a new build uses
 a temporary Windows drive for shorter paths. It records the letter in the output directory so it
 can reopen the same CMake cache. If that drive is occupied, wait until it is free or select a fresh

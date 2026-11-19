@@ -21,7 +21,8 @@ das figuras e a verificação do número de secções no gerador.
 
 As ilustrações mostram dados fictícios. As capturas Android foram obtidas num emulador;
 as da edição desktop mostram a interface desktop. Substitua apenas por capturas da plataforma
-correta e sem dados pessoais. O logótipo vem de `shared/branding/lem-logo.png`.
+correta e sem dados pessoais. A capa usa o mesmo ficheiro `shared/branding/lem-logo-tight.svg`
+que o cabeçalho da aplicação.
 
 ## Gerar os dois PDFs
 

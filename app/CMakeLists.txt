@@ -11,7 +11,7 @@ if(LEM_WINDOWS_STANDALONE AND MSVC)
 endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 QuickDialogs2 Network Concurrent)
+find_package(Qt6 6.12 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 QuickDialogs2 Network Concurrent Svg)
 # App-level response limits do not replace Qt's internal HTTP parser fix.
 # Patched vendor kits may retain 6.12.0: their backport must be verified separately.
 if(Qt6_VERSION VERSION_LESS "6.12.1")
@@ -36,7 +36,8 @@ qt_add_qml_module(Lem
  OUTPUT_DIRECTORY "${QT_QML_OUTPUT_DIRECTORY}/Lem"
  QML_FILES qml/SignatureDialog.qml qml/Main.qml qml/Measurements.js qml/PhotoCropDialog.qml
 )
-qt_add_resources(Lem branding PREFIX /branding BASE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/branding" FILES ../shared/branding/lem-logo.png ../shared/branding/report-logos.json)
+qt_add_resources(Lem branding PREFIX /branding BASE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/branding"
+ FILES ../shared/branding/lem-logo-tight.svg ../shared/branding/report-logos.json)
 qt_add_resources(Lem startup_animations PREFIX /startup BASE "${CMAKE_CURRENT_SOURCE_DIR}/assets/startup"
  FILES
   assets/startup/greeting-0.png
@@ -78,7 +79,9 @@ if(WIN32)
  endif()
 endif()
 qt_add_resources(Lem schema PREFIX / BASE "${CMAKE_CURRENT_SOURCE_DIR}/.." FILES ../shared/checklist-v1.json)
-target_link_libraries(Lem PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Network Qt6::Concurrent)
+target_link_libraries(Lem PRIVATE Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Network Qt6::Concurrent Qt6::Svg)
+# The QML Image decodes the shared logo through Qt's SVG image-format plugin.
+qt_import_plugins(Lem INCLUDE Qt6::QSvgPlugin)
 include(cmake/WindowsStandalone.cmake)
 lem_configure_windows_standalone(Lem)
 if(MSVC)

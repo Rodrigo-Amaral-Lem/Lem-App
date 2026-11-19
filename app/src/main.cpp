@@ -55,12 +55,14 @@ int main(int argc, char **argv) {
 #endif
     bool smoke = app.arguments().contains("--smoke-test");
 #ifdef LEM_WINDOWS_STANDALONE
-    // The isolated release smoke test must prove static TLS and photo plugins exist.
-    if (smoke && (!QSslSocket::availableBackends().contains("schannel")
-                  || !QSslSocket::supportsSsl()
-                  || !QImageReader::supportedImageFormats().contains("jpeg"))) {
-        qCritical() << "Standalone build is missing Schannel TLS or JPEG support.";
-        return 5;
+    // The isolated release smoke test covers TLS, evidence photos and the SVG logo.
+    if (smoke) {
+        const auto imageFormats = QImageReader::supportedImageFormats();
+        if (!QSslSocket::availableBackends().contains("schannel") || !QSslSocket::supportsSsl()
+            || !imageFormats.contains("jpeg") || !imageFormats.contains("svg")) {
+            qCritical() << "Standalone build is missing Schannel TLS, JPEG or SVG support.";
+            return 5;
+        }
     }
 #endif
     QTemporaryDir temp;

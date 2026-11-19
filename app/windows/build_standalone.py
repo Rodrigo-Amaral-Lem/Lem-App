@@ -19,7 +19,8 @@ import threading
 
 APP = Path(__file__).resolve().parents[1]
 DEFAULT_BUILD = Path('build/windows-static')
-MODULES = ('', 'Core', 'Gui', 'Network', 'Concurrent', 'Qml', 'Quick', 'QuickControls2', 'QuickDialogs2', 'ShaderTools')
+MODULES = ('', 'Core', 'Gui', 'Network', 'Concurrent', 'Qml', 'Quick', 'QuickControls2', 'QuickDialogs2', 'ShaderTools', 'Svg')
+SOURCE_MODULES = ('qtbase', 'qtshadertools', 'qtdeclarative', 'qtsvg')
 # The builder runs CMake explicitly before shortening paths. Ninja must use
 # that edited manifest for the whole build. This does not change the cache ABI.
 MANUAL_GENERATION = '-DCMAKE_SUPPRESS_REGENERATION=ON'
@@ -70,7 +71,7 @@ def qt_info(prefix):
 
 def source_version(source):
     config = source / 'qtbase/.cmake.conf'
-    if config.is_file() and all((source / module / 'CMakeLists.txt').is_file() for module in ('qtbase', 'qtdeclarative', 'qtshadertools')) and (source / 'configure.bat').is_file():
+    if config.is_file() and all((source / module / 'CMakeLists.txt').is_file() for module in SOURCE_MODULES) and (source / 'configure.bat').is_file():
         match = re.search(r'set\(QT_REPO_MODULE_VERSION\s+"([^"]+)"', config.read_text(encoding='utf-8'))
         if match:
             return match[1]
@@ -281,7 +282,7 @@ class Builder:
                 break
         if explicit and self.prefix is None and Path(explicit).exists() and any(Path(explicit).iterdir()):
             if not (inside(Path(explicit), self.build) and (self.qt_build / 'lem-static-config.json').is_file()):
-                raise BuildError('QtPrefix is not a complete static x64 Qt 6.12+ kit for this compiler. Shared installer kits cannot produce a single EXE.')
+                raise BuildError('QtPrefix requires a complete static x64 Qt 6.12+ kit for this compiler, including Qt SVG. Shared installer kits cannot produce a single EXE.')
         self.prefix = self.prefix or (Path(explicit).resolve() if explicit else local_prefix)
         if inside(self.build, self.prefix):
             raise BuildError('BuildDirectory cannot be inside the installed static Qt prefix.')
@@ -416,7 +417,7 @@ class Builder:
             if self.build_qt:
                 args = ['-static', '-static-runtime', '-release', '-cmake-generator', 'Ninja', '-platform',
                         'win32-g++' if self.args.compiler == 'MinGW' else 'win32-msvc', '-prefix', str(self.prefix),
-                        '-submodules', 'qtbase,qtshadertools,qtdeclarative', '-nomake', 'tests', '-nomake', 'examples',
+                        '-submodules', ','.join(SOURCE_MODULES), '-nomake', 'tests', '-nomake', 'examples',
                         '-schannel', '-no-openssl', '-no-icu', '-opengl', 'desktop', '-qt-zlib', '-qt-libpng',
                         '-qt-libjpeg', '-qt-pcre', '-qt-freetype', '-qt-harfbuzz', '-qt-doubleconversion',
                         '--', '-DCMAKE_OBJECT_PATH_MAX=180', cmake_path('Python3_EXECUTABLE', sys.executable),
@@ -465,7 +466,7 @@ class Builder:
             shorten_ninja_paths(self.build)
             self.say('[5/6] Build Lem')
             self.run([self.cmake, '--build', self.build, '--target', 'Lem', '--parallel', self.args.jobs])
-            self.say('[6/6] Audit DLL imports and run isolated startup/TLS/JPEG test')
+            self.say('[6/6] Audit DLL imports and run isolated startup/TLS/JPEG/SVG test')
             self.run([sys.executable, APP / 'windows/verify-pe.py', self.build / 'Lem.exe', '--report', self.build / 'dll-imports.json'])
             portable = self.build / 'portable'
             portable.mkdir(exist_ok=True)
