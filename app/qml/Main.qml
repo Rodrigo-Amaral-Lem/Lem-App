@@ -788,6 +788,7 @@ ApplicationWindow {
         property bool destructive: false
         property color selectedColor: win.brandPrimary
         property string symbol: ""
+        property bool wrapText: false
         implicitHeight: win.touchHeight
         padding: 12
         hoverEnabled: true
@@ -795,12 +796,13 @@ ApplicationWindow {
         Accessible.name: text
         contentItem: Item {
             implicitWidth: control.symbol ? 20 : buttonText.implicitWidth
-            implicitHeight: control.symbol ? 20 : buttonText.implicitHeight
+            implicitHeight: control.symbol ? 20 : control.wrapText ? buttonText.contentHeight : buttonText.implicitHeight
             Text {
                 id: buttonText
                 anchors.centerIn: parent
                 width: parent.width
-                elide: Text.ElideRight
+                wrapMode: control.wrapText ? Text.Wrap : Text.NoWrap
+                elide: control.wrapText ? Text.ElideNone : Text.ElideRight
                 visible: !control.symbol
                 text: control.text
                 font: control.font
@@ -1335,6 +1337,12 @@ ApplicationWindow {
             value: "",
             notes: ""
         };
+    }
+    function notesForDisplay(id) {
+        const answer = answerFor(id);
+        if (id === "EST.15" && answer.notes === "Sem POS" && answer.suggested_notes === answer.notes)
+            return "Sem TPM";
+        return answer.notes || "";
     }
     function photosFor(id) {
         return win.reportPhotos[id] || [];
@@ -2181,7 +2189,7 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             UiLabel {
                 Layout.fillWidth: true
-                text: "Após a validação no servidor, esta correção substitui o original. Será usado um novo identificador interno; o nome do PDF/ZIP utiliza a data e hora de fim. Se a ligação falhar, o envio fica pendente e o original é conservado até confirmação."
+                text: "Após a validação no servidor, esta correção substitui o original. Será usado um novo identificador interno. Se a ligação falhar, o envio fica pendente e o original é conservado até confirmação."
                 wrapMode: Text.Wrap
             }
         }
@@ -2233,7 +2241,7 @@ ApplicationWindow {
                 placeholderText: "2026-11-16T11:00:00+00:00"
             }
             UiLabel {
-                text: "Formato: AAAA-MM-DDTHH:mm:ss+00:00. O fuso é +00:00 no inverno e +01:00 no verão em Portugal continental. Z significa +00:00. Alterar apenas o início mantém o nome do PDF/ZIP."
+                text: "Formato: AAAA-MM-DDTHH:mm:ss+00:00. O fuso é +00:00 no inverno e +01:00 no verão em Portugal continental. Z significa +00:00."
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
@@ -3533,13 +3541,23 @@ ApplicationWindow {
                             Repeater {
                                 model: modelData.reports
                                 UiButton {
-                                    implicitHeight: win.touchHeight
+                                    id: catalogReportButton
                                     required property var modelData
+                                    readonly property string interventionDate: {
+                                        const value = modelData.status === "closed" ? modelData.finished : modelData.started;
+                                        if (!value) return "";
+                                        const date = new Date(value);
+                                        return isNaN(date.getTime()) ? "" : Qt.formatDateTime(date, "dd/MM/yyyy HH:mm:ss");
+                                    }
+                                    // Keep long names and the intervention date inside narrow catalogue cards.
+                                    wrapText: true
+                                    implicitHeight: Math.max(win.touchHeight, implicitContentHeight + topPadding + bottomPadding)
                                     objectName: "catalogReport_" + modelData.id
                                     width: Math.min(implicitWidth, parent.width)
-                                    text: (modelData.status === "closed" ? "Fechado" : "Rascunho") + " • " + (modelData.identifier || "") + (modelData.dirty ? " · por enviar" : "")
+                                    text: (modelData.status === "closed" ? "Fechado" : "Rascunho") + " • " + (modelData.identifier || "") + (modelData.dirty ? " · por enviar" : "") +
+                                          (interventionDate ? "\n" + (modelData.status === "closed" ? "Fim " : "Início ") + interventionDate : "")
                                     ToolTip.visible: hovered
-                                    ToolTip.text: modelData.identifier || ""
+                                    ToolTip.text: catalogReportButton.text
                                     enabled: !lem.busy
                                     onClicked: {
                                         win.openCatalogReport("", modelData.id);
@@ -4146,7 +4164,7 @@ ApplicationWindow {
                                                     placeholderText: (itemCard.answerValue === "NOK" || win.answerFor(itemCard.modelData.id).assessment === "NOK") ? "Descreva a não conformidade" : itemCard.notesRequired ? "Indique o motivo de N/A" : "Observações"
                                                     wrapMode: TextEdit.Wrap
                                                     visible: win.editing && !itemCard.modelData.notes_disabled && (itemCard.modelData.kind === "notes" || itemCard.modelData.notes_visible || itemCard.noteExpanded || itemCard.notesRequired || text.length > 0)
-                                                    text: win.answerFor(itemCard.modelData.id).notes || ""
+                                                    text: win.notesForDisplay(itemCard.modelData.id)
                                                     enabled: !lem.busy
                                                     selectByMouse: true
                                                     Accessible.name: itemCard.modelData.id + ", observações"
@@ -4166,7 +4184,7 @@ ApplicationWindow {
                                                 }
                                                 UiLabel {
                                                     visible: !win.editing && !!win.answerFor(itemCard.modelData.id).notes
-                                                    text: win.answerFor(itemCard.modelData.id).notes || "" || ""
+                                                    text: win.notesForDisplay(itemCard.modelData.id)
                                                     wrapMode: Text.Wrap
                                                     Layout.fillWidth: true
                                                 }

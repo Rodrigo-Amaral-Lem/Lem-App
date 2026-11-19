@@ -72,8 +72,8 @@ int main(int argc,char **argv) {
     const auto answer = [&client](const QString &key) {
         return QJsonObject::fromVariantMap(client.current()["payload"].toMap()["answers"].toMap()[key].toMap());
     };
-    client.answer("EST.15", "NA", ""); CHECK(answer("EST.15")["notes"] == "Sem POS");
-    client.answer("EST.15", "OK", "Sem POS"); CHECK(answer("EST.15")["notes"] == "");
+    client.answer("EST.15", "NA", ""); CHECK(answer("EST.15")["notes"] == "Sem TPM");
+    client.answer("EST.15", "OK", "Sem TPM"); CHECK(answer("EST.15")["notes"] == "");
     client.answer("EST.15", "NA", ""); client.beginNotesEdit("EST.15");
     CHECK(answer("EST.15")["notes"] == "" && !answer("EST.15").contains("suggested_notes"));
     client.answer("EST.15", "NA", "Sem POS"); // Identical wording, now authored by the technician.

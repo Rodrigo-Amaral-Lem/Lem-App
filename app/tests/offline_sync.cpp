@@ -1282,6 +1282,7 @@ int main(int argc, char **argv) {
     administrator.openReport(charger, sharedId); CHECK(settled(administrator));
     CHECK(administrator.current()["status"] == "closed");
     const auto originalOwner = administrator.current()["owner_id"];
+    const auto originalIdentifier = administrator.current()["identifier"];
     const auto originalPhotoCount = administrator.current()["photos"].toList().size();
     const auto originalPayload = LemReviewTest::persistedReport(administrator, sharedId).value("payload");
     CHECK(originalPayload.isObject());
@@ -1359,7 +1360,7 @@ int main(int argc, char **argv) {
     CHECK(administrator.current()["correction"].toMap()["state"] == "committed");
     CHECK(administrator.current()["owner_id"] == originalOwner);
     CHECK(administrator.current()["photos"].toList().size() == originalPhotoCount + 1);
-    CHECK(administrator.current()["identifier"].toString().contains("2026-10-01_11-30-12"));
+    CHECK(administrator.current()["identifier"] == originalIdentifier);
     CHECK(administrator.current()["payload"].toMap()["started"] == "2026-10-01T08:00:00Z");
     CHECK(administrator.current()["payload"].toMap()["finished"] == "2026-10-01T10:30:12Z");
     // Commit acknowledgement was lost. Recovery must install the shared identity,

@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para Android
 
-Android · Aplicação 0.4.1 · Edição 2.6 · 18 de novembro de 2026
+Android · Aplicação 0.4.1 · Edição 2.7 · 18 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-android.pdf](manual-utilizador-android.pdf).
 
@@ -299,6 +299,8 @@ A limpeza não apaga os originais da galeria nem as evidências do servidor. Tra
 | PDF | Relatório para leitura e impressão, com os resultados e as evidências apresentadas no documento. Os vídeos não são reproduzidos no PDF. |
 | ZIP | Inclui o PDF, os dados do relatório e as fotografias/vídeos originais organizados por pergunta. Utilize-o quando a entrega exigir os ficheiros originais. |
 
+O nome dos ficheiros junta o ID do carregador e o nome do contrato no formato **ID_Contrato**. Fotografias e vídeos acrescentam o seu identificador. As datas constam do relatório.
+
 **PDF e ZIP sem rede:** são gerados no dispositivo se o relatório estiver fechado e tiver todas as evidências locais. Se faltarem ficheiros, a exportação usa o servidor e exige ligação, sessão iniciada e relatório sincronizado. Exportar localmente não sincroniza o relatório. Confirme o conteúdo antes de o entregar.
 
 **Exportação de um contrato inteiro:** está disponível na app para desktop Windows/Linux. No Android, exporte cada report pelo respetivo menu.
@@ -364,7 +366,7 @@ Ao selecionar N/A com a observação vazia, a app sugere os motivos abaixo. Conf
 | QVE.10 | QVE sem sinalética |
 | MAN.20 | Apertos não verificados devido a veículo em carga |
 | Cada ensaio CARG.01 de conector | Veículo usado não compatível |
-| EST.15 | Sem POS |
+| EST.15 | Sem TPM |
 
 ### Verificação antes de sair do local
 
@@ -459,7 +461,7 @@ Esta referência abrange todos os campos do formulário atual. A secção 5 deta
 | **EST.12** — Verifique o estado físico dos componentes do carregador (conectores, suportes, ecrã, etc.) | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia opcional. |
 | **EST.13** — Verifique se o tarifário está visível e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia obrigatória quando aplicável. |
 | **EST.14** — Verifique se o ecrã funciona corretamente | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia opcional. |
-| **EST.15** — Verifique se o terminal de pagamento (POS) está instalado e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação obrigatória; sugestão «Sem POS». Fotografia opcional. |
+| **EST.15** — Verifique se o terminal de pagamento (TPM) está instalado e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação obrigatória com a sugestão «Sem TPM». Fotografia opcional. |
 | **EST.16** — Verifique se os autocolantes da DGEG estão visíveis e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia obrigatória quando aplicável. |
 | **EST.17** — Verifique se todo o hardware da estação de carregamento está a funcionar corretamente | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia opcional. |
 | **EST.18** — Observações gerais do equipamento | Observações, fotografias e vídeos opcionais. Pode ficar vazio. | Sem OK/NOK/N/A. |

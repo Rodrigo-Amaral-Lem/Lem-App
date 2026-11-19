@@ -829,10 +829,13 @@ QVariantList Lem::buildChargerRows() const {
     QHash<QString, QJsonArray> localReports;
     for (auto value : m_reports) {
         const auto r = value.toObject();
+        const auto payload = r["payload"].toObject();
         localReports[r["charger_id"].toString()].append(QJsonObject{{"id", r["id"]},
                                                                     {"status", r["status"]},
                                                                     {"owner_id", r["owner_id"]},
                                                                     {"identifier", ReportNaming::identifier(r)},
+                                                                    {"started", payload["started"].toString(r["started"].toString())},
+                                                                    {"finished", payload["finished"].toString(r["finished"].toString())},
                                                                     {"dirty", r["dirty"]}, {"revision", r["revision"]}});
     }
     QJsonArray out;
@@ -856,8 +859,17 @@ QVariantList Lem::buildChargerRows() const {
                     summary["owner_id"] = r["owner_id"];
                     summary["revision"] = r["revision"];
                     summary["identifier"] = r["identifier"];
+                    summary["started"] = r["started"];
+                    summary["finished"] = r["finished"];
                 }
-                if (summary["identifier"].toString().isEmpty()) summary["identifier"] = r["identifier"];
+                if (!summary.contains("finished")) {
+                    // Cached summaries from older clients lack separate dates.
+                    // Use the local report's frozen context when it is available.
+                    summary["identifier"] = r["identifier"];
+                    summary["started"] = r["started"];
+                    summary["finished"] = r["finished"];
+                } else if (summary["identifier"].toString().isEmpty())
+                    summary["identifier"] = r["identifier"];
                 summary["dirty"] = r["dirty"];
                 reports[positions[id]] = summary;
             } else {
@@ -865,10 +877,11 @@ QVariantList Lem::buildChargerRows() const {
                 reports.append(r);
             }
         }
-        // Older catalogues may not yet carry the public identifier.
+        // Summary-only caches from before the change can still hold the old
+        // dated name. Use their catalogue context until the report is received.
         for (int i = 0; i < reports.size(); ++i) {
             auto summary = reports[i].toObject();
-            if (summary["identifier"].toString().isEmpty()) {
+            if (!summary.contains("finished") || summary["identifier"].toString().isEmpty()) {
                 auto context = summary;
                 context["snapshot"] = QJsonObject{{"charger", QJsonObject{{"external_id", c["external_id"]}}},
                                                   {"contract", QJsonObject{{"name", contractName}}}};
@@ -1023,8 +1036,13 @@ void Lem::answer(QString key, QString value, QString notes) {
     const bool valueChanged = previous["value"].toString() != value;
     const bool wasNA = Measurements::notApplicable(previous["value"].toString());
     const bool isNA = Measurements::notApplicable(value);
+    const auto previousNotes = previous["notes"].toString();
+    // The editor displays TPM for an old untouched suggestion. Treat that
+    // display alias as the old note during a status action, so it can clear.
+    if (key == "EST.15" && MaintenanceRules::untouched(previous) && notes == Checklist::paymentNote(previousNotes))
+        notes = previousNotes;
     // Provenance, not wording alone, identifies a removable automatic note.
-    if (notes != previous["notes"].toString()) nextAnswer.remove("suggested_notes");
+    if (notes != previousNotes) nextAnswer.remove("suggested_notes");
     nextAnswer["notes"] = notes;
     if (valueChanged && (wasNA || isNA || value.isEmpty() || previous["value"] == "OK" || previous["value"] == "NOK"))
         MaintenanceRules::clearSuggestion(nextAnswer);
@@ -1686,7 +1704,7 @@ bool Lem::setCorrectionTimes(QString started, QString finished) {
     if (!checkpointReport(corrected, "Não foi possível guardar as datas. As datas anteriores foram conservadas. Tente novamente após verificar o armazenamento."))
         return false;
     m_current = corrected;
-    status("Datas da correção guardadas. O nome do PDF/ZIP utiliza a data e hora de fim.");
+    status("Datas da correção guardadas.");
     return true;
 }
 
@@ -2188,8 +2206,8 @@ void Lem::completeContractExportItem(QString id, QString name, QString staged, Q
     if (job->cancelled) { finishContractExport(); return; }
     QString relative = name + (job->kind == "pdf" ? ".pdf" : ".zip");
     if (error.isEmpty()) {
-        // Preserve the required public filename even for two reports with the
-        // same charger/end time. A collision gets its own internal-ID subfolder.
+        // Reports for the same charger and contract share a public filename.
+        // A collision gets its own internal-ID subfolder.
         if (QFileInfo::exists(QDir(job->directory).filePath(relative))) {
             const auto folder = "report-" + id;
             if (!SafeStorage::component(id) || !QDir(job->directory).mkdir(folder)) error = "Nome de exportação já existente.";

@@ -140,10 +140,10 @@ contract, it retains a suspension marker with the local answers and evidence, in
 Other contracts continue synchronizing. The report displays the reason; after administrative recovery,
 refresh/synchronize the contract list to lift the suspension and send the preserved work.
 
-Reports and their PDF/ZIP exports use `ChargerID_YYYY-MM-DD_HH-mm-ss_Contract`; the time is the
-completion time in Lisbon. The PDF inside the ZIP has the same name. Spaces and characters that
-cannot appear in filenames become hyphens. Drafts show `Rascunho` until closure; older closed
-records without a completion timestamp show `sem-data_sem-hora`.
+Drafts, closed reports and PDF/ZIP exports use `ID_Contrato`. The PDF and JSON inside the
+ZIP share that name, and the original evidence filenames include the same prefix plus the
+evidence ID. Spaces and characters that cannot appear in filenames become hyphens. Intervention
+dates appear separately in the catalogue and inside the report.
 
 On Windows/Linux desktop, **Contratos → Exportar todos os PDFs… / Exportar todos os ZIPs…**
 exports one file per closed report into a new folder under the chosen destination. A session and
@@ -192,8 +192,8 @@ cancellation do not update the record. If another intervention changed the same 
 the server rejects the conflicting correction and preserves both reports; review the current
 charger data before resolving it. Unchanged fields and other historical reports are preserved.
 
-The corrected report gets a new internal ID. The PDF/ZIP name continues to use the finish date/time;
-changing only the start does not change that filename. Previously exported files are unchanged.
+The corrected report gets a new internal ID. The changed dates appear in its PDF and JSON.
+The export filename uses the charger ID and contract name.
 
 N/A suggestions are editable and apply only when entering N/A with empty notes. Existing notes
 are preserved. See the report contract for all required-note items. FIN.02 hides general media
@@ -206,7 +206,8 @@ MAN.12 and MAN.18 recalculate from MAN.11 using the boundaries in the shared rep
 A migrated ambiguous reading shows its previous text and needs confirmation. Untouched suggested
 observations clear on state change or when entering the notes editor; custom text survives.
 EST.01 records before views/cleanliness; MAN.21 after views/cleanliness; general notes are MAN.22.
-EST.10 is removed, EST.13 only checks tariff and EST.16 only DGEG stickers. EST.15 N/A suggests Sem POS.
+EST.10 is removed, EST.13 only checks tariff and EST.16 only DGEG stickers. EST.15 checks the payment
+terminal (TPM) and suggests `Sem TPM` for N/A.
 
 The photo editor uses two 48-pixel icon-only controls: clockwise rotation and crop. Crop is optional
 and its selected background shows whether it is active. Both icons are drawn, independent of fonts.

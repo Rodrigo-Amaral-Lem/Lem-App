@@ -2,11 +2,8 @@
 // Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
 
 #pragma once
-#include <QDateTime>
 #include <QJsonObject>
 #include <QRegularExpression>
-#include <QStringList>
-#include <QTimeZone>
 
 // Public names are derived from frozen context; UUIDs still address stored reports.
 namespace ReportNaming {
@@ -27,14 +24,13 @@ inline QString identifier(const QJsonObject &report) {
     const auto snapshot = report["snapshot"].toObject();
     const auto charger = component(snapshot["charger"].toObject()["external_id"].toString(), "Carregador", 72);
     const auto contract = component(snapshot["contract"].toObject()["name"].toString(), "Contrato", 112);
-    if (report["status"] != "closed") return charger + "_Rascunho_" + contract;
-    QString stamp = "sem-data_sem-hora";
-    for (const auto &value : QStringList{report["finished"].toString(), report["payload"].toObject()["finished"].toString()}) {
-        const auto date = QDateTime::fromString(value, Qt::ISODateWithMs);
-        if (!date.isValid() || date.timeSpec() == Qt::LocalTime) continue;
-        stamp = date.toTimeZone(QTimeZone("Europe/Lisbon")).toString("yyyy-MM-dd_HH-mm-ss");
-        break;
-    }
-    return charger + "_" + stamp + "_" + contract;
+    return charger + "_" + contract;
+}
+
+inline QString evidenceFilename(const QString &identifier, const QString &id, const QString &extension) {
+    // UUIDs distinguish originals from the same checkpoint. Keep legacy longer
+    // evidence IDs intact and bound the name for filesystem extraction.
+    const auto suffix = "_" + id + "." + extension;
+    return component(identifier, "Report", qMax(qsizetype(1), 250 - suffix.toUtf8().size())) + suffix;
 }
 }

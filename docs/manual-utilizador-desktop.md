@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para desktop
 
-Desktop · Aplicação 0.4.1 · Edição 2.6 · 18 de novembro de 2026
+Desktop · Aplicação 0.4.1 · Edição 2.7 · 18 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-desktop.pdf](manual-utilizador-desktop.pdf).
 
@@ -299,6 +299,8 @@ A limpeza não apaga os originais da galeria nem as evidências do servidor. Tra
 | PDF | Relatório para leitura e impressão, com os resultados e as evidências apresentadas no documento. Os vídeos não são reproduzidos no PDF. |
 | ZIP | Inclui o PDF, os dados do relatório e as fotografias/vídeos originais organizados por pergunta. Utilize-o quando a entrega exigir os ficheiros originais. |
 
+O nome dos ficheiros junta o ID do carregador e o nome do contrato no formato **ID_Contrato**. Fotografias e vídeos acrescentam o seu identificador.
+
 **PDF e ZIP sem rede:** são gerados no dispositivo se o relatório estiver fechado e tiver todas as evidências locais. Se faltarem ficheiros, a exportação usa o servidor e exige ligação, sessão iniciada e relatório sincronizado. Exportar localmente não sincroniza o relatório. Confirme o conteúdo antes de o entregar.
 
 ### Exportar todos os reports fechados de um contrato
@@ -327,7 +329,7 @@ Nos formulários muito antigos, os códigos podiam ter outros significados. A se
 
 Se alterar fabricante/marca (EST.02), modelo (EST.03) ou número de série (EST.04), a correção aceite também atualiza a ficha do carregador nos contratos que partilham o equipamento. O servidor compara cada campo alterado com o valor que a ficha tinha ao abrir a cópia. Se o campo tiver mudado entretanto para outro valor, o envio indica o conflito e conserva os dois relatórios. Para voltar a verificar uma correção pendente por este motivo, escolha **Sincronizar**.
 
-A correção recebe um novo identificador interno. O nome do PDF/ZIP usa a data e hora de fim; alterar apenas o início não muda esse nome. Ficheiros já exportados não são alterados.
+A correção recebe um novo identificador interno. As datas corrigidas constam do relatório.
 
 ### Criar uma nova intervenção a partir de outra
 
@@ -382,7 +384,7 @@ Ao selecionar N/A com a observação vazia, a app sugere os motivos abaixo. Conf
 | QVE.10 | QVE sem sinalética |
 | MAN.20 | Apertos não verificados devido a veículo em carga |
 | Cada ensaio CARG.01 de conector | Veículo usado não compatível |
-| EST.15 | Sem POS |
+| EST.15 | Sem TPM |
 
 ### Verificação antes de entregar o relatório
 
@@ -477,7 +479,7 @@ Esta referência abrange todos os campos do formulário atual. A secção 5 deta
 | **EST.12** — Verifique o estado físico dos componentes do carregador (conectores, suportes, ecrã, etc.) | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia opcional. |
 | **EST.13** — Verifique se o tarifário está visível e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia obrigatória quando aplicável. |
 | **EST.14** — Verifique se o ecrã funciona corretamente | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia opcional. |
-| **EST.15** — Verifique se o terminal de pagamento (POS) está instalado e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação obrigatória; sugestão «Sem POS». Fotografia opcional. |
+| **EST.15** — Verifique se o terminal de pagamento (TPM) está instalado e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação obrigatória com a sugestão «Sem TPM». Fotografia opcional. |
 | **EST.16** — Verifique se os autocolantes da DGEG estão visíveis e em boas condições | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia obrigatória quando aplicável. |
 | **EST.17** — Verifique se todo o hardware da estação de carregamento está a funcionar corretamente | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia opcional. |
 | **EST.18** — Observações gerais do equipamento | Observações, fotografias e vídeos opcionais. Pode ficar vazio. | Sem OK/NOK/N/A. |

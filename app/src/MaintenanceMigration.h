@@ -81,7 +81,11 @@ inline QJsonObject report(QJsonObject result) {
             if (key == "EST.01") item["label"] = QStringLiteral("Fotografias do interior e exterior do carregador e sua limpeza antes da tarefa executada (visualizar todos os componentes internos e externos)");
             if (key == "EST.13") item["label"] = QStringLiteral("Verifique se o tarifário está visível e em boas condições");
             if (key == "EST.16") item["label"] = QStringLiteral("Verifique se os autocolantes da DGEG estão visíveis e em boas condições");
-            if (key == "EST.15") { item["na_notes_default"] = "Sem POS"; item["na_notes_required"] = true; }
+            if (key == "EST.15") {
+                item["label"] = item["label"].toString().replace("(POS)", "(TPM)");
+                item["na_notes_default"] = "Sem TPM";
+                item["na_notes_required"] = true;
+            }
             if (key == "MAN.11" || key == "MAN.12") {
                 item["measurement_unit"] = "mA"; item["measurement_digits"] = 6; item["measurement_decimals"] = 0;
                 item["help"] = QStringLiteral("1 A = 1000 mA · 0,03 A = 30 mA");

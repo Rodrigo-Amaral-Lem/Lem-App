@@ -22,5 +22,8 @@ int main(int argc, char **argv) {
     const auto emoji = QString::fromUtf8("🚗");
     const auto bounded = ReportNaming::component(emoji.repeated(100), "fallback", 73);
     if (bounded != emoji.repeated(18) || bounded.toUtf8().size() > 73) return 3;
-    qInfo() << "PASS: report names, Lisbon dates, offline closure, safe UTF-8 filenames";
+    const QString id(128, 'a');
+    const auto evidence = ReportNaming::evidenceFilename(emoji.repeated(100), id, "jpg");
+    if (!evidence.endsWith("_" + id + ".jpg") || evidence.toUtf8().size() > 250) return 1;
+    qInfo() << "PASS: report names without dates, offline closure, and bounded UTF-8 evidence names";
 }

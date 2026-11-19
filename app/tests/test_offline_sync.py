@@ -219,7 +219,7 @@ def delete_ack_stats():
                         direct = PdfReader(branding_output / (name + '.pdf'))
                         assert 'CSMTEC' in direct.pages[0].extract_text()
                         with ZipFile(branding_output / (name + '.zip')) as archive:
-                            report = json.loads(archive.read('report.json'))
+                            report = json.loads(archive.read(next(name for name in archive.namelist() if name.endswith(".json"))))
                             assert report['presentation']['issuer'] == 'CSMTEC'
                             bundled = PdfReader(BytesIO(archive.read(report['identifier'] + '.pdf')))
                             assert 'CSMTEC' in bundled.pages[0].extract_text()

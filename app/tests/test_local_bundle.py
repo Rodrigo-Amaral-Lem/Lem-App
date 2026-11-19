@@ -36,16 +36,16 @@ with TemporaryDirectory(prefix='bundle-native-') as folder:
     result = run(); assert result.returncode == 0, result.stderr
     with ZipFile(destination) as z:
         assert z.testzip() is None
-        doc = json.loads(z.read('report.json'))
+        identifier = "PC-001_Contrato_Évora"
+        doc = json.loads(z.read(identifier + ".json"))
         assert doc['sync_pending'] and doc['owner_id']=='technician' and doc['revision']==0
         assert '_conflict_remote' not in doc and '_inflight_payload' not in doc
         assert all('path' not in p and 'uploaded' not in p for p in doc['photos'])
-        identifier = doc['identifier']
-        assert 'Évora' in identifier
+        assert doc['identifier'] == identifier
         pdf = z.read(identifier+'.pdf')
         assert 'CSMTEC' in PdfReader(BytesIO(pdf)).pages[0].extract_text()
         for pid, extension, prefix in [('photo','png','fotografias'),('video','mp4','videos')]:
-            name=f'{prefix}/EST.01/{pid}.{extension}'
+            name=f'{prefix}/EST.01/{identifier}_{pid}.{extension}'
             assert z.read(name)==originals[pid] and z.getinfo(name).compress_type==ZIP_STORED
     # Optional general observations and migrated historical notes must export
     # their media even when there is no answer text. Verify local PDF and ZIP.
@@ -59,7 +59,7 @@ with TemporaryDirectory(prefix='bundle-native-') as folder:
     result = run(); assert result.returncode == 0, result.stderr
     with ZipFile(destination) as zipped:
         assert zipped.testzip() is None
-        doc = json.loads(zipped.read('report.json'))
+        doc = json.loads(zipped.read(identifier + ".json"))
         pdf = PdfReader(BytesIO(zipped.read(doc['identifier'] + '.pdf')))
         text = '\n'.join(page.extract_text() for page in pdf.pages)
         drawn_photos = []
@@ -76,7 +76,7 @@ with TemporaryDirectory(prefix='bundle-native-') as folder:
         for media in doc['photos']:
             video = media['mime'].startswith('video/')
             folder, ext, original = ('videos', 'mp4', 'video') if video else ('fotografias', 'png', 'photo')
-            name = f"{folder}/{media['checkpoint']}/{media['id']}.{ext}"
+            name = f"{folder}/{media['checkpoint']}/{identifier}_{media['id']}.{ext}"
             assert zipped.read(name) == originals[original]
     # Every failure keeps an already chosen destination intact, with no partial ZIP.
     for invalid in ('digest','missing','path','draft'):

@@ -10,12 +10,15 @@
 #include <QMap>
 #include "MaintenanceMigration.h"
 
-// Correct the six voltage labels for display/export without rewriting frozen reports.
+// Correct display wording without rewriting frozen reports.
 namespace Checklist {
 // Display-only wording for imported/frozen metadata; never rewrite user answers.
 inline QString connectorText(QString value) {
     return value.replace(QRegularExpression("\\bMennekes\\s+(?:Type|Tipo)\\s*2\\b",
                          QRegularExpression::CaseInsensitiveOption), "AC Type 2");
+}
+inline QString paymentNote(QString note) {
+    return note == "Sem POS" ? QString("Sem TPM") : note;
 }
 // Legacy closure read missing optional answers through operator[], inserting null.
 // Remove only those placeholders; retain real answers and every required field.
@@ -41,7 +44,10 @@ inline QString naNotesDefault(const QJsonObject &schema, const QString &key) {
     for (auto section : schema["sections"].toArray())
         for (auto entry : section.toObject()["items"].toArray()) {
             const auto item = entry.toObject();
-            if (item["id"] == key) return item["na_notes_default"].toString();
+            if (item["id"] == key) {
+                const auto note = item["na_notes_default"].toString();
+                return key == "EST.15" ? paymentNote(note) : note;
+            }
         }
     return {};
 }
@@ -92,6 +98,11 @@ inline QJsonObject correctedDraft(QJsonObject report) {
                 if (id == "SEG.02" || id == "SEG.04") item["na_notes_required"] = true;
             }
             if (id == "SITE.01") item["label"] = QStringLiteral("Verifique a limpeza geral do posto de carregamento");
+            if (id == "EST.15" && schema["version"].toInt() == 7) {
+                item["label"] = item["label"].toString().replace("(POS)", "(TPM)");
+                if (item.contains("na_notes_default"))
+                    item["na_notes_default"] = paymentNote(item["na_notes_default"].toString());
+            }
             if (id == "SITE.05") item["label"] = QStringLiteral("Verifique possíveis sinais de vandalismo (cabos cortados, fechadura forçada, carregador danificado, etc.)");
             if (id == "SITE.02") {
                 item["na_notes_required"] = true;
@@ -332,6 +343,7 @@ inline QJsonObject forCharger(QJsonObject source, QJsonObject details, QString *
 inline QString label(QJsonObject item) {
     const auto id = item["id"].toString();
     auto value = item["label"].toString();
+    if (id == "EST.15") value.replace("(POS)", "(TPM)");
     if (id == "MAN.04" || id == "MAN.05" || id == "MAN.06" || id == "PC02.05" || id == "PC02.06" || id == "PC02.07")
         value.replace("380-420 V", "360-440 V");
     if (id == "MAN.07" || id == "MAN.08" || id == "MAN.09" || id == "PC02.08" || id == "PC02.09" || id == "PC02.10")

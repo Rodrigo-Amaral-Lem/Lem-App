@@ -106,23 +106,26 @@ inline bool archive(const QJsonObject &report, QIODevice &output, QString *error
     const auto pdf = ReportPdf::render(report, error);
     if (!error->isEmpty()) return false;
     Writer zip(output);
-    if (!zip.add(ReportNaming::identifier(report) + ".pdf", pdf) ||
-        !zip.add("report.json", QJsonDocument(document(report)).toJson(QJsonDocument::Indented))) {
+    const auto identifier = ReportNaming::identifier(report);
+    if (!zip.add(identifier + ".pdf", pdf) ||
+        !zip.add(identifier + ".json", QJsonDocument(document(report)).toJson(QJsonDocument::Indented))) {
         *error = "Não foi possível gravar o ZIP."; return false;
     }
     QSet<QString> names;
     for (const auto entry : report["photos"].toArray()) {
         const auto p = entry.toObject(); const auto id = p["id"].toString(), checkpoint = p["checkpoint"].toString();
         const auto mime = p["mime"].toString();
-        const QMap<QString, QString> extensions{{"image/jpeg","jpg"}, {"image/png","png"}, {"video/mp4","mp4"}, {"video/3gpp","3gp"}};
+        static const QMap<QString, QString> extensions{{"image/jpeg","jpg"}, {"image/png","png"}, {"video/mp4","mp4"}, {"video/3gpp","3gp"}};
         if (!SafeStorage::component(id) || !QRegularExpression("^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$").match(checkpoint).hasMatch() ||
             !extensions.contains(mime) || names.contains(id)) {
             *error = "Identificação ou tipo de evidência inválido para ZIP."; return false;
         }
         names.insert(id);
         QFile file(QUrl(p["path"].toString()).toLocalFile());
+        const auto folder = mime.startsWith("video/") ? "videos/" : "fotografias/";
+        const auto name = folder + checkpoint + "/" + ReportNaming::evidenceFilename(identifier, id, extensions[mime]);
         if (!file.open(QIODevice::ReadOnly) || file.size() <= 0 ||
-            !zip.add((mime.startsWith("video/") ? "videos/" : "fotografias/") + checkpoint + "/" + id + "." + extensions[mime], file, p["digest"].toString())) {
+            !zip.add(name, file, p["digest"].toString())) {
             *error = "Não foi possível exportar a evidência " + checkpoint + ". Verifique o ficheiro e o espaço disponível."; return false;
         }
     }
