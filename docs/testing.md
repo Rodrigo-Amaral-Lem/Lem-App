@@ -64,6 +64,7 @@ python app/tests/test_photo_delegate_stability.py
 python app/tests/test_report_groups_054.py
 python -X utf8 -B app/tests/test_checkpoint_save_ui.py
 python -X utf8 -B app/tests/test_pcve_catalogue_ui.py
+python -X utf8 -B app/tests/test_contract_notes_ui.py
 ```
 
 `test_checkpoint_save_ui.py` exercises failed draft creation, visible save errors, exact

@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para desktop
 
-Desktop · Aplicação 0.5.0 · Edição 2.9 · 19 de novembro de 2026
+Desktop · Aplicação 0.5.1 · Edição 2.10 · 19 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-desktop.pdf](manual-utilizador-desktop.pdf).
 
@@ -20,9 +20,15 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. As ações são realizadas com o rato e o teclado. Clique nos botões e utilize a roda do rato ou a barra de deslocação para percorrer o relatório.
 
-Este manual descreve a versão 0.5.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
+Este manual descreve a versão 0.5.1 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
+
+### Consultar as notas do contrato
+
+Ao abrir um report, o técnico vê as **Notas** desse PCVE quando há texto. **Voltar ao report** abre o formulário. Para reler as instruções, escolha **Notas do PCVE** no menu do report. Sem ligação, a app apresenta a última versão recebida para esse ID e contrato.
+
+O administrador pode abrir o ícone de notas junto à seta de navegação do cartão, escolher **Editar notas** e **Guardar**. Para apagar as notas, guarde o campo vazio. Na importação por Excel, a coluna **Notas** define o texto de cada ID. Uma folha sem essa coluna conserva as notas existentes.
 
 ## 02 Começar a utilizar a app
 
@@ -73,7 +79,7 @@ Pode anexar fotografias, vídeos e uma imagem da assinatura a partir dos ficheir
 
 ### Consultar IDs de PCVEs
 
-Em **PCVEs**, abra um dos **Relatórios associados**. A seta de regresso volta ao mesmo ponto da ficha. O ID é permanente. Em **Gestão → Contratos → Gerir IDs do contrato**, o administrador pode **Adicionar ou atualizar por Excel**. Os dados ficam na ficha central e nos contratos associados. **Editar** abre a ficha central. **Retirar** conserva a ficha e os relatórios. No cartão, **Fechado 30_03_16** indica 30 de março entre as 16h00 e as 16h59, seguido do nome do relatório.
+Em **PCVEs**, abra um dos **Relatórios associados**. A seta de regresso volta ao mesmo ponto da ficha. O ID é permanente. Em **Gestão → Contratos → Gerir IDs do contrato**, o administrador pode **Adicionar ou atualizar por Excel**. Os contratos partilham a ficha técnica do PCVE. **Editar** abre a ficha central. **Retirar** conserva a ficha e os relatórios. No cartão, **Fechado 30_03_16** indica 30 de março entre as 16h00 e as 16h59, seguido do nome do relatório.
 
 ### Evitar registos duplicados
 

@@ -1967,6 +1967,67 @@ void Lem::detachCharger(QString contractId, QString chargerId) {
             });
 }
 
+void Lem::loadContractNotes(QString contractId, QString chargerId) {
+    exchangeContractNotes(contractId, chargerId, {});
+}
+
+void Lem::saveContractNotes(QString contractId, QString chargerId, int baseRevision, QString notes) {
+    if (m_user["role"] != "admin" || baseRevision < 0) return;
+    exchangeContractNotes(contractId, chargerId, {{"base_revision", baseRevision}, {"notes", notes}});
+}
+
+void Lem::exchangeContractNotes(const QString &cid, const QString &id, const QJsonObject &edit) {
+    const bool saving = !edit.isEmpty();
+    if (id.isEmpty() || cid.isEmpty() || cid != m_contract || !authenticated()) {
+        emit contractNotesFailed(cid, id, 0, "Sem ligação ao servidor.", saving);
+        return;
+    }
+    // A late reply from a previous account/server must not update the new user's cache.
+    const auto session = [this, token = m_token, server = m_server] {
+        return m_token == token && m_server == server;
+    };
+    const auto path = "/api/contracts/" + QString::fromLatin1(QUrl::toPercentEncoding(cid))
+                    + "/chargers/" + QString::fromLatin1(QUrl::toPercentEncoding(id)) + "/notes";
+    request(saving ? "PUT" : "GET", path, saving ? json(edit) : QByteArray{},
+        [this, cid, id, saving, session](QByteArray data) {
+            if (!session()) return;
+            auto record = QJsonDocument::fromJson(data).object();
+            if (record["id"] != id || record["contract_id"] != cid || !record["contract_notes"].isString()
+                || record["notes_revision"].toInt(-1) < 0 || !record["attached"].isBool()) {
+                emit contractNotesFailed(cid, id, 0, "Confirmação de notas inválida.", saving);
+                return;
+            }
+            // Update only this membership. Detached history can still be read
+            // without reintroducing the ID into the active contract list.
+            auto rows = m_catalogues.value(cid).toArray();
+            for (qsizetype i = 0; i < rows.size(); ++i) {
+                auto row = rows[i].toObject();
+                if (row["id"] != id) continue;
+                if (row["notes_revision"].toInt(-1) > record["notes_revision"].toInt()) {
+                    record["contract_notes"] = row["contract_notes"];
+                    record["notes_revision"] = row["notes_revision"];
+                } else if (row["notes_revision"] != record["notes_revision"]) {
+                    row["contract_notes"] = record["contract_notes"];
+                    row["notes_revision"] = record["notes_revision"];
+                    rows[i] = row;
+                    m_catalogues[cid] = rows;
+                    if (m_contract == cid) m_chargers = rows;
+                    persist();
+                    emit changed();
+                }
+                break;
+            }
+            emit contractNotesReceived(record.toVariantMap(), saving);
+        }, "application/json", [this, cid, id, saving, session](int code, const QString &body) {
+            if (!session()) return;
+            const auto detail = QJsonDocument::fromJson(body.toUtf8()).object()["detail"].toString();
+            const auto fallback = code == 422 ? QStringLiteral("Texto inválido. Use até 32 767 caracteres.")
+                                              : QStringLiteral("Não foi possível contactar o servidor.");
+            emit contractNotesFailed(cid, id, code, detail.isEmpty()
+                ? fallback : detail, saving);
+        });
+}
+
 void Lem::saveStation(QString id, QString baseUpdated, QVariantMap fields) {
     if (!canManageStations() || m_busy || id.isEmpty() || baseUpdated.isEmpty() || fields.isEmpty()) return;
     m_busy = true;

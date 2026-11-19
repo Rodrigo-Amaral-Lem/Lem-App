@@ -861,7 +861,7 @@ QJsonArray Lem::currentPcveRows(QJsonArray rows) {
     // Closed report snapshots and pending report payloads are separate data.
     static const QSet<QString> obsolete = {"location", "localização", "localizacao", "local",
         "nome do local", "site name", "localização / nome do local", "localizacao / nome do local",
-        "site id", "id do site"};
+        "site id", "id do site", "notas", "contract notes"};
     static const QRegularExpression lowerCedilla("(?<=[a-zà-öø-ÿ])Ý(?=[aouãõáàâóôú])");
     static const QRegularExpression upperCedilla("Ý(?=[aouãõáàâóôúAOUÃÕÁÀÂÓÔÚ])");
     static const QRegularExpression smallCedilla("ý(?=[aouãõáàâóôúAOUÃÕÁÀÂÓÔÚ])");
@@ -958,6 +958,23 @@ void Lem::refreshCatalogue(QString id, bool force) {
         "GET", "/api/contracts/" + id + "/chargers", {},
         [this, id](QByteArray data) {
             auto rows = QJsonDocument::fromJson(data).array();
+            // A catalogue GET can race a single-ID read or a confirmed notes edit.
+            // Retain the newer notes without masking report/PCVE catalogue updates.
+            QHash<QString, QJsonObject> previousNotes;
+            for (const auto &entry : m_catalogues.value(id).toArray()) {
+                const auto row = entry.toObject();
+                if (row.contains("notes_revision")) previousNotes.insert(row["id"].toString(), row);
+            }
+            for (qsizetype i = 0; i < rows.size(); ++i) {
+                auto row = rows[i].toObject();
+                const auto old = previousNotes.constFind(row["id"].toString());
+                if (old != previousNotes.cend() && row.contains("notes_revision")
+                    && old->value("notes_revision").toInt() > row["notes_revision"].toInt()) {
+                    row["contract_notes"] = old->value("contract_notes");
+                    row["notes_revision"] = old->value("notes_revision");
+                    rows[i] = row;
+                }
+            }
             for (auto row : rows)
                 for (auto removed : row.toObject()["deleted_reports"].toArray())
                     if (m_reports.contains(removed.toString()))
