@@ -2982,6 +2982,44 @@ void Lem::createUser(QString email, QString name, QString password, QString role
                 loadUsers();
             });
 }
+bool Lem::changeOwnPassword(QString current, QString replacement, QString confirmation) {
+    // Count Unicode characters as the server does, including supplementary characters.
+    const auto length = replacement.toUcs4().size();
+    if (!authenticated() || m_busy || current.isEmpty() || current.toUcs4().size() > 200 ||
+        length < 12 || length > 200 || confirmation != replacement)
+        return false;
+
+    m_busy = true;
+    emit changed();
+    const auto id = m_user.value("id").toString();
+    const auto finish = [this, token = m_token](bool saved, const QString &message) {
+        m_busy = false;
+        emit changed();
+        if (m_token == token)
+            emit ownPasswordChangeFinished(saved, message);
+    };
+    request("PUT", "/api/account/password",
+        json({{"current_password", current}, {"new_password", replacement}, {"confirmation", confirmation}}),
+        [id, finish](QByteArray data) {
+            const auto ack = QJsonDocument::fromJson(data).object();
+            const bool saved = ack["ok"].toBool() && ack["user_id"].toString() == id;
+            finish(saved, saved ? "Password alterada. A sessão neste dispositivo continua ativa."
+                                : "O servidor não confirmou a alteração. Verifique a password antes de repetir.");
+        }, "application/json", [finish](int code, QString) {
+            // Only display local messages. Older or misconfigured servers may echo inputs.
+            QString message;
+            switch (code) {
+            case 403: message = "Password atual incorreta."; break;
+            case 404: case 405: message = "Atualize o servidor para poder alterar a sua password."; break;
+            case 422: message = "Verifique a nova password e a confirmação."; break;
+            case 429: message = "Demasiadas tentativas. Aguarde um minuto."; break;
+            default: message = "Não foi possível confirmar a alteração. Verifique a ligação e a password antes de repetir.";
+            }
+            finish(false, message);
+        });
+    return true;
+}
+
 bool Lem::resetTechnicianPassword(QString id, QString password) {
     if (m_busy || m_user["role"] != "admin" || !online()) return false;
     bool technician = false;

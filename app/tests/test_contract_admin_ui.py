@@ -91,7 +91,28 @@ assert len(resets) == before and js('resetPassword.text') == ''
 values['user']['role'] = 'tech'
 lem.changed.emit()
 assert not find_visual(w.contentItem(), 'resetTechnicianPasswordButton').isVisible()
+
+# Both roles change their own password from Account. Dismissing the form or
+# losing the session must discard typed credentials before the next opening.
+js('loginDialog.open()')
+for role in ("tech", "admin"):
+    values["user"]["role"] = role
+    lem.changed.emit()
+    trigger("openOwnPassword")
+    assert js("ownPasswordDialog.opened && !loginDialog.visible")
+    assert js("!currentPassword.length && !ownNewPassword.length && !ownConfirmation.length")
+    js('currentPassword.text="current"; ownNewPassword.text="replacement"; ownConfirmation.text="repeat"')
+    if role == "tech":
+        js("ownPasswordDialog.close()")
+    else:
+        values["authenticated"] = False
+        lem.changed.emit()
+    QTest.qWait(100)
+    assert js("loginDialog.opened && !ownPasswordDialog.visible")
+    assert js("!currentPassword.length && !ownNewPassword.length && !ownConfirmation.length")
+assert not find_visual(w.contentItem(), "openOwnPassword").isVisible()
 assert not errors, errors
+print("PASS: own password is available to both authenticated roles and cleared on cancel/session loss")
 print('PASS: desktop-only contract export, captured picker context, progress/cancel and admin-only technician reset with masked/cleared passwords')
 print('Previews:', PREVIEW_DIR)
 delete(engine)

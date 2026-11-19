@@ -3858,6 +3858,17 @@ ApplicationWindow {
                     }
                 }
                 UiButton {
+                    objectName: "openOwnPassword"
+                    text: "Alterar a minha password"
+                    width: parent.width
+                    visible: lem.authenticated
+                    enabled: !win.networkActivity
+                    onClicked: {
+                        loginDialog.close();
+                        ownPasswordDialog.open();
+                    }
+                }
+                UiButton {
                     implicitHeight: win.touchHeight
                     text: "Terminar sessão"
                     enabled: !win.networkActivity
@@ -3956,6 +3967,8 @@ ApplicationWindow {
             win.refreshCatalog(false);
         }
         function onChanged() {
+            if (!lem.authenticated && ownPasswordDialog.visible)
+                ownPasswordDialog.close();
             if (!lem.authenticated || lem.user.role !== "admin") {
                 deleteContractDialog.close();
                 deletedContractsDialog.close();
@@ -4048,6 +4061,138 @@ ApplicationWindow {
         property string kind: "pdf"
         title: contractExportFolder.kind === "pdf" ? "Pasta para todos os PDFs do contrato" : "Pasta para todos os ZIPs do contrato"
         onAccepted: lem.exportContract(contractExportFolder.contractId, contractExportFolder.kind, contractExportFolder.selectedFolder)
+    }
+    Dialog {
+        id: ownPasswordDialog
+        objectName: "ownPasswordDialog"
+        title: "Alterar a minha password"
+        modal: true
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(win.width - 24, 440)
+        height: Math.min(win.height - win.SafeArea.margins.top - win.SafeArea.margins.bottom - 20,
+                         implicitHeight)
+        padding: 16
+        palette: lightPalette
+        property bool submitting: false
+        property bool saved: false
+        property string feedback: ""
+        closePolicy: submitting ? Popup.NoAutoClose : Popup.CloseOnEscape
+        function clearFields() {
+            currentPassword.clear();
+            ownNewPassword.clear();
+            ownConfirmation.clear();
+        }
+        onClosed: {
+            clearFields();
+            submitting = false;
+            saved = false;
+            feedback = "";
+            passwordScroll.contentY = 0;
+            loginDialog.open();
+        }
+        Connections {
+            target: lem
+            ignoreUnknownSignals: true
+            function onOwnPasswordChangeFinished(success, message) {
+                if (!ownPasswordDialog.visible)
+                    return;
+                ownPasswordDialog.submitting = false;
+                ownPasswordDialog.saved = success;
+                ownPasswordDialog.feedback = message;
+                if (success)
+                    ownPasswordDialog.clearFields();
+                passwordScroll.contentY = 0;
+            }
+        }
+        contentItem: Flickable {
+            id: passwordScroll
+            implicitHeight: passwordForm.implicitHeight
+            contentHeight: passwordForm.implicitHeight
+            contentWidth: width
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { id: passwordScrollBar }
+            Column {
+                id: passwordForm
+                width: passwordScroll.width - passwordScrollBar.width
+                spacing: 8
+                UiLabel {
+                    width: parent.width
+                    text: ownPasswordDialog.feedback
+                    visible: !!text
+                    font.bold: true
+                    color: ownPasswordDialog.saved ? win.ink : win.danger
+                    wrapMode: Text.Wrap
+                }
+                Column {
+                    visible: !ownPasswordDialog.saved
+                    enabled: !ownPasswordDialog.submitting
+                    width: parent.width
+                    spacing: 8
+                    UiLabel {
+                        width: parent.width
+                        wrapMode: Text.Wrap
+                        text: "Escolha uma password de 12 a 200 caracteres. Nos outros dispositivos terá de voltar a entrar."
+                    }
+                    UiLabel { text: "Password atual" }
+                    UiTextField {
+                        id: currentPassword
+                        width: parent.width
+                        Accessible.name: "Password atual"
+                        echoMode: TextInput.Password
+                        onTextEdited: ownPasswordDialog.feedback = ""
+                        onAccepted: ownNewPassword.forceActiveFocus()
+                    }
+                    UiLabel { text: "Nova password" }
+                    UiTextField {
+                        id: ownNewPassword
+                        width: parent.width
+                        Accessible.name: "Nova password"
+                        echoMode: TextInput.Password
+                        onTextEdited: ownPasswordDialog.feedback = ""
+                        onAccepted: ownConfirmation.forceActiveFocus()
+                    }
+                    UiLabel { text: "Repetir nova password" }
+                    UiTextField {
+                        id: ownConfirmation
+                        width: parent.width
+                        Accessible.name: "Repetir nova password"
+                        echoMode: TextInput.Password
+                        onTextEdited: ownPasswordDialog.feedback = ""
+                        onAccepted: Qt.inputMethod.hide()
+                    }
+                    UiLabel {
+                        width: parent.width
+                        wrapMode: Text.Wrap
+                        color: win.danger
+                        text: "As passwords não coincidem."
+                        visible: ownConfirmation.text.length > 0 && ownConfirmation.text !== ownNewPassword.text
+                    }
+                    UiButton {
+                        width: parent.width
+                        text: ownPasswordDialog.submitting ? "A guardar…" : "Guardar password"
+                        primary: true
+                        enabled: lem.authenticated && !lem.busy && currentPassword.length > 0
+                                 && Array.from(currentPassword.text).length <= 200
+                                 && Array.from(ownNewPassword.text).length >= 12
+                                 && Array.from(ownNewPassword.text).length <= 200
+                                 && ownNewPassword.text === ownConfirmation.text
+                        onClicked: {
+                            Qt.inputMethod.hide();
+                            ownPasswordDialog.feedback = "";
+                            ownPasswordDialog.submitting = lem.changeOwnPassword(currentPassword.text, ownNewPassword.text, ownConfirmation.text);
+                        }
+                    }
+                }
+                UiButton {
+                    width: parent.width
+                    text: ownPasswordDialog.saved ? "Fechar" : "Cancelar"
+                    enabled: !ownPasswordDialog.submitting
+                    onClicked: ownPasswordDialog.close()
+                }
+            }
+        }
     }
     Dialog {
         id: resetPasswordDialog

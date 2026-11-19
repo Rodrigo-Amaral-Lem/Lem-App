@@ -249,6 +249,7 @@ class Lem : public QObject {
     Q_INVOKABLE void loadUsers();
     Q_INVOKABLE void createUser(QString email, QString name, QString password, QString role = "tech");
     Q_INVOKABLE bool resetTechnicianPassword(QString userId, QString password);
+    Q_INVOKABLE bool changeOwnPassword(QString current, QString replacement, QString confirmation);
     Q_INVOKABLE void assignUser(QString userId);
     Q_INVOKABLE QString contractId() const {
         return m_contract;
@@ -266,6 +267,7 @@ class Lem : public QObject {
     void chargersChanged();
     void stationsChanged();
     void excelImported(QString summary);
+    void ownPasswordChangeFinished(bool saved, QString message);
     void currentChanged();
     void photosChanged();
     void contractExportCancelled();
