@@ -296,6 +296,13 @@ struct LemReviewTest {
                                      .toObject()["signatures"]
                                      .toObject()["FIN.02"]
                                      .toObject()["photo_id"];
+        // Real pre-v6 signatures move entirely into the historical collection.
+        auto archivedOnly = historicalPayload;
+        archivedOnly.remove("signatures");
+        client.m_current["payload"] = archivedOnly;
+        CHECK(!client.editPhoto(signatureId.toString(), 1, 0, 0, 1, 1));
+        CHECK(client.m_current["photos"] == original["photos"]);
+        client.m_current = original;
         client.copyLocalReport();
         CHECK(wait(client));
         CHECK(client.m_current["id"] != originalId);

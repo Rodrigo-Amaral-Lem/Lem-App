@@ -2547,8 +2547,10 @@ ApplicationWindow {
             reportId = win.page === "report" ? lem.current.id : "";
             externalId = label || row.external_id || "";
             contractName = ((lem.contracts || []).find(c => c.id === cid) || {}).name || "";
-            note = row.contract_notes || "";
-            revision = row.notes_revision === undefined ? -1 : row.notes_revision;
+            const cached = row.notes_revision !== undefined || typeof lem.historicalContractNotes !== "function"
+                         ? row : lem.historicalContractNotes(cid, id);
+            note = cached.contract_notes || "";
+            revision = cached.notes_revision === undefined ? -1 : cached.notes_revision;
             attached = !!row.id;
             editing = false;
             saving = false;

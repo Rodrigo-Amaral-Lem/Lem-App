@@ -34,7 +34,8 @@ and on the server. Drafts can be saved while these fields are still empty.
 
 The optional **Notas** column supplies instructions for each ID in this contract. Technicians
 see them on opening a report and can reopen **Notas do PCVE** from its menu. Offline, the app
-uses the last notes saved for that membership. Administrators can use the notes icon beside
+uses the last notes saved for that membership, including when a report is opened from the
+history of an ID removed from its contract. Administrators can use the notes icon beside
 navigation on the contract card, then **Editar notas** and **Guardar**.
 
 ## Fill and review a report
@@ -208,7 +209,9 @@ dos reports**; an explicit notice identifies unsaved choices.
 On Windows/Linux desktop, an administrator can use **Corrigir report fechado…** on a synchronized
 closed report. The server copies the existing evidence into the working draft. You can edit answers
 and observations, remove an attachment or add a new one with an empty local evidence cache. Only new
-attachments are uploaded. Download an individual file if you want to inspect its contents. Use
+attachments are uploaded. Download an individual file if you want to inspect its contents.
+The photo editor preserves historical signature images. An explicit removal also removes
+the signature reference from the correction. Use
 **Editar início e fim…** for the intervention dates (including timezone). At review, choose
 **Guardar correção e substituir original…** and confirm. The original remains available until the
 server accepts the complete replacement, which preserves the technician's ownership. Cancelling

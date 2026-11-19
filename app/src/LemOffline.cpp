@@ -944,6 +944,34 @@ void Lem::applyStationRecords(const QJsonArray &incoming, bool complete, QJsonAr
     m_stations = stations;
 }
 
+// Validate the whole listing before acting on even the first removal marker.
+// Optional fields were absent on older servers. An empty array is authoritative.
+static bool validMembershipCatalogue(const QJsonDocument &document, const QString &contractId) {
+    if (!document.isArray()) return false;
+    QSet<QString> ids;
+    for (const auto &entry : document.array()) {
+        const auto row = entry.toObject();
+        const auto id = row["id"].toString();
+        if (id.isEmpty() || ids.contains(id) || row["external_id"].toString().isEmpty()
+            || !row["details"].isObject() || !row["reports"].isArray()
+            || (row.contains("contract_id") && row["contract_id"] != contractId)
+            || (row.contains("deleted_reports") && !row["deleted_reports"].isArray())
+            || (row.contains("report_replacements") && !row["report_replacements"].isObject()))
+            return false;
+        ids.insert(id);
+        if ((row.contains("notes_revision") || row.contains("contract_notes"))
+            && (row["notes_revision"].toInt(-1) < 0 || !row["contract_notes"].isString())) return false;
+        for (const auto &summary : row["reports"].toArray())
+            if (summary.toObject()["id"].toString().isEmpty()) return false;
+        for (const auto &removed : row["deleted_reports"].toArray())
+            if (removed.toString().isEmpty()) return false;
+        const auto replacements = row["report_replacements"].toObject();
+        for (auto it = replacements.begin(); it != replacements.end(); ++it)
+            if (it.key().isEmpty() || it.value().toString().isEmpty()) return false;
+    }
+    return true;
+}
+
 // Server deletion markers remove stale local copies before installing fresh summaries.
 void Lem::refreshCatalogue(QString id, bool force) {
     if (id.isEmpty() || m_token.isEmpty() || m_catalogueLoading)
@@ -954,12 +982,25 @@ void Lem::refreshCatalogue(QString id, bool force) {
     m_catalogueLoading = true;
     m_refreshing = true;
     emit changed();
+    const auto failed = [this, id](int, QString) {
+        m_catalogueLoading = false;
+        m_refreshing = false;
+        status("Sem atualização do catálogo; dados locais conservados.");
+        if (m_contract != id) refreshCatalogue(m_contract);
+        scheduleSync(3000);
+    };
     request(
         "GET", "/api/contracts/" + id + "/chargers", {},
-        [this, id](QByteArray data) {
-            auto rows = QJsonDocument::fromJson(data).array();
+        [this, id, failed](QByteArray data) {
+            const auto document = QJsonDocument::fromJson(data);
+            if (!validMembershipCatalogue(document, id)) {
+                failed(0, {});
+                return;
+            }
+            auto rows = document.array();
             // A catalogue GET can race a single-ID read or a confirmed notes edit.
             // Retain the newer notes without masking report/PCVE catalogue updates.
+            auto history = m_historicalNotes.value(id).toObject();
             QHash<QString, QJsonObject> previousNotes;
             for (const auto &entry : m_catalogues.value(id).toArray()) {
                 const auto row = entry.toObject();
@@ -967,11 +1008,17 @@ void Lem::refreshCatalogue(QString id, bool force) {
             }
             for (qsizetype i = 0; i < rows.size(); ++i) {
                 auto row = rows[i].toObject();
-                const auto old = previousNotes.constFind(row["id"].toString());
-                if (old != previousNotes.cend() && row.contains("notes_revision")
-                    && old->value("notes_revision").toInt() > row["notes_revision"].toInt()) {
-                    row["contract_notes"] = old->value("contract_notes");
-                    row["notes_revision"] = old->value("notes_revision");
+                const auto membership = row["id"].toString();
+                auto old = previousNotes.take(membership);
+                if (!row.contains("notes_revision")) {
+                    retainContractNote(history, old);
+                    continue;
+                }
+                const auto archived = history.take(membership).toObject();
+                if (archived["notes_revision"].toInt(-1) > old["notes_revision"].toInt(-1)) old = archived;
+                if (old["notes_revision"].toInt(-1) > row["notes_revision"].toInt()) {
+                    row["contract_notes"] = old["contract_notes"];
+                    row["notes_revision"] = old["notes_revision"];
                     rows[i] = row;
                 }
             }
@@ -994,6 +1041,11 @@ void Lem::refreshCatalogue(QString id, bool force) {
                                                 {"details", row["details"]}, {"updated", row["station_updated"]}});
             }
             applyStationRecords(stations, false, &rows);
+            // Only departed memberships need separate storage. Active notes
+            // already live in the listing that is checkpointed below.
+            for (const auto &departed : std::as_const(previousNotes)) retainContractNote(history, departed);
+            if (history.isEmpty()) m_historicalNotes.remove(id);
+            else m_historicalNotes[id] = history;
             m_catalogues[id] = rows;
             m_catalogueTimes[id] = double(QDateTime::currentSecsSinceEpoch());
             if (m_contract == id)
@@ -1011,14 +1063,7 @@ void Lem::refreshCatalogue(QString id, bool force) {
             scheduleSync(1500);
         },
         "application/json",
-        [this, id](int, QString) {
-            m_catalogueLoading = false;
-            m_refreshing = false;
-            status("Sem atualização do catálogo; dados locais conservados.");
-            if (m_contract != id)
-                refreshCatalogue(m_contract);
-            scheduleSync(3000);
-        });
+        failed);
 }
 
 // Explicit refresh never replaces dirty local work. Conflicts have a separate preview/copy flow.

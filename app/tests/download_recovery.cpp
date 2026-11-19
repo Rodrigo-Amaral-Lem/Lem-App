@@ -19,6 +19,10 @@
 #endif
 #define CHECK(x) do { if (!(x)) { qCritical() << "FAILED" << #x << __LINE__; return 1; } } while(false)
 struct LemReviewTest {
+    static void loadCatalogueUser(Lem &client) {
+        client.m_user = QJsonObject{{"id", "history-test"}, {"role", "tech"}};
+        client.loadUser();
+    }
     static void session(Lem &c, QString server) { c.m_server = server; c.m_token = "test-only"; }
     static void download(Lem &c, QString path, QString destination, QString digest,
                          std::function<void(QSharedPointer<NetworkSecurity::FileBody>)> done, std::function<void(int,QString)> failed) {
@@ -64,6 +68,8 @@ int main(int argc, char **argv) {
     LemReviewTest::session(client, "http://127.0.0.1:" + QString::number(server.serverPort()));
     QMap<QString,int> requests; QMap<QString,qint64> bytes; bool resumed = false, validator = false, batchRecovered = false;
     int presentationFailure = 0;
+    QByteArray contractsListing = R"([{"id":"test-contract","name":"Updated contract"}])";
+    QByteArray membershipListing = R"([{"id":"pcve","external_id":"PCVE","details":{},"reports":[],"contract_notes":"Gate B","notes_revision":2}])";
     QObject::connect(&server, &QTcpServer::newConnection, &app, [&] {
         auto socket=server.nextPendingConnection(); auto buffer=QSharedPointer<QByteArray>::create();
         QObject::connect(socket,&QTcpSocket::disconnected,socket,&QObject::deleteLater);
@@ -72,10 +78,13 @@ int main(int argc, char **argv) {
             socket->setProperty("sent",true);
             const auto name = QString::fromLatin1(buffer->split(' ')[1]); const auto n=++requests[name];
             QByteArray response, payload; const auto offset=262144;
-            if (name == "/api/contracts" || name == "/api/stations") {
+            if (name == "/api/contracts/test-contract/chargers") {
+                payload = membershipListing;
+                response = "HTTP/1.1 200 OK\r\nContent-Length: " + QByteArray::number(payload.size()) + "\r\n\r\n" + payload;
+            } else if (name == "/api/contracts" || name == "/api/stations") {
                 payload = name == "/api/contracts"
-                    ? R"([{"id":"test-contract","name":"Updated contract"}])"
-                    : R"([{"id":"station","external_id":"PCVE-01","updated":"now","details":{}}])";
+                    ? contractsListing
+                    : QByteArrayLiteral(R"([{"id":"station","external_id":"PCVE-01","updated":"now","details":{}}])");
                 response = "HTTP/1.1 200 OK\r\nContent-Length: " + QByteArray::number(payload.size())
                          + "\r\n\r\n" + payload;
             } else if (name=="/api/contracts/test-contract/presentation") {
@@ -190,6 +199,41 @@ int main(int argc, char **argv) {
         CHECK(requests["/api/reports/export-test/bundle"]==2);
         CHECK(zip.open(QIODevice::ReadOnly)); CHECK(zip.readAll()==bundle); zip.close();
         CHECK(client.message().contains("Não foi possível confirmar"));
+    }
+    {
+        Lem catalogue(temp.filePath("catalogue"));
+        LemReviewTest::session(catalogue, "http://127.0.0.1:" + QString::number(server.serverPort()));
+        LemReviewTest::loadCatalogueUser(catalogue);
+        catalogue.selectContract("test-contract");
+        CHECK(until([&] { return !catalogue.backgroundTransferActive(); }));
+        CHECK(catalogue.chargers().size() == 1);
+        for (const auto &invalid : {QByteArray("{}"), QByteArray("[null]")}) {
+            membershipListing = invalid;
+            CHECK(catalogue.refreshBackgroundCatalogues());
+            CHECK(until([&] { return !catalogue.backgroundTransferActive(); }));
+            CHECK(catalogue.chargers().size() == 1);
+        }
+        membershipListing = "[]";
+        CHECK(catalogue.refreshBackgroundCatalogues());
+        CHECK(until([&] { return !catalogue.backgroundTransferActive(); }));
+        CHECK(catalogue.chargers().isEmpty());
+        LemReviewTest::loadCatalogueUser(catalogue);
+        CHECK(catalogue.chargers().isEmpty());
+        CHECK(catalogue.historicalContractNotes("test-contract", "pcve")["contract_notes"] == "Gate B");
+        CHECK(catalogue.historicalContractNotes("other", "pcve").isEmpty());
+        contractsListing = "[null]";
+        CHECK(catalogue.refreshBackgroundCatalogues());
+        CHECK(until([&] { return !catalogue.backgroundTransferActive(); }));
+        LemReviewTest::loadCatalogueUser(catalogue);
+        CHECK(catalogue.historicalContractNotes("test-contract", "pcve")["contract_notes"] == "Gate B");
+        // An authoritative withdrawal of the contract also revokes its archived notes.
+        contractsListing = "[]";
+        CHECK(catalogue.refreshBackgroundCatalogues());
+        CHECK(until([&] { return !catalogue.backgroundTransferActive(); }));
+        LemReviewTest::loadCatalogueUser(catalogue);
+        catalogue.selectContract("test-contract");
+        CHECK(until([&] { return !catalogue.backgroundTransferActive(); }));
+        CHECK(catalogue.historicalContractNotes("test-contract", "pcve").isEmpty());
     }
     qInfo()<<"PASS: interrupted 6 MiB evidence resumes without repeating bytes; old-server restart; bad range rejected; bounded retries; access denial; failed item does not stop nine-file batch; only missing item repeats; interrupted server ZIP restarts and saves exact bytes";
     return 0;

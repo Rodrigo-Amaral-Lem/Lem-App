@@ -7,9 +7,12 @@ from shiboken6 import delete
 
 writes = []
 reads = []
+history = {}
 
 
 def install(attrs):
+    attrs["historicalContractNotes"] = Slot(str, str, result="QVariantMap", name="historicalContractNotes")(
+        lambda self, cid, key: history.get((cid, key), {}))
     attrs["contractNotesReceived"] = Signal("QVariantMap", bool)
     attrs["contractNotesFailed"] = Signal(str, str, int, str, bool)
     attrs["loadContractNotes"] = Slot(str, str, name="loadContractNotes")(lambda self, cid, key: reads.append((cid, key)))
@@ -48,6 +51,15 @@ def checks():
         assert not find_visual(w.contentItem(), "editContractNotes").isVisible()
         js("contractNotesDialog.dismiss()")
         QTest.qWait(100)
+        history["contract", "membership"] = row("Instruções do histórico", 2)
+        values["chargers"] = []
+        lem.changed.emit()
+        js("showReportNotes(false)")
+        assert js("contractNotesDialog.visible && !contractNotesDialog.attached && contractNotesDialog.revision === 2")
+        assert js("contractNotesDialog.note === 'Instruções do histórico'")
+        js("contractNotesDialog.dismiss()")
+        QTest.qWait(100)
+        history.clear()
         enter("")
         assert not js("contractNotesDialog.visible")
         # A server note added since the cached listing opens immediately on receipt.
