@@ -31,7 +31,7 @@ struct LemReviewTest {
     static void report(Lem &c, QString id, const QJsonArray &photos) {
         c.m_user = QJsonObject{{"id","download-test"},{"name","Test"},{"role","tech"}};
         c.m_current = QJsonObject{{"id",id},{"owner_id","download-test"},{"status","closed"},
-            {"contract_id","test-contract"},
+            {"contract_id","test-contract"},{"charger_id","pcve"},{"payload",QJsonObject{{"answers",QJsonObject{}}}},
             {"dirty",false},{"revision",1},{"photos",photos},
             {"snapshot",QJsonObject{{"charger",QJsonObject{{"external_id","TEST"}}}}},
             {"template",QJsonObject{{"sections",QJsonArray{QJsonObject{{"items",QJsonArray{QJsonObject{{"id","EST.01"}}}}}}}}}};
@@ -87,8 +87,10 @@ int main(int argc, char **argv) {
                     : QByteArrayLiteral(R"([{"id":"station","external_id":"PCVE-01","updated":"now","details":{}}])");
                 response = "HTTP/1.1 200 OK\r\nContent-Length: " + QByteArray::number(payload.size())
                          + "\r\n\r\n" + payload;
-            } else if (name=="/api/contracts/test-contract/presentation") {
-                payload = presentationFailure ? "{}" : "{\"issuer\":\"CSMTEC\",\"revision\":1,\"client_logos\":[]}";
+            } else if (name=="/api/reports/export-test") {
+                auto live = QJsonObject::fromVariantMap(client.current());
+                live["presentation"] = QJsonObject{{"issuer","CSMTEC"},{"revision",1},{"client_logos",QJsonArray{}}};
+                payload = presentationFailure ? QByteArray("{}") : QJsonDocument(live).toJson();
                 const QByteArray status = presentationFailure == 1 ? "404 Not Found" :
                                           presentationFailure == 2 ? "403 Forbidden" : "200 OK";
                 response="HTTP/1.1 "+status+"\r\nContent-Length: "+QByteArray::number(payload.size())+"\r\n\r\n"+payload;
@@ -186,7 +188,9 @@ int main(int argc, char **argv) {
     CHECK(client.contracts().value(0).toMap()["name"] == "Updated contract");
     CHECK(client.stations().value(0).toMap()["external_id"] == "PCVE-01");
     CHECK(client.photoDownloadSummary()["missing"].toInt() == 0);
-    LemReviewTest::report(client,"export-test",photos);
+    auto exportPhoto = photos.first().toObject();
+    exportPhoto["id"] = "export-original";
+    LemReviewTest::report(client,"export-test",QJsonArray{exportPhoto});
     const auto zipPath=temp.filePath("downloaded.zip");
     client.exportReport("bundle",QUrl::fromLocalFile(zipPath)); CHECK(until([&] { return !client.busy(); }));
     if (!QFileInfo::exists(zipPath)) qCritical()<<client.message()<<requests["/api/reports/export-test/bundle"];

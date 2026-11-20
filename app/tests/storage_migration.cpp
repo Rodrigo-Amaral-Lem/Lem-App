@@ -5,6 +5,7 @@
 #include <QCoreApplication>
 #include <QTemporaryDir>
 #include <QDebug>
+#include <QProcess>
 #define CHECK(x)                                                                                   \
     do {                                                                                           \
         if (!(x)) {                                                                                \
@@ -22,6 +23,27 @@ int main(int argc, char **argv) {
     QCoreApplication app(argc, argv);
     QTemporaryDir temp;
     CHECK(temp.isValid());
+    const auto args = app.arguments();
+    if (args.size() == 3 && args[1] == "--second-writer") {
+        const auto lock = AppStorage::lockWriter(args[2]);
+        if (!lock) return 3;
+        write(args[2] + "/other/cache.json", "{}");
+        return 0;
+    }
+    const auto shared = temp.path() + "/profile";
+    auto writer = AppStorage::lockWriter(shared);
+    CHECK(writer);
+    const auto pending = shared + "/tech/edits/report.json";
+    const auto notes = QStringLiteral("Revisão Âncora / North").toUtf8();
+    write(pending, notes);
+    const QStringList second{"--second-writer", shared};
+    CHECK(QProcess::execute(app.applicationFilePath(), second) == 3);
+    CHECK(!QFile::exists(shared + "/other/cache.json"));
+    writer.reset();
+    CHECK(QProcess::execute(app.applicationFilePath(), second) == 0);
+    QFile savedJournal(pending);
+    CHECK(savedJournal.open(QIODevice::ReadOnly) && savedJournal.readAll() == notes);
+
     const auto old = temp.path() + "/Former Product", target = temp.path() + "/Lem";
     write(old + "/last-user.json", R"({"server":"https://example.test","user":{"id":"tech"}})");
     const auto photo = old + "/scope/tech/photos/evidence.jpg";
@@ -41,7 +63,11 @@ int main(int argc, char **argv) {
                                                                  {"path", QUrl::fromLocalFile(photo)
                                                                               .toString()}}}}}}}}})
               .toJson());
-    CHECK(AppStorage::resolve(target) == target);
+    // An old lock file in the migration source cannot replace the active lock.
+    write(old + "/writer.lock", "legacy lock");
+    const auto migrationLock = AppStorage::lockWriter(target);
+    CHECK(migrationLock && AppStorage::resolve(target) == target);
+    CHECK(QProcess::execute(app.applicationFilePath(), {"--second-writer", target}) == 3);
     CHECK(QFile::exists(old + "/last-user.json"));
     CHECK(QFile::exists(target + "/scope/tech/photos/evidence.jpg"));
     QFile f(target + "/scope/tech/cache.json");

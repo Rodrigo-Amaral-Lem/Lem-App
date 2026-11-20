@@ -3,6 +3,7 @@
 #include "Lem.h"
 #include "ReportBundle.h"
 #include <QGuiApplication>
+#include <QDesktopServices>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QNetworkReply>
@@ -43,6 +44,11 @@ static QJsonObject report(QString id, QString imagePath) {
         {"template", QJsonObject{{"sections", QJsonArray{section}}}},
         {"payload", QJsonObject{{"answers", answers}}}, {"photos", QJsonArray{photo}}};
 }
+class ExportViewer : public QObject {
+    Q_OBJECT
+public slots:
+    void view(const QUrl &) {} // Keep synthetic PDFs inside the test process.
+};
 struct LemReviewTest {
     static void prepare(Lem &c, QString endpoint, QString photo) {
         c.m_server = endpoint; c.m_token = "test-only";
@@ -59,6 +65,11 @@ struct LemReviewTest {
         auto correction = pending; correction["id"] = "correction"; correction["correction"] = QJsonObject{{"state", "editing"}};
         c.m_reports["correction"] = correction;
         c.m_autoSync.stop(); QDir().mkpath(c.cacheDir());
+    }
+    static void openCached(Lem &c, QJsonObject report) {
+        c.m_current = report;
+        c.m_template = report["template"].toObject();
+        c.m_reports[report["id"].toString()] = report;
     }
     static QJsonObject current(const Lem &c) { return c.m_current; }
     static QJsonObject cached(const Lem &c) { return c.m_reports; }
@@ -77,6 +88,8 @@ struct LemReviewTest {
 
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv); app.setApplicationVersion("0.3.0");
+    ExportViewer viewer;
+    QDesktopServices::setUrlHandler("file", &viewer, "view");
     QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
     QTemporaryDir root; QTcpServer server; CHECK(server.listen(QHostAddress::LocalHost));
     const auto endpoint = "http://127.0.0.1:" + QString::number(server.serverPort());
@@ -104,12 +117,16 @@ int main(int argc, char **argv) {
             if (path == "/api/contracts/contract/presentation") {
                 if (mode == "trash") status = "423 Locked";
                 else payload = QJsonDocument(report("local", imagePath)["presentation"].toObject()).toJson();
-            } else if (path == "/api/contracts/contract/chargers") {
+            } else if (path == "/api/contracts/contract/chargers?include_detached=true") {
                 if (mode == "ack-during-list") LemReviewTest::acknowledgePending(client);
                 QJsonArray rows;
                 for (const auto id : {"local", "remote", "collision", "bad-file", "gone", "draft"})
                     rows.append(QJsonObject{{"id", id}, {"status", QString(id) == "draft" ? "draft" : "closed"}});
-                payload = QJsonDocument(QJsonArray{QJsonObject{{"id", "charger"}, {"reports", rows}}}).toJson();
+                const auto detached = rows.takeAt(2);
+                payload = QJsonDocument(QJsonArray{
+                    QJsonObject{{"id", "charger"}, {"reports", rows}},
+                    QJsonObject{{"id", "detached"}, {"attached", false}, {"reports", QJsonArray{detached}}}
+                }).toJson();
             } else if (path == "/unrelated") {
                 QTimer::singleShot(500, socket, [socket] {
                     socket->write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"); socket->disconnectFromHost();
@@ -122,7 +139,10 @@ int main(int argc, char **argv) {
                 else payload = "{\"ok\":true,\"user_id\":\"target\"}";
             } else if (path.startsWith("/api/reports/")) {
                 const auto segments = path.split('/'); const auto id = segments[3];
-                if (id == "gone") status = "410 Gone";
+                if (id == "gone" || id == "superseded") {
+                    status = "410 Gone";
+                    if (id == "superseded") payload = R"({"detail":{"replacement_id":"corrected","message":"Substituído"}})";
+                } else if (id == "restricted") status = "403 Forbidden";
                 else if (segments.size() == 4) {
                     auto metadata = report(id, imagePath);
                     auto photos = metadata["photos"].toArray(); auto photo = photos[0].toObject();
@@ -144,6 +164,23 @@ int main(int argc, char **argv) {
             socket->disconnectFromHost();
         });
     });
+    // A selected, fully cached report must still pass the online UUID check.
+    for (const QString kind : {"pdf", "bundle"}) {
+        const auto selected = root.filePath(kind == "pdf" ? "existing.pdf" : "existing.zip");
+        for (const QString id : {"superseded", "gone", "restricted"}) {
+            Lem observer(root.filePath("observer-" + kind + "-" + id));
+            LemReviewTest::prepare(observer, endpoint, imagePath);
+            LemReviewTest::openCached(observer, report(id, imagePath));
+            QFile file(selected);
+            CHECK(file.open(QIODevice::WriteOnly) && file.write("keep") == 4);
+            file.close();
+            observer.exportReport(kind, QUrl::fromLocalFile(selected));
+            CHECK(waitFor([&] { return !observer.busy(); }));
+            CHECK(requests["/api/reports/" + id] > 0 && bytes(selected) == "keep");
+            if (id != "restricted") CHECK(!LemReviewTest::cached(observer).contains(id));
+            if (id == "superseded") CHECK(LemReviewTest::current(observer)["id"] == "corrected");
+        }
+    }
     QString firstDirectory;
     for (const auto kind : {"pdf", "bundle"}) {
         client.exportContract("contract", kind, QUrl::fromLocalFile(root.path()));
@@ -215,5 +252,20 @@ int main(int argc, char **argv) {
     CHECK(client.resetTechnicianPassword("target", "SyntheticPassword123!"));
     CHECK(waitFor([&] { return !client.busy(); }));
     CHECK(client.passwordReset()["state"].toString() == "error");
+    // A real refused connection still permits a complete, previously cached export.
+    server.close();
+    for (const QString kind : {"pdf", "bundle"}) {
+        Lem offline(root.filePath("disconnected-" + kind));
+        LemReviewTest::prepare(offline, endpoint, imagePath);
+        LemReviewTest::openCached(offline, report("local", imagePath));
+        const auto target = root.filePath(kind == "pdf" ? "offline.pdf" : "offline.zip");
+        offline.exportReport(kind, QUrl::fromLocalFile(target));
+        CHECK(waitFor([&] { return !offline.busy(); }));
+        CHECK(bytes(target).startsWith(kind == "pdf" ? "%PDF-" : "PK"));
+    }
+    QDesktopServices::unsetUrlHandler("file");
+    qInfo() << "PASS: selected PDF and ZIP preserve existing files on correction, deletion or denied access and export locally during an outage";
     qInfo() << "PASS: contract PDF/ZIP local/server paths, closed-only, stale observer, pending closure, collisions, retry, partial failure, cancel isolation, trash/session guards and technician password actions";
 }
+
+#include "contract_export.moc"

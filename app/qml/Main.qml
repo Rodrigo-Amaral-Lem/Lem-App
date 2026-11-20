@@ -1222,7 +1222,8 @@ ApplicationWindow {
         if (!value && !item.optional)
             issues.push("Falta resposta");
         if (value && Measurements.digits(item.id) && Measurements.format(item.id, value) === null)
-            issues.push("Valor inválido: até " + Measurements.digits(item.id) + " algarismos inteiros e 2 decimais, ou Não Aplicável");
+            issues.push(Measurements.milliamp(item.id) ? "Indique um número inteiro de até 6 algarismos, sem separador decimal." :
+                "Valor inválido: até " + Measurements.digits(item.id) + " algarismos inteiros e 2 decimais, ou Não Aplicável");
         if (item.reading_required && /^(OK|NOK)$/i.test(value))
             issues.push("Falta valor medido");
         if (!item.notes_disabled && (value === "NOK" || a.assessment === "NOK") && !String(a.notes || "").trim())
@@ -5339,6 +5340,18 @@ ApplicationWindow {
                                 text: (win.reportData._conflict_reason || "A propriedade ou a revisão mudou no servidor.") + " As respostas e fotografias locais foram conservadas. Pode criar outro rascunho a partir desta cópia."
                             }
                             UiButton {
+                                objectName: "exportOrderRecovery"
+                                Layout.fillWidth: true
+                                visible: !!win.reportData._order_item
+                                text: "Guardar cópia para entrega"
+                                onClicked: {
+                                    if (!lem.prepareExport("recovery")) return
+                                    win.exportKind = "recovery"
+                                    exportDialog.selectedFile = lem.defaultExport("recovery")
+                                    exportDialog.open()
+                                }
+                            }
+                            UiButton {
                                 objectName: "viewConflictServer"
                                 Layout.fillWidth: true
                                 text: "Consultar versão do servidor"
@@ -5551,7 +5564,7 @@ ApplicationWindow {
                                                     validator: RegularExpressionValidator {
                                                         regularExpression: Measurements.editorPattern(itemCard.measurementId)
                                                     }
-                                                    inputMethodHints: Measurements.milliamp(itemCard.measurementId) ? Qt.ImhDigitsOnly : Measurements.digits(itemCard.measurementId) ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
+                                                    inputMethodHints: Measurements.digits(itemCard.measurementId) ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
                                                     text: itemCard.modelData.id === "MAN.18" && Measurements.notApplicable(itemCard.answerValue) ? "NA" : Measurements.editorText(itemCard.measurementId, win.answerFor(itemCard.modelData.id).value)
                                                     enabled: !lem.busy
                                                     selectByMouse: true
@@ -5564,6 +5577,15 @@ ApplicationWindow {
                                                                 lem.answer(itemCard.modelData.id, formatted, notes.text);
                                                         }
                                                     }
+                                                }
+                                                UiLabel {
+                                                    objectName: "integerError_" + itemCard.modelData.id
+                                                    visible: valueField.visible && Measurements.milliamp(itemCard.measurementId)
+                                                             && !!valueField.text && Measurements.format(itemCard.measurementId, valueField.text) === null
+                                                    Layout.fillWidth: true
+                                                    wrapMode: Text.Wrap
+                                                    color: "#a12626"
+                                                    text: "Indique um número inteiro de até 6 algarismos, sem separador decimal."
                                                 }
                                                 UiButton {
                                                     objectName: "sign_" + itemCard.modelData.id

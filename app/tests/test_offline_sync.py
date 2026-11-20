@@ -51,15 +51,19 @@ def main(binary, delete_ack=False, legacy_delete_ack=False):
         runner = folder / "runner.py"
         branding_output = Path(os.environ.get("LEM_BRANDING_TEST_OUTPUT", str(folder / "branding")))
         branding_output.mkdir(parents=True, exist_ok=True)
-        runner.write_text("""import asyncio,json,sys
+        runner.write_text("""import asyncio,json,os,sys
 from fastapi.responses import JSONResponse
 from app.main import create_app
+from app.models import ImportBatch
+from sqlalchemy import func, select
 app=create_app();counts={};lost=False;lost_delete=False;arm_delete=False;photo_active=0;photo_max=0;photo_gets=0;lost_correction=False;fail_contract_refresh=False
 legacy_identity_conflict = False
+lost_import_path = None
+import_replayed_once = False
 @app.middleware('http')
 async def track(request,call_next):
  global lost,lost_delete,arm_delete,photo_active,photo_max,photo_gets,lost_correction,fail_contract_refresh
- global legacy_identity_conflict
+ global legacy_identity_conflict, lost_import_path, import_replayed_once
  key=request.method+' '+request.url.path;counts[key]=counts.get(key,0)+1
  if request.method == 'POST' and request.url.path.endswith('/correction/commit') and not legacy_identity_conflict:
   legacy_identity_conflict = True
@@ -82,6 +86,13 @@ async def track(request,call_next):
    response=await call_next(request)
   finally:photo_active-=1
  else:response=await call_next(request)
+ if os.environ.get("LEM_TEST_IMPORT_REPLAY") == "1" and request.method == "POST" and request.url.path.endswith("/import") and response.status_code == 200:
+  if lost_import_path is None and counts[key] == 2:  # preview, then accepted commit
+   lost_import_path = request.url.path
+   return JSONResponse({})  # committed; acknowledgement unreadable to the client
+  if request.url.path == lost_import_path and counts[key] == 3:
+   with app.state.factory() as db:
+    import_replayed_once = db.scalar(select(func.count(ImportBatch.id))) == 1
  if request.method=='PUT' and request.url.path.endswith('/presentation') and response.status_code==200:fail_contract_refresh=True
  if arm_delete and not lost_delete and request.method=='DELETE' and '/photos/' in request.url.path and response.status_code==200:
   lost_delete=True;return JSONResponse({})
@@ -91,7 +102,7 @@ async def track(request,call_next):
   lost_correction=True;return JSONResponse({})
  return response
 @app.get('/__test/stats')
-def stats():return {'requests':counts,'photo_max':photo_max,'lost_delete':lost_delete,'lost_correction':lost_correction,'legacy_identity_conflict':legacy_identity_conflict}
+def stats():return {'requests':counts,'import_replayed_once':import_replayed_once,'photo_max':photo_max,'lost_delete':lost_delete,'lost_correction':lost_correction,'legacy_identity_conflict':legacy_identity_conflict}
 """ + ("""
 import os
 import httpx
@@ -164,6 +175,7 @@ def delete_ack_stats():
             "DATABASE_URL": "sqlite:///" + str(folder / "test.db"),
             "NO_PROXY": "localhost,127.0.0.1",
             "QT_QPA_PLATFORM": "offscreen",
+            "LEM_TEST_IMPORT_REPLAY": "0" if delete_ack else "1",
             "LEM_TEST_LEGACY_DELETE_ACK": "1" if legacy_delete_ack else "0",
             "LEM_BRANDING_TEST_OUTPUT": str(branding_output.resolve()),
         }
@@ -214,7 +226,7 @@ def delete_ack_stats():
                     if delete_ack:
                         check_delete_ack(client, run_native, args, folder)
                         return
-                    assert run_native(*args) == 0
+                    assert run_native(*args, "--retry-import") == 0
                     for name in ('legacy', 'legacy-admin'):
                         direct = PdfReader(branding_output / (name + '.pdf'))
                         assert 'CSMTEC' in direct.pages[0].extract_text()
@@ -226,6 +238,7 @@ def delete_ack_stats():
                             assert direct.pages[0].extract_text() == bundled.pages[0].extract_text()
                     stats = client.get("http://127.0.0.1:18765/__test/stats").json()
                     counts = stats["requests"]
+                    assert stats["import_replayed_once"], stats
                     assert stats["photo_max"] <= 4, stats
                     assert stats["lost_delete"], stats
                     assert stats["legacy_identity_conflict"], stats
@@ -269,7 +282,7 @@ def check_delete_ack(client, run_native, args, folder):
     state = ("--state", str(folder))
     first = run_native(*args, *state, "--delete-ack")
     url = "http://127.0.0.1:18765"
-    auth = {"X-Lem-Client-Version": "0.3.2"}
+    auth = {"X-Lem-Client-Version": os.environ.get("LEM_TEST_CLIENT_VERSION", "0.5.4")}
     login = client.post(url + "/api/login", headers=auth,
                         json={"email": "admin@lem.pt", "password": "IntegrationPassword123!"})
     auth["Authorization"] = "Bearer " + login.raise_for_status().json()["token"]

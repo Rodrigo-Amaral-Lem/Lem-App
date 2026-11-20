@@ -54,7 +54,8 @@ def verify(binary, port):
                 api.put("/api/work-orders/" + oid, headers=creator, json=dict(id=oid, revision=0,
                     start=day, due=day, technicians=[uid], targets=[candidate["target"]])).raise_for_status()
                 url = "/api/reports/" + rid
-                body = dict(charger_id=candidate["target"], checklist_version=TEMPLATE["version"],
+                order = next(row for row in api.get("/api/work-orders", headers=tech).json()["orders"] if row["id"] == oid)
+                body = dict(charger_id=candidate["target"], work_item_id=order["items"][0]["id"], checklist_version=TEMPLATE["version"],
                             base_revision=0, status="draft", payload={"answers":{}})
                 api.put(url, headers=tech, json=body).raise_for_status()
                 payload = {"answers": answers()}

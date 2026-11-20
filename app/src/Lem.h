@@ -406,7 +406,7 @@ class Lem : public QObject {
     void startSync(bool manual);
     bool releasePhotoSync(QString reportId);
     void syncFailed(int code, QString message);
-    bool mergeSync(QJsonObject sent, bool complete = false);
+    bool mergeSync(QJsonObject sent, bool complete = false, QJsonValue serverPhotos = {});
     void syncRequest(QString method, QString path, QByteArray body, Callback cb);
     bool saveEdits(QJsonObject report);
     QString editPath(QString reportId) const;
@@ -446,6 +446,7 @@ class Lem : public QObject {
     bool orderAllowsDraft(QString target) const;
     void receiveFollowedReports();
     QJsonObject receivedPhotoPaths(QJsonObject report) const;
+    QJsonArray reconcilePhotos(QJsonArray photos, const QJsonArray &serverPhotos, const QJsonArray &removed) const;
     void refreshContracts(bool fromManualSync, bool includeStations = false);
     void refreshCatalogue(QString id, bool force = false);
     void resetStationCatalogue();
@@ -471,7 +472,8 @@ class Lem : public QObject {
     void reconcileContractSync(bool fromManualSync);
     void syncNext(int index, QString notice = {});
     void syncPhotos(int index, QJsonObject report, int photoIndex);
-    void getPhotos(QJsonObject report, int index);
+    static bool validRemoteReport(const QJsonObject &report, const QString &expectedId);
+    bool getPhotos(QJsonObject report, const QString &expectedId);
     QString localPath(QUrl url) const;
     QNetworkAccessManager net;
     QString m_root, m_server = ServerSettings::defaultUrl(), m_message, m_token, m_contract;

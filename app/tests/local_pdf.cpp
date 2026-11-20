@@ -221,7 +221,14 @@ int main(int argc, char **argv) {
     missing["path"] = QUrl::fromLocalFile(corrupt.fileName()).toString();
     photos[0] = missing;
     report["photos"] = photos;
-    // As on the server, damaged historical images produce a visible warning.
+    // Pending local work cannot use a broken original as evidence.
+    CHECK(!ReportPdf::write(report, safe, &error));
+    CHECK(kept.open(QIODevice::ReadOnly) && kept.readAll() == "KEEP");
+    kept.close();
+    // The server already accepted this historical original. Retain its visible warning.
+    missing["uploaded"] = true;
+    photos[0] = missing;
+    report["photos"] = photos;
     CHECK(ReportPdf::write(report, safe, &error));
     CHECK(kept.open(QIODevice::ReadOnly));
     CHECK(kept.readAll().startsWith("%PDF-"));

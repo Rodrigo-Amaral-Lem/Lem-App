@@ -270,3 +270,7 @@ including its in-flight payload and durable cache. Oversized HTTP 401/426 eviden
 reach the failure callback with the authentication status, not the completed-file callback.
 
 Run `python app/tests/test_work_order_download.py <Lem-offline-test> <free-loopback-port>` with the sibling Server dependencies and matching Qt runtime. The runner seeds two closed reports on separate orders and checks the followed report and its original evidence on disk after administrator login.
+
+## Field handoff regressions
+
+Run CTest with `LEM_BUILD_TESTS=ON` for profile writer exclusion, malformed refreshes, over-acknowledgements, local photo and time validation, attachment reconciliation, and online export checks. Run `python app/tests/test_order_reconnection.py <Lem-offline-test> <private-port>` against the sibling Server tests to remove and restore a technician's work-order grant across a restart. It verifies the same report UUID, Portuguese and English text, and the original photograph's digest. Use `test_measurement_inputs.py` for typed and pasted integer mA inputs.

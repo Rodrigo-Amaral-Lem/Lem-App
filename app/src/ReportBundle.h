@@ -7,6 +7,7 @@
 #include <QCryptographicHash>
 #include <QDataStream>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMap>
@@ -102,13 +103,27 @@ inline QJsonObject document(const QJsonObject &report) {
     doc["photos"] = photos; return doc;
 }
 
-inline bool archive(const QJsonObject &report, QIODevice &output, QString *error) {
-    const auto pdf = ReportPdf::render(report, error);
-    if (!error->isEmpty()) return false;
+inline bool archive(const QJsonObject &report, QIODevice &output, QString *error, bool recovery = false) {
     Writer zip(output);
     const auto identifier = ReportNaming::identifier(report);
-    if (!zip.add(identifier + ".pdf", pdf) ||
-        !zip.add(identifier + ".json", QJsonDocument(document(report)).toJson(QJsonDocument::Indented))) {
+    auto manifest = document(report);
+    if (recovery) {
+        manifest["purpose"] = "work_order_recovery";
+        manifest["work_item_id"] = report["_order_item"];
+        manifest["pending_removals"] = report["deleted_photos"].toArray();
+        QJsonArray serverOnly;
+        for (const auto &entry : report["photos"].toArray()) {
+            const auto photo = entry.toObject();
+            if (photo["uploaded"].toBool() && !QFileInfo::exists(QUrl(photo["path"].toString()).toLocalFile()))
+                serverOnly.append(photo["id"]);
+        }
+        manifest["server_only_photos"] = serverOnly;
+    } else {
+        const auto pdf = ReportPdf::render(report, error);
+        if (!error->isEmpty()) return false;
+        if (!zip.add(identifier + ".pdf", pdf)) { *error = "Não foi possível gravar o PDF no ZIP."; return false; }
+    }
+    if (!zip.add(identifier + ".json", QJsonDocument(manifest).toJson(QJsonDocument::Indented))) {
         *error = "Não foi possível gravar o ZIP."; return false;
     }
     QSet<QString> names;
@@ -124,6 +139,7 @@ inline bool archive(const QJsonObject &report, QIODevice &output, QString *error
         QFile file(QUrl(p["path"].toString()).toLocalFile());
         const auto folder = mime.startsWith("video/") ? "videos/" : "fotografias/";
         const auto name = folder + checkpoint + "/" + ReportNaming::evidenceFilename(identifier, id, extensions[mime]);
+        if (recovery && p["uploaded"].toBool() && !file.exists()) continue;
         if (!file.open(QIODevice::ReadOnly) || file.size() <= 0 ||
             !zip.add(name, file, p["digest"].toString())) {
             *error = "Não foi possível exportar a evidência " + checkpoint + ". Verifique o ficheiro e o espaço disponível."; return false;
@@ -141,11 +157,12 @@ inline bool copy(QIODevice &source, QIODevice &destination) {
     return true;
 }
 
-inline bool write(const QJsonObject &report, const QString &destination, QString *error) {
-    *error = ReportPdf::validate(report); if (!error->isEmpty()) return false;
+inline bool write(const QJsonObject &report, const QString &destination, QString *error, bool recovery = false) {
+    *error = recovery ? QString{} : ReportPdf::validate(report);
+    if (!error->isEmpty()) return false;
     if (destination.startsWith("content:")) {
         QTemporaryFile staged;
-        if (!staged.open() || !archive(report, staged, error) || !staged.flush() || !staged.seek(0)) {
+        if (!staged.open() || !archive(report, staged, error, recovery) || !staged.flush() || !staged.seek(0)) {
             if (error->isEmpty()) *error = "Não foi possível preparar o ZIP local."; return false;
         }
         QFile file(destination);
@@ -155,7 +172,7 @@ inline bool write(const QJsonObject &report, const QString &destination, QString
         return true;
     }
     QSaveFile file(destination);
-    if (!file.open(QIODevice::WriteOnly) || !archive(report, file, error) || !file.commit()) {
+    if (!file.open(QIODevice::WriteOnly) || !archive(report, file, error, recovery) || !file.commit()) {
         if (error->isEmpty()) *error = "Não foi possível guardar o ZIP."; return false;
     }
     return true;

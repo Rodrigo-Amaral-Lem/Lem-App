@@ -3,6 +3,9 @@
 
 // Run only against the disposable test API provided by test_offline_sync.py.
 #include "Lem.h"
+#include "AppStorage.h"
+#include <QProcess>
+#include "ReportPdf.h"
 #include "TestSignature.h"
 #include <QGuiApplication>
 #include <QTemporaryDir>
@@ -249,13 +252,61 @@ static int resumeDeleteAck(const QString &state) {
     return 0;
 }
 
+// The API fixture removes and restores this technician's grant between two launches.
+static int restoredVisit(const QStringList &args) {
+    const auto endpoint = args[2], root = args[3], order = args[4], item = args[5], target = args[6], id = args[7];
+    const auto open = [&](Lem &client) {
+        client.setServer(endpoint);
+        client.login("old-shift@example.invalid", qEnvironmentVariable("LEM_ORDER_TEST_PASSWORD"));
+        return until([&]{ return client.authenticated() && !client.workOrders().isEmpty() && !client.refreshing(); })
+            && client.prepareOrderReport(order, item) == id && client.openReport(target, id)
+            && until([&]{ return client.current()["id"] == id && !client.busy(); });
+    };
+    const auto expected = QStringLiteral("Ângulo revisto, ligação confirmada / field follow-up.");
+    {
+        Lem field(root + "/profile");
+        CHECK(open(field));
+        CHECK(field.current()["_order_item"] == item);
+        CHECK(write(root + "/opened", {}));
+        CHECK(until([&]{ return QFile::exists(root + "/scope-removed"); }));
+        field.answer("FIN.03", "", expected);
+        QImage image(80, 60, QImage::Format_RGB32);
+        image.fill(Qt::darkCyan);
+        CHECK(image.save(root + "/original.png"));
+        field.attach("FIN.03", QUrl::fromLocalFile(root + "/original.png"));
+        field.sync();
+        CHECK(until([&]{ return field.current()["_conflict"].toBool() && !field.syncing(); }));
+        CHECK(field.current()["_conflict_kind"] == "order_scope" && notes(field, "FIN.03") == expected);
+        CHECK(write(root + "/upload-rejected", {}));
+        CHECK(until([&]{ return QFile::exists(root + "/scope-restored"); }));
+    }
+    Lem restarted(root + "/profile");
+    CHECK(open(restarted));
+    CHECK(restarted.current()["_order_item"] == item);
+    restarted.sync();
+    if (!until([&]{ return !restarted.syncing() && !restarted.current()["dirty"].toBool(); })) {
+        qCritical() << "Restored visit did not synchronize:" << restarted.syncState() << restarted.message()
+                    << restarted.current()["_conflict_reason"] << restarted.current()["_contract_unavailable"];
+        return 1;
+    }
+    CHECK(restarted.current()["id"] == id && !restarted.current()["_conflict"].toBool());
+    CHECK(notes(restarted, "FIN.03") == expected);
+    const auto photo = restarted.current()["photos"].toList().value(0).toMap();
+    QFile original(root + "/original.png");
+    CHECK(original.open(QIODevice::ReadOnly));
+    const auto digest = QCryptographicHash::hash(original.readAll(), QCryptographicHash::Sha256).toHex();
+    CHECK(photo["uploaded"].toBool() && photo["digest"].toString() == QString::fromLatin1(digest));
+    qInfo() << "Restored visit, same UUID and evidence SHA-256" << digest;
+    return 0;
+}
+
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
     ExportViewer exportViewer;
     QDesktopServices::setUrlHandler("file", &exportViewer, "view");
     // These integration fixtures only contact the disposable loopback server.
     QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
-    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.5.0"));
+    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.5.4"));
     app.setOrganizationName("Lem-Offline-Test");
     app.setApplicationName("Lem Offline Test");
     const auto args = app.arguments();
@@ -266,6 +317,42 @@ int main(int argc, char **argv) {
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsRoot + "/settings");
     QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, settingsRoot + "/system-settings");
+    if (args.size() == 3 && args[1] == "--second-profile-writer") {
+        const auto lock = AppStorage::lockWriter(args[2]);
+        if (!lock) return 3;
+        Lem second(args[2]);
+        second.demo();
+        second.answer("FIN.03", "", "Segunda intervenção / South");
+        CHECK(until([&] { return !second.saving(); }));
+        CHECK(write(args[2] + "/second-draft.json", {{"id", second.current()["id"].toString()}}));
+        return 0;
+    }
+    if (args.size() == 1) {
+        const auto profile = temp.filePath("shared-profile");
+        const QStringList second{"--second-profile-writer", profile};
+        QString firstId;
+        {
+            const auto writer = AppStorage::lockWriter(profile);
+            CHECK(writer);
+            Lem technician(profile);
+            technician.demo();
+            firstId = technician.current()["id"].toString();
+            technician.answer("SITE.02", "NOK", "Medição Âncora / North");
+            CHECK(until([&] { return !technician.saving(); }));
+            CHECK(QProcess::execute(app.applicationFilePath(), second) == 3);
+        }
+        CHECK(QProcess::execute(app.applicationFilePath(), second) == 0);
+        const auto secondId = read(profile + "/second-draft.json")["id"].toString();
+        CHECK(!firstId.isEmpty() && !secondId.isEmpty() && firstId != secondId);
+        const auto writer = AppStorage::lockWriter(profile);
+        CHECK(writer);
+        Lem reloaded(profile);
+        reloaded.demo();
+        CHECK(reloaded.openReport("", firstId) && notes(reloaded, "SITE.02") == "Medição Âncora / North");
+        CHECK(reloaded.openReport("", secondId) && notes(reloaded, "FIN.03") == "Segunda intervenção / South");
+        qInfo() << "PASS: two desktop processes and a restarted controller retained both offline drafts";
+    }
+    if (args.size() == 8 && args[1] == "--restored-visit") return restoredVisit(args);
     if (args.size() == 6 && args[1] == "--work-order-download") {
         Lem observer(temp.path() + "/observer");
         observer.setServer(args[2]);
@@ -721,8 +808,16 @@ int main(int argc, char **argv) {
     c.previewExcel("Parque", 1,
                    {{"external_id", "Identificador"}, {"model", "Modelo"}, {"serial", "Série"}, {"connectors", "Tomadas"}});
     CHECK(settled(c));
+    const auto importOperation = c.importPreview().value("operation_id").toString();
+    CHECK(!QUuid(importOperation).isNull());
     c.commitExcel();
     CHECK(settled(c));
+    if (args.contains("--retry-import")) {
+        CHECK(c.importPreview().value("operation_id") == importOperation);
+        c.commitExcel();
+        CHECK(settled(c) && c.importPreview().isEmpty());
+        qInfo() << "Retried the committed workbook with its original operation ID";
+    }
     CHECK(!c.chargers().isEmpty());
     const auto charger = c.chargers().first().toMap()["id"].toString();
     if (args.contains("--delete-ack")) return exerciseDeleteAck(c, charger, source, state);
@@ -1137,6 +1232,15 @@ int main(int argc, char **argv) {
     CHECK(addTestSignature(owner));
     owner.finish(); CHECK(settled(owner));
     CHECK(owner.current()["status"] == "closed" && !owner.current()["dirty"].toBool());
+    const auto closedBeforeCorrection = QJsonObject::fromVariantMap(owner.current());
+    QHash<QString, QByteArray> closedOriginals;
+    for (const auto &value : closedBeforeCorrection["photos"].toArray()) {
+        const auto photo = value.toObject();
+        QFile original(QUrl(photo["path"].toString()).toLocalFile());
+        CHECK(original.open(QIODevice::ReadOnly));
+        closedOriginals.insert(photo["id"].toString(), original.readAll());
+    }
+    CHECK(closedOriginals.size() == 3);
     // Catalogue status must already be correct while the full cached report is still stale.
     bool catalogueClosedBeforeDownload = false;
     const auto catalogueWatch = QObject::connect(&viewer, &Lem::chargersChanged, [&] {
@@ -1417,6 +1521,31 @@ int main(int argc, char **argv) {
         CHECK(row["details"].toMap()["model"] == "Modelo corrigido pelo administrador");
         CHECK(row["details"].toMap()["serial"] == "SN-CORRECAO-ADMIN");
     }
+    // This computer still has the previous signed report and all three originals.
+    // Open that same cached selection independently for the two export formats.
+    for (const QString kind : {"pdf", "bundle"}) {
+        auto cached = closedBeforeCorrection;
+        QJsonArray originals;
+        for (const auto &value : cached["photos"].toArray()) {
+            auto photo = value.toObject();
+            const auto id = photo["id"].toString();
+            QFile file(temp.filePath(kind + "-" + id + ".png"));
+            CHECK(file.open(QIODevice::WriteOnly) && file.write(closedOriginals.value(id)) > 0);
+            file.close();
+            photo["path"] = QUrl::fromLocalFile(file.fileName()).toString();
+            originals.append(photo);
+        }
+        cached["photos"] = originals;
+        CHECK(ReportPdf::validate(cached).isEmpty());
+        LemReviewTest::cachedReport(owner, cached);
+        QFile destination(temp.filePath(kind == "pdf" ? "previous.pdf" : "previous.zip"));
+        CHECK(destination.open(QIODevice::WriteOnly) && destination.write("previous export") == 15);
+        destination.close();
+        owner.exportReport(kind, QUrl::fromLocalFile(destination.fileName())); CHECK(settled(owner));
+        CHECK(destination.open(QIODevice::ReadOnly) && destination.readAll() == "previous export");
+        CHECK(owner.current()["id"] == correctionId && notes(owner, "FIN.03") == "LOSE_CORRECTION_ACK");
+    }
+    qInfo() << "PASS: online PDF and ZIP from a complete second computer cache preserve the destination and open the accepted correction";
     owner.sync(); CHECK(settled(owner));
     owner.openReport(charger, correctionId); CHECK(settled(owner));
     CHECK(owner.current()["status"] == "closed" && owner.current()["owner_id"] == originalOwner);

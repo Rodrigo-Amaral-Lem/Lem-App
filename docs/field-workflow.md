@@ -243,3 +243,9 @@ terminal (TPM) and suggests `Sem TPM` for N/A.
 
 The photo editor uses two 48-pixel icon-only controls: clockwise rotation and crop. Crop is optional
 and its selected background shows whether it is active. Both icons are drawn, independent of fonts.
+
+### Reconnecting during a planned visit
+
+Open the order to see who owns the accepted draft. A distinct unsent copy remains available through the local recovery action. On restored access, synchronize the original report. For a permanent handoff, save its recovery ZIP and give it to the new owner. Retain the original device copy until the recipient checks the answers and attachments. A later visit to the same membership has a separate item ID.
+
+A decimal point or comma in an integer mA reading remains visible until corrected. Review and correct the value before closure. A rejected oversized report reopens under its original ID. The device keeps its evidence and checks the finish against the recorded start.

@@ -64,6 +64,22 @@ bool readableReport(const QJsonObject &report) {
            report.value("photos").isArray() && report.value("template").isObject() &&
            report.value("snapshot").isObject();
 }
+// A malformed 0.5.3 refresh could persist only display/cache defaults under an
+// empty key. Recover that exact shape and keep the guard for any real data.
+bool emptyRefreshPlaceholder(QJsonObject entry) {
+    if (entry["last_access"].toDouble() <= 0 || !entry.value("photos").isArray() ||
+        !entry.value("photos").toArray().isEmpty() || entry.value("dirty").toBool()) return false;
+    for (const auto key : {"last_access", "photos"}) entry.remove(key);
+    for (const auto key : {"offline_photos", "dirty"}) {
+        if (entry.contains(key) && entry.value(key) != QJsonValue(false)) return false;
+        entry.remove(key);
+    }
+    for (const auto key : {"id", "status", "template", "snapshot", "charger_id", "contract_id", "presentation"}) {
+        if (entry.contains(key) && !entry.value(key).isNull()) return false;
+        entry.remove(key);
+    }
+    return entry.isEmpty();
+}
 QString uuid() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
@@ -111,8 +127,8 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
         for (auto it = m_reports.constBegin(); it != m_reports.constEnd(); ++it) {
             const auto r = it.value().toObject();
             if (r["owner_id"] == m_user["id"] && r["dirty"].toBool() && r["correction"].toObject().isEmpty()) {
-                localDrafts.insert(r["charger_id"].toString(), QVariantMap{{"id", it.key()},
-                    {"item", r["_order_item"].toString()}, {"closed", r["status"] == "closed"}});
+                localDrafts.insert(r["_order_item"].toString(r["charger_id"].toString()), QVariantMap{{"id", it.key()},
+                    {"item", r["_order_item"].toString()}, {"conflict", r["_conflict"].toBool()}, {"closed", r["status"] == "closed"}});
             }
             const auto snapshot = r["snapshot"].toObject();
             reportSummaries.append(
@@ -344,7 +360,8 @@ void Lem::loadUser() {
             // Only discard empty placeholders; retain non-empty damaged records
             // for recovery instead of silently deleting potentially unsent work.
             if (m_reports.value(key).isNull() ||
-                (m_reports.value(key).isObject() && m_reports.value(key).toObject().isEmpty()))
+                (m_reports.value(key).isObject() && (m_reports.value(key).toObject().isEmpty() ||
+                 (key.isEmpty() && emptyRefreshPlaceholder(m_reports.value(key).toObject())))))
                 m_reports.remove(key);
             else if (!m_reports.value(key).isObject() ||
                      m_reports.value(key).toObject().value("id").toString() != key ||
@@ -378,7 +395,12 @@ void Lem::loadUser() {
     // Recover validated files committed between batch metadata checkpoints.
     // A .part/QSaveFile temporary is never considered complete evidence.
     for (const auto &id : m_reports.keys()) {
-        auto report = m_reports[id].toObject(); auto photos = report["photos"].toArray();
+        auto report = m_reports[id].toObject();
+        if (report["_conflict"].toBool() && !report.contains("_conflict_kind") &&
+            !report["_order_item"].toString().isEmpty() &&
+            report["_conflict_reason"] == "Contrato ou tarefa não atribuídos para esta operação.")
+            report["_conflict_kind"] = "order_scope";
+        auto photos = report["photos"].toArray();
         for (int i = 0; i < photos.size(); ++i) {
             auto photo = photos[i].toObject();
             if (!photo["uploaded"].toBool() || !photo["path"].toString().isEmpty()) continue;
@@ -1180,7 +1202,7 @@ bool Lem::openReport(QString chargerId, QString reportId) {
                 return;
             }
             report["dirty"] = false;
-            getPhotos(report, 0);
+            getPhotos(report, reportId);
         }, "application/json", [this](int code, QString) {
             m_busy = false;
             status(code == 410 || code == 404 ? "O relatório selecionado já não está disponível."
@@ -1261,8 +1283,23 @@ bool Lem::openReport(QString chargerId, QString reportId) {
 
 // Despite the historical name, install report/photo METADATA without downloading images.
 // Recover available private file paths, then checkpoint the selected report.
-void Lem::getPhotos(QJsonObject report, int index) {
-    Q_UNUSED(index);
+bool Lem::validRemoteReport(const QJsonObject &report, const QString &expectedId) {
+    return !expectedId.isEmpty() && report.value("id") == expectedId &&
+           readableReport(report) && !report.value("charger_id").toString().isEmpty() &&
+           report.value("owner_id").isString() && report.value("revision").toInt() > 0 &&
+           (report.value("status") == "draft" || report.value("status") == "closed");
+}
+
+bool Lem::getPhotos(QJsonObject report, const QString &expectedId) {
+    if (!validRemoteReport(report, expectedId)) {
+        m_busy = false;
+        status("Resposta de report inválida. Os dados locais foram conservados.");
+        return false;
+    }
+    if (const auto item = report.value("work_item_id"); item.isString())
+        report["_order_item"] = item;
+    else if (const auto local = m_reports.value(expectedId).toObject(); local.contains("_order_item"))
+        report["_order_item"] = local["_order_item"];
     m_syncConflicts.remove(report["id"].toString());
     // Metadata first; remote originals are downloaded only on explicit demand.
     report["offline_photos"] =
@@ -1273,6 +1310,7 @@ void Lem::getPhotos(QJsonObject report, int index) {
     m_busy = false;
     remember();
     status("Report disponível. Fotografias antigas podem ser descarregadas quando necessário.");
+    return true;
 }
 
 QJsonObject Lem::receivedPhotoPaths(QJsonObject report) const {
@@ -1342,7 +1380,10 @@ void Lem::answer(QString key, QString value, QString notes) {
     m_current["_edit_seq"] = m_current["_edit_seq"].toDouble() + 1;
     queueEdits(m_current);
     m_reports[m_current.value("id").toString()] = m_current;
-    emit changed();
+    if (json(payload).size() > LEM_PAYLOAD_UTF8_BYTES)
+        status("Report demasiado grande. Reduza o texto das observações antes de concluir.");
+    else
+        emit changed();
     scheduleSync();
 }
 // Focus is an explicit request to replace a generated observation. A custom
@@ -1434,32 +1475,38 @@ bool Lem::attachToReport(QString reportId, QString key, QUrl url) {
         }
         ext = videoMime == "video/3gpp" ? ".3gp" : ".mp4";
     } else {
-    QBuffer b(&bytes);
-    b.open(QIODevice::ReadOnly);
-    QImageReader reader(&b);
-    reader.setAutoTransform(true);
-    auto size = reader.size();
-    if (!size.isValid() || qint64(size.width()) * size.height() > 40000000) {
-        status("Imagem inválida ou superior a 40 MP.");
-        return false;
-    }
-    auto format = reader.format().toLower();
-    if (format == "jpeg" || format == "jpg")
-        ext = ".jpg";
-    else if (format == "png")
-        ext = ".png";
-    else {
-        auto image = reader.read();
-        if (image.isNull()) {
-            status("Formato de imagem não suportado.");
+        QBuffer input(&bytes);
+        input.open(QIODevice::ReadOnly);
+        QImageReader reader(&input);
+        reader.setAutoTransform(true);
+        const auto size = reader.size();
+        if (!size.isValid() || qint64(size.width()) * size.height() > 40000000) {
+            status("Imagem inválida ou superior a 40 MP.");
             return false;
         }
-        bytes.clear();
-        QBuffer output(&bytes);
-        output.open(QIODevice::WriteOnly);
-        image.save(&output, "JPEG", 92);
-        ext = ".jpg";
-    }
+        const auto format = reader.format().toLower();
+        const bool jpeg = format == "jpeg" || format == "jpg";
+        const bool png = format == "png";
+        if ((jpeg && !EvidenceMedia::completeJpeg(bytes)) || (png && !EvidenceMedia::completePng(bytes))) {
+            status("Fotografia incompleta. Selecione o original.");
+            return false;
+        }
+        const auto image = reader.read();
+        if (image.isNull()) {
+            status("Não foi possível ler a fotografia completa.");
+            return false;
+        }
+        ext = png ? ".png" : ".jpg";
+        if (!jpeg && !png) {
+            QByteArray converted;
+            QBuffer output(&converted);
+            output.open(QIODevice::WriteOnly);
+            if (!image.save(&output, "JPEG", 92)) {
+                status("Não foi possível converter a fotografia.");
+                return false;
+            }
+            bytes = converted;
+        }
     }
     if (bytes.size() > (videoMime.isEmpty() ? 20 : 60) * 1024 * 1024) {
         status("Limite por ficheiro: 20 MiB por fotografia ou 60 MiB por vídeo."); return false;
@@ -2233,18 +2280,18 @@ void Lem::beginReportCorrection() {
         json({{"id", requestId}, {"base_revision", original["revision"]}}),
         [this, original, requestId](QByteArray data) {
             auto report = QJsonDocument::fromJson(data).object();
-            if (report["id"] != requestId || report["correction"].toObject()["state"] != "editing") {
+            if (!validRemoteReport(report, requestId) || report["correction"].toObject()["state"] != "editing") {
                 m_busy = false; status("Resposta inválida; repita a abertura da correção para recuperar a cópia."); return;
             }
             const auto directory = cacheDir();
             auto watcher = new QFutureWatcher<void>(this);
-            connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher, report, original] {
+            connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher, report, original, requestId] {
                 watcher->deleteLater();
                 auto source = m_reports.value(original["id"].toString()).toObject();
                 source.remove("_correction_request_id");
                 if (!source.isEmpty()) m_reports[original["id"].toString()] = source;
                 auto ready = report; ready["dirty"] = false;
-                getPhotos(ready, 0);
+                if (!getPhotos(ready, requestId)) return;
                 status("Cópia de correção aberta. O original só será substituído ao guardar a correção completa.");
             });
             watcher->setFuture(QtConcurrent::run(&m_editPool, [original, report, directory] {
@@ -2318,6 +2365,13 @@ void Lem::finish() {
     if (m_template["version"].toInt() >= 7) answers = MaintenanceRules::apply(answers, false);
     auto photos = m_current["photos"].toArray();
     QStringList errors;
+    for (const auto &entry : photos) {
+        const auto photo = entry.toObject();
+        const auto mime = photo["mime"].toString();
+        if (!photo["uploaded"].toBool() && mime.startsWith("image/") &&
+            !EvidenceMedia::readableStoredPhoto(QUrl(photo["path"].toString()).toLocalFile(), mime))
+            errors << photo["checkpoint"].toString() + ": substitua a fotografia incompleta pelo original";
+    }
     if (m_template["version"].toInt() >= 7 && MaintenanceRules::reading(answers, "MAN.11") == 0)
         errors << "MAN.11: o calibre configurado deve ser superior a zero";
     const QMap<QString, QString> identityFields{{"EST.02", "manufacturer"}, {"EST.03", "model"}, {"EST.04", "serial"}};
@@ -2353,6 +2407,10 @@ void Lem::finish() {
             if (m_template["version"].toInt() >= 4 && identityFields.contains(id) && !Measurements::notApplicable(value) &&
                 value != m_current["snapshot"].toObject()["charger"].toObject()[identityFields.value(id)].toString().trimmed() && value.size() > 500)
                 errors << id + ": máximo 500 caracteres";
+            const auto notesLimit = item["kind"] == "notes" ? LEM_GENERAL_NOTE_CHARACTERS : LEM_ANSWER_CHARACTERS;
+            if (a["notes"].toString().toUcs4().size() > notesLimit ||
+                a["value"].toString().toUcs4().size() > LEM_ANSWER_CHARACTERS)
+                errors << id + ": texto demasiado longo";
             if (item["kind"] == "status" && !a["value"].toString().isEmpty() &&
                 !QStringList{"OK", "NOK", "NA"}.contains(a["value"].toString()))
                 errors << id + ": escolha OK, NOK ou N/A";
@@ -2385,15 +2443,23 @@ void Lem::finish() {
     auto payload = m_current["payload"].toObject();
     payload["answers"] = answers;
     const bool correction = m_current["correction"].toObject()["state"] == "editing";
-    if (!correction) payload["finished"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
-    else {
-        const auto start = QDateTime::fromString(payload["started"].toString(), Qt::ISODate);
-        const auto end = QDateTime::fromString(payload["finished"].toString(), Qt::ISODate);
-        if (!start.isValid() || !end.isValid() || start.timeSpec() == Qt::LocalTime ||
-            end.timeSpec() == Qt::LocalTime || end < start) {
-            m_current = previous;
-            status("Corrija as datas de início e fim antes de guardar a correção."); return;
-        }
+    if (!correction) {
+        if (previous["started"].isString()) payload["started"] = previous["started"];
+        payload["finished"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    }
+    const auto start = QDateTime::fromString(correction ? payload["started"].toString() :
+        previous["started"].toString(payload["started"].toString()), Qt::ISODate);
+    const auto end = QDateTime::fromString(payload["finished"].toString(), Qt::ISODate);
+    if (!start.isValid() || !end.isValid() || start.timeSpec() == Qt::LocalTime ||
+        end.timeSpec() == Qt::LocalTime || end < start) {
+        m_current = previous;
+        status("Verifique o relógio e as datas do report. O fim não pode ser anterior ao início.");
+        return;
+    }
+    if (json(payload).size() > LEM_PAYLOAD_UTF8_BYTES) {
+        m_current = previous;
+        status("Report demasiado grande. Reduza o texto das observações antes de concluir.");
+        return;
     }
     m_current["payload"] = payload;
     m_current["dirty"] = true;
@@ -2429,7 +2495,7 @@ void Lem::finish() {
 QString Lem::defaultExport(QString kind) const {
     return QUrl::fromLocalFile(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) +
                                "/" + ReportNaming::identifier(m_current) +
-                               (kind == "pdf" ? ".pdf" : ".zip"))
+                               (kind == "pdf" ? ".pdf" : kind == "recovery" ? "_recuperacao.zip" : ".zip"))
         .toString();
 }
 
@@ -2440,6 +2506,8 @@ bool Lem::prepareExport(QString kind) {
         status("Abra um report antes de exportar e aguarde a operação em curso.");
         return false;
     }
+    if (kind == "recovery")
+        return m_current["_conflict"].toBool() && m_current["owner_id"] == m_user["id"] && !m_current["_order_item"].toString().isEmpty();
     if (m_current["status"].toString() != "closed") {
         status("Conclua o report antes de exportar PDF ou ZIP.");
         return false;
@@ -2471,7 +2539,7 @@ bool Lem::prepareExport(QString kind) {
 }
 void Lem::exportSaved(const QString &kind, const QUrl &target, bool local) {
     QString message =
-        (local ? (kind == "bundle" ? "ZIP exportado localmente: " : "PDF exportado localmente: ") : "Exportado: ") + target.toDisplayString();
+        (local ? (kind == "recovery" ? "Cópia de recuperação guardada: " : kind == "bundle" ? "ZIP exportado localmente: " : "PDF exportado localmente: ") : "Exportado: ") + target.toDisplayString();
     // Called on the GUI thread only after the writer has closed/committed the file.
     // Qt uses Android's content URI/FileProvider support, or the desktop file association.
     if (kind == "pdf" && !QDesktopServices::openUrl(target))
@@ -2482,59 +2550,70 @@ void Lem::exportSaved(const QString &kind, const QUrl &target, bool local) {
 void Lem::exportReport(QString kind, QUrl target) {
     if (!prepareExport(kind))
         return;
+    if (kind == "recovery") { exportPreparedReport(kind, target); return; }
     const auto report = withContractPresentation(m_current);
     const auto cid = report["contract_id"].toString();
     const auto rid = report["id"].toString();
-    // Pre-branding server reports have no contract ID in their frozen snapshot.
-    // A missing/evicted catalogue must not silently turn an online export into LEM.
-    const bool resolveContract = cid.isEmpty() && report["revision"].toInt() > 0;
-    if (!m_token.isEmpty() && (!cid.isEmpty() || resolveContract)) {
-        m_busy = true;
-        status("A confirmar o formato atual do contrato…");
-        const auto path = resolveContract ? "/api/reports/" + rid : "/api/contracts/" + cid + "/presentation";
-        request("GET", path, {},
-            [this, cid, rid, resolveContract, chargerId = report["charger_id"].toString(), kind, target](QByteArray data) {
-                const auto received = QJsonDocument::fromJson(data).object();
-                const auto resolved = resolveContract ? received["contract_id"].toString() : cid;
-                const auto style = resolveContract ? received["presentation"].toObject() : received;
-                if (m_current["id"].toString() != rid || resolved.isEmpty() ||
-                    (style["issuer"] != "Lem" && style["issuer"] != "CSMTEC") ||
-                    (resolveContract && (received["id"].toString() != rid || received["charger_id"].toString() != chargerId))) {
-                    m_busy = false;
-                    status("Não foi possível confirmar o contrato e o formato deste report. A exportação foi cancelada.");
-                    return;
-                }
-                if (resolveContract) {
-                    // An administrator may export somebody else's closed report.
-                    // Bind only metadata; never replace local answers/evidence or mark it dirty.
-                    m_current["contract_id"] = resolved;
-                    if (m_reports.contains(rid)) {
-                        auto cached = m_reports[rid].toObject(); cached["contract_id"] = resolved; m_reports[rid] = cached;
-                    }
-                    if (m_pendingEdits.contains(rid)) {
-                        auto pending = m_pendingEdits[rid].toObject(); pending["contract_id"] = resolved; m_pendingEdits[rid] = pending;
-                    }
-                }
-                receiveContractPresentation(resolved, style);
-                m_busy = false;
-                if (!persist()) { emit changed(); return; }
-                exportPreparedReport(kind, target);
-            }, "application/json", [this, rid, resolveContract, kind, target](int code, QString detail) {
-                m_busy = false;
-                if (m_current["id"].toString() != rid) { emit changed(); return; }
-                // Offline export remains possible with the last received contract format.
-                if (!resolveContract && (code == 0 || code >= 500)) {
-                    exportPreparedReport(kind, target);
-                } else status("Não foi possível confirmar o formato do contrato: " + detail);
-            });
+    const bool serverReport = report["revision"].toInt() > 0;
+    if (m_token.isEmpty() || (!serverReport && cid.isEmpty())) {
+        exportPreparedReport(kind, target);
         return;
     }
-    exportPreparedReport(kind, target);
+    // A valid contract presentation does not prove that this UUID survived
+    // an administrator correction. Read identity, evidence and style together.
+    m_busy = true;
+    status("A confirmar o relatório e o formato do contrato…");
+    const auto path = serverReport ? "/api/reports/" + rid : "/api/contracts/" + cid + "/presentation";
+    request("GET", path, {}, [this, rid, cid, serverReport, kind, target](QByteArray bytes) {
+        m_busy = false;
+        if (m_current["id"] != rid) { emit changed(); return; }
+        const auto received = QJsonDocument::fromJson(bytes).object();
+        const auto style = serverReport ? received["presentation"].toObject() : received;
+        const auto resolved = serverReport ? received["contract_id"].toString() : cid;
+        if (resolved.isEmpty() || (!cid.isEmpty() && cid != resolved) ||
+            (style["issuer"] != "Lem" && style["issuer"] != "CSMTEC") ||
+            (serverReport && (!validRemoteReport(received, rid) || received["charger_id"] != m_current["charger_id"] ||
+             (received["status"] != "closed" && !(m_current["dirty"].toBool() &&
+               received["owner_id"] == m_current["owner_id"] && received["revision"] == m_current["revision"]))))) {
+            status("Não foi possível confirmar o relatório. A exportação foi cancelada.");
+            return;
+        }
+        if (serverReport && !m_current["dirty"].toBool()) {
+            // A matching frozen revision can gain evidence from another device.
+            // Keep the local historical snapshot and previously downloaded paths.
+            if (received["revision"] == m_current["revision"])
+                m_current["photos"] = reconcilePhotos(m_current["photos"].toArray(), received["photos"].toArray(), {});
+            else if (!getPhotos(received, rid))
+                return;
+        }
+        m_current["contract_id"] = resolved;
+        m_reports[rid] = m_current;
+        if (m_pendingEdits.contains(rid)) m_pendingEdits[rid] = m_current;
+        receiveContractPresentation(resolved, style);
+        if (persist()) exportPreparedReport(kind, target);
+    }, "application/json", [this, rid, cid, kind, target](int code, QString detail) {
+        m_busy = false;
+        if (m_current["id"] != rid) { emit changed(); return; }
+        if (code == 410) {
+            const auto successor = QJsonDocument::fromJson(detail.toUtf8()).object()["detail"].toObject()["replacement_id"].toString();
+            const auto charger = m_current["charger_id"].toString();
+            if (!successor.isEmpty()) {
+                if (receiveReplacement(rid, successor) && !m_reports.value(rid).toObject()["dirty"].toBool())
+                    openReport(charger, successor);
+                status("Relatório substituído. Consulte a correção antes de exportar.");
+            } else {
+                if (!m_current["dirty"].toBool()) forgetReport(rid);
+                status("O relatório foi apagado no servidor. A exportação foi cancelada.");
+            }
+        } else if (!cid.isEmpty() && (code == 0 || code >= 500)) {
+            exportPreparedReport(kind, target);
+        } else status("Não foi possível confirmar o relatório e o formato do contrato: " + detail);
+    });
 }
 
 void Lem::exportPreparedReport(QString kind, QUrl target) {
     if (!prepareExport(kind)) return;
-    if ((kind == "pdf" || kind == "bundle") && ReportPdf::validate(m_current).isEmpty()) {
+    if (kind == "recovery" || ((kind == "pdf" || kind == "bundle") && ReportPdf::validate(m_current).isEmpty())) {
         if (!flushEdits())
             return;
         auto report = withContractPresentation(m_current);
@@ -2545,7 +2624,7 @@ void Lem::exportPreparedReport(QString kind, QUrl target) {
                 report["payload"].toObject()["answers"].toObject()[report["template"].toObject()["version"].toInt() >= 3 ? "FIN.02" : "PG04.02"].toObject()["value"];
         const auto destination = localPath(target);
         m_busy = true;
-        m_localOperationTitle = kind == "bundle" ? "A gerar e guardar ZIP neste dispositivo" : "A gerar e guardar PDF neste dispositivo";
+        m_localOperationTitle = kind == "recovery" ? "A guardar cópia de recuperação" : kind == "bundle" ? "A gerar e guardar ZIP neste dispositivo" : "A gerar e guardar PDF neste dispositivo";
         status(m_localOperationTitle);
         auto watcher = new QFutureWatcher<QString>(this);
         connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, target, kind] {
@@ -2560,7 +2639,7 @@ void Lem::exportPreparedReport(QString kind, QUrl target) {
         });
         watcher->setFuture(QtConcurrent::run(&m_editPool, [report, destination, kind] {
             QString error;
-            if (kind == "bundle") ReportBundle::write(report, destination, &error);
+            if (kind == "bundle" || kind == "recovery") ReportBundle::write(report, destination, &error, kind == "recovery");
             else ReportPdf::write(report, destination, &error);
             return error;
         }));
@@ -2652,7 +2731,7 @@ void Lem::exportContract(QString cid, QString kind, QUrl directory) {
             if (job->presentation["issuer"] != "Lem" && job->presentation["issuer"] != "CSMTEC") {
                 finishContractExport("Formato do contrato inválido."); return;
             }
-            auto reply = request("GET", "/api/contracts/" + job->contractId + "/chargers", {},
+            auto reply = request("GET", "/api/contracts/" + job->contractId + "/chargers?include_detached=true", {},
                 [this, job](QByteArray data) {
                     if (job->cancelled) { finishContractExport(); return; }
                     const auto doc = QJsonDocument::fromJson(data);
@@ -3138,10 +3217,11 @@ void Lem::previewImport(const QString &path, QJsonObject mapping) {
     m_busy = true;
     status("A preparar a pré-visualização…");
     multipart("POST", path, {{"mapping", QString::fromUtf8(json(m_mapping))}, {"commit", "false"}},
-              m_excelName, m_excel, [this](QByteArray data) {
+              m_excelName, m_excel, [this, path](QByteArray data) {
                   m_busy = false;
                   const auto preview = QJsonDocument::fromJson(data).object();
-                  if (!preview["records"].isArray() || !preview["errors"].isArray()) {
+                  if (!preview["records"].isArray() || !preview["errors"].isArray() ||
+                      (path.startsWith("/api/contracts/") && QUuid(preview["operation_id"].toString()).isNull())) {
                       status("O servidor devolveu uma pré-visualização inválida.");
                       return;
                   }
@@ -3159,15 +3239,21 @@ void Lem::commitExcel() {
         return;
     m_busy = true;
     status("A importar o Excel…");
-    multipart("POST", path, {{"mapping", QString::fromUtf8(json(m_mapping))}, {"commit", "true"}},
+    QList<QPair<QString, QString>> fields{{"mapping", QString::fromUtf8(json(m_mapping))}, {"commit", "true"}};
+    if (!stationsOnly) fields.append({"operation_id", m_preview["operation_id"].toString()});
+    multipart("POST", path, fields,
               m_excelName, m_excel, [this, stationsOnly](QByteArray data) {
                   m_busy = false;
+                  const auto outcome = QJsonDocument::fromJson(data).object();
+                  if (outcome["created"].toInt(-1) < 0 || outcome["updated"].toInt(-1) < 0) {
+                      status("Confirmação da importação inválida. Repita a confirmação desta pré-visualização.");
+                      return;
+                  }
                   m_preview = {};
                   m_importInfo = {};
                   m_excelImportPath.clear();
                   m_excel.clear();
                   m_catalogueTimes = {};
-                  const auto outcome = QJsonDocument::fromJson(data).object();
                   const auto summary = QString("Importação concluída. %1 criados, %2 atualizados.")
                          .arg(outcome["created"].toInt()).arg(outcome["updated"].toInt());
                   status(summary);

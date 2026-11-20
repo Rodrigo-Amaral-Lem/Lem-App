@@ -38,6 +38,9 @@ void Lem::refreshOrders(bool planner) {
         const auto day = data["today"].toString();
         if (m_orders != orders || day != m_planningDay) {
             m_orders = orders;
+            for (auto it = m_reports.constBegin(); it != m_reports.constEnd(); ++it)
+                if (it.value().toObject()["_conflict_kind"] == "order_scope") m_syncConflicts.remove(it.key());
+            scheduleSync(1500);
             m_planningDay = day;
             emit workOrderListChanged();
             emit changed();
@@ -142,11 +145,6 @@ bool Lem::orderAllowsDraft(QString target) const {
 bool Lem::isOrderRecovery(const QJsonObject &report) const {
     if (m_user["role"] != "tech" || report["status"] != "draft") return false;
     const auto target = report["charger_id"].toString();
-    for (const auto &value : m_contracts) {
-        const auto c = value.toObject();
-        if (c["id"] == report["contract_id"] && !c["order_only"].toBool()) return false;
-    }
-    if (orderAllowsDraft(target)) return false;
     for (const auto &value : m_orders) {
         for (const auto &entry : value.toObject()["items"].toArray()) {
             const auto item = entry.toObject();
@@ -192,15 +190,16 @@ QString Lem::prepareOrderReport(QString orderId, QString itemId, QString request
                 {"station_id",item["station_id"]},{"external_id",item["external_id"]},{"details",item["details"]}});
             if (!requestedReport.isEmpty()) return requestedReport;
             if (!item["report_id"].toString().isEmpty()) return item["report_id"].toString();
+            if (!drafts.isEmpty()) {
+                for (const auto &draft : drafts)
+                    if (draft.toObject()["owner_id"] == m_user["id"]) return draft.toObject()["id"].toString();
+                return drafts.first().toObject()["id"].toString();
+            }
             for (auto it = m_reports.begin(); it != m_reports.end(); ++it) {
                 const auto r = it.value().toObject();
-                if (r["charger_id"] == target && r["owner_id"] == m_user["id"] &&
+                if (r["_order_item"] == itemId && r["charger_id"] == target && r["owner_id"] == m_user["id"] &&
                     (r["status"] == "draft" || r["dirty"].toBool())) return it.key();
             }
-            for (const auto &draft : item["drafts"].toArray()) {
-                if (draft.toObject()["owner_id"] == m_user["id"]) return draft.toObject()["id"].toString();
-            }
-            if (!drafts.isEmpty()) return drafts.first().toObject()["id"].toString();
             return {};
         }
     }
@@ -229,8 +228,7 @@ void Lem::receiveFollowedReports() {
                 m_orderDownload = false;
                 auto r = QJsonDocument::fromJson(bytes).object();
                 const auto existing = m_reports.value(rid).toObject();
-                if (m_followedReports.contains(rid) && r["id"] == rid && r["photos"].isArray() &&
-                    r["payload"].isObject() && r["template"].isObject() && r["snapshot"].isObject() &&
+                if (m_followedReports.contains(rid) && validRemoteReport(r, rid) &&
                     !existing["dirty"].toBool() && !existing["_conflict"].toBool() && !m_pendingEdits.contains(rid) &&
                     r["revision"].toInt() >= existing["revision"].toInt()) {
                     r["offline_photos"] = true;

@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para desktop
 
-Desktop · Aplicação 0.5.3 · Edição 2.12 · 19 de novembro de 2026
+Desktop · Aplicação 0.5.4 · Edição 2.13 · 20 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-desktop.pdf](manual-utilizador-desktop.pdf).
 
@@ -20,7 +20,7 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. As ações são realizadas com o rato e o teclado. Clique nos botões e utilize a roda do rato ou a barra de deslocação para percorrer o relatório.
 
-Este manual descreve a versão 0.5.3 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
+Este manual descreve a versão 0.5.4 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
 
@@ -97,9 +97,9 @@ O cartão **Concluído** indica que esse PCVE tem uma intervenção fechada no c
 
 Em **Ordens** (no menu de navegação, **Ordens de trabalho**), escolha uma ordem para consultar os técnicos, as datas e os IDs de cada contrato. **Informação do ID** mostra a ficha e as notas do contrato antes da visita. **Operador** identifica quem opera o PCVE e **Cliente** identifica o cliente do trabalho. Podem ser entidades diferentes.
 
-O administrador escolhe **Nova ordem**, indica o início e o prazo, seleciona técnicos e acrescenta os IDs por fazer. **Subir** e **Descer** organizam a sequência sugerida. Em **Editar ordem** pode mudar as datas, a equipa e os IDs pendentes. Antes do dia de início, **Cancelar ordem** e **Confirmar cancelamento** libertam os IDs pendentes. A ordem fica no histórico, com a data de cancelamento e o mesmo código.
+O administrador escolhe **Nova ordem**, indica o início e o prazo, seleciona técnicos e acrescenta os IDs por fazer. **Subir** e **Descer** organizam a sequência sugerida. Em **Editar ordem** pode ajustar o prazo e a equipa. Depois do início, a data inicial fica fixa. Um ID com rascunho em curso permanece na ordem. Antes do dia de início, **Cancelar ordem** e **Confirmar cancelamento** libertam os IDs pendentes. A ordem fica no histórico, com a data de cancelamento e o mesmo código.
 
-A partir do dia de início em Lisboa, o técnico pode escolher qualquer ID e **Abrir intervenção**. Para trabalhar sem rede, atualize a ordem após o início enquanto ainda tem ligação. O seu rascunho offline aparece como **Em preenchimento · por sincronizar**. Se outro técnico já o iniciou, pode consultá-lo e pedir ao administrador que transfira a responsabilidade. Se a intervenção for impossível, escolha **Assinalar impedimento**, escreva o motivo e confirme em **Marcar inválida**. O ID continua por fazer no contrato e pode voltar a ser planeado. A última tarefa resolvida regista a hora de fecho. **Recuperar rascunho** abre uma cópia anterior para consulta. **Relatório removido** identifica um documento apagado após o fecho.
+A partir do dia de início em Lisboa, o técnico pode escolher qualquer ID e **Abrir intervenção**. Para trabalhar sem rede, atualize a ordem após o início enquanto ainda tem ligação. O seu rascunho offline aparece como **Em preenchimento · por sincronizar**. **Consultar rascunho** abre o trabalho do colega identificado na ordem. **Consultar cópia local em conflito** abre o seu trabalho da mesma visita. Se recuperar a atribuição, sincronize. Para entregar o trabalho a outro técnico, escolha **Guardar cópia para entrega**. O ZIP inclui as respostas e os anexos disponíveis no dispositivo. Se a intervenção for impossível, escolha **Assinalar impedimento**, escreva o motivo e confirme em **Marcar inválida**. O ID continua por fazer no contrato e pode voltar a ser planeado. A última tarefa resolvida regista a hora de fecho. **Recuperar rascunho** abre uma cópia anterior para consulta. **Relatório removido** identifica um documento apagado após o fecho.
 
 O criador segue a ordem automaticamente. Os restantes administradores podem escolher **Seguir** e qualquer administrador pode gerir a ordem. No desktop, a app descarrega os relatórios e as evidências das ordens seguidas para consulta local enquanto a sessão está iniciada.
 
@@ -135,7 +135,7 @@ Nos campos de medição, introduza o resultado do instrumento. Quando existirem 
 
 ### Intensidade diferencial e resistência de terra
 
-**1 A = 1000 mA; 0,03 A = 30 mA.** MAN.11 e MAN.12 não aceitam casas decimais. Em rascunhos antigos, valores com unidade explícita são convertidos quando possível; um valor sem unidade ou ambíguo é mostrado como **Valor anterior** e deve ser confirmado em mA.
+**1 A = 1000 mA; 0,03 A = 30 mA.** Em MAN.11 e MAN.12, a vírgula ou o ponto ficam visíveis com um aviso. Escreva um valor inteiro em mA para validar a leitura. Em rascunhos antigos, valores com unidade explícita são convertidos quando possível; um valor sem unidade ou ambíguo é mostrado como **Valor anterior** e deve ser confirmado em mA.
 
 Com MAN.11 válido, MAN.12 fica **NOK** se a leitura for menor ou igual a 50% ou maior ou igual a 105% do calibre configurado. Entre esses limites, fica OK. Exemplo: para 300 mA, 150 mA e 315 mA são NOK. A app sugere «Valor de intensidade de disparo diferencial fora do calibre configurado».
 
@@ -331,13 +331,13 @@ A limpeza não apaga os originais da galeria nem as evidências do servidor. Tra
 
 O nome dos ficheiros junta o ID do carregador e o nome do contrato no formato **ID_Contrato**. Fotografias e vídeos acrescentam o seu identificador.
 
-**PDF e ZIP sem rede:** são gerados no dispositivo se o relatório estiver fechado e tiver todas as evidências locais. Se faltarem ficheiros, a exportação usa o servidor e exige ligação, sessão iniciada e relatório sincronizado. Exportar localmente não sincroniza o relatório. Confirme o conteúdo antes de o entregar.
+**PDF e ZIP sem rede:** são gerados no dispositivo se o relatório estiver fechado e tiver todas as evidências locais. Se faltarem ficheiros, a exportação usa o servidor e exige ligação, sessão iniciada e relatório sincronizado. Com ligação, a app confirma se o relatório foi substituído ou apagado antes de exportar. Confirme o conteúdo antes de o entregar.
 
 ### Exportar todos os reports fechados de um contrato
 
 Em **Contratos**, selecione o contrato e escolha **Exportar todos os PDFs…** ou **Exportar todos os ZIPs…**. Indique a pasta de destino: a app cria uma nova subpasta com um ficheiro por report, sem substituir exportações anteriores. Esta opção existe apenas no desktop Windows/Linux.
 
-É necessária ligação para obter a lista atual do servidor. Também são incluídos os seus reports fechados localmente que aguardam sincronização, desde que não estejam em conflito, suspensos ou em correção. A app aproveita evidências locais e descarrega do servidor o que falta para exportar. Exportar não sincroniza esses reports.
+A lista obtida do servidor inclui relatórios fechados de IDs retirados do contrato. Também são incluídos os seus reports fechados localmente que aguardam sincronização, desde que não estejam em conflito, suspensos ou em correção. A app aproveita evidências locais e descarrega do servidor o que falta para exportar. Exportar não sincroniza esses reports.
 
 Pode continuar noutro report e acompanhar o progresso em **Contratos**. **Cancelar exportação** conserva os ficheiros concluídos. **Abrir pasta** mostra o resultado e o resumo das falhas ou reports por exportar. Se dois reports tiverem o mesmo nome, um fica numa subpasta própria; nenhum substitui o outro.
 
@@ -373,8 +373,8 @@ A opção **Criar rascunho como cópia** cria um relatório independente para re
 | --- | --- |
 | O contrato ou o carregador não aparece | Confirme a conta e o contrato selecionados, limpe a pesquisa e escolha **Atualizar**. Se continuar em falta, peça ao administrador para confirmar a atribuição. |
 | Vejo dados locais mas não consigo enviar | Abra a conta e volte a **Entrar**. Confirme a ligação e o endereço do servidor e peça **Sinc.**. |
-| Não consigo concluir | Abra **Rever report** e use **Abrir item**. Confirme leituras, justificações NOK/N/A e fotografias. Em MAN.02, substitua texto de um rascunho antigo por OK, NOK ou N/A. Aguarde cópias e anexações em curso. |
-| Uma fotografia ou um vídeo foi recusado | Leia o motivo. Verifique o formato, o tamanho e a duração. Experimente JPG/PNG para imagens ou MP4/3GP para vídeos. Confirme os restantes ficheiros aceites. |
+| Não consigo concluir | Abra **Rever report** e use **Abrir item**. Confirme leituras, justificações NOK/N/A e fotografias. Verifique o relógio se o fim for anterior ao início. Se atingir o limite de texto, reduza as observações no mesmo rascunho. Em MAN.02, substitua texto de um rascunho antigo por OK, NOK ou N/A. Aguarde cópias e anexações em curso. |
+| Uma fotografia ou um vídeo foi recusado | Leia o motivo. Verifique o formato, o tamanho e a duração. Para uma fotografia incompleta, selecione novamente o original. Experimente JPG/PNG para imagens ou MP4/3GP para vídeos. Confirme os restantes ficheiros aceites. |
 | A evidência está na lista mas não abre | O original pode não estar no dispositivo. Ligue-se à rede e descarregue a evidência ou todas as evidências do relatório. |
 | O ficheiro não aparece no seletor | Confirme a pasta e o filtro de formato. Para imagens, prefira JPG/PNG. Certifique-se de que o ficheiro está disponível no computador. |
 | Assinar está desativado | Preencha primeiro o nome em FIN.02 e confirme que o relatório pode ser editado. Se alterar o nome, registe a assinatura novamente. |

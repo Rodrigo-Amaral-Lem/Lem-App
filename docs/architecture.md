@@ -228,3 +228,11 @@ recovery flow.
 ## Work orders
 
 The WorkOrders screen uses LemWorkOrders.cpp for scoped planning, revisioned edits and report navigation. The account-scoped cache preserves the last accepted list. Existing report synchronization uploads a technician's draft. The server resolves the corresponding membership on acceptance. The server publishes membership IDs for limited contracts so refreshing one contract preserves all other authorised offline rows. Offline edits carry their work item ID for recovery after a colleague finishes. Desktop compares both revision and attachment count for followed drafts and fetches missing originals into the private evidence cache. WorkOrderJob polls the authenticated inbox independently of the Android activity using the existing encrypted session, system notification permission and a per-installation receipt identifier.
+
+### Durable field handoffs
+
+Desktop locks the profile before migration or journal replay. The lock lives beside the profile so copying legacy files preserves the active lock. A second process can write after the first exits.
+
+Scoped offline reports retain their original item UUID. A changed order grant triggers permission, owner and revision checks before edits resume. When two crews claim the same item, the order opens the acknowledged report by default and exposes the other local UUID separately. Recovery export includes the local answers, original files, pending removals and identifiers of server-only files.
+
+The client verifies a report response's identity and shape before replacing cached state. Synchronization merges the server's attachment list with pending local additions and removals. An online export checks a known report UUID before writing the selected file. Contract exports request closed history for detached memberships as well.

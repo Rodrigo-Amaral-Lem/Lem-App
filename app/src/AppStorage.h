@@ -17,10 +17,21 @@
 #include <QSet>
 #include <QCoreApplication>
 #include <QSaveFile>
+#include <QLockFile>
+#include <memory>
 #include <QSettings>
 #include <QStandardPaths>
 
 namespace AppStorage {
+// Hold a sibling lock before discovery. Copying an old profile must never
+// replace the lock protecting its destination.
+inline std::unique_ptr<QLockFile> lockWriter(const QString &profile) {
+    auto lock = std::make_unique<QLockFile>(profile + ".writer.lock");
+    lock->setStaleLockTime(0);
+    if (!QDir().mkpath(profile) || !lock->tryLock(0)) return {};
+    return lock;
+}
+
 inline bool hasData(const QString &root) {
     if (root.isEmpty())
         return false;

@@ -43,14 +43,15 @@ for width, height, auto_hide in [(1050, 850, False), (390, 844, True), (640, 390
     w.setProperty("autoHideChrome", auto_hide)
     js("selectSection(1)")
     QTest.qWait(100)
-    for index in [0, 5, 12]:
-        checkpoint = values["sections"][0]["items"][index]["id"]
+    required = [item["id"] for item in values["sections"][0]["items"] if not item.get("optional")]
+    for checkpoint in [required[0], required[len(required) // 2], required[-1]]:
         # Reproduce returning from review with the scrolling menus hidden.
         js("reportScroll.contentY = Math.max(0, reportScroll.contentHeight-reportScroll.height); chromeReveal=0")
         QTest.qWait(250)
         jump_and_check(0, checkpoint, via_review=True)
     # Cross-group jump: lazy creation and saved scroll restoration must finish first.
-    jump_and_check(1, "MAN.07", via_review=True)
+    maintenance = next(i for i, section in enumerate(values["sections"]) if section["id"] == "MAN")
+    jump_and_check(maintenance, "MAN.07", via_review=True)
     # A last question with enough viewport space must stop at the real content end.
     last = values["sections"][0]["items"][-1]["id"]
     actual, maximum = jump_and_check(0, last)
@@ -70,8 +71,9 @@ for width, height, auto_hide in [(1050, 850, False), (390, 844, True), (640, 390
     assert js("reportScroll.contentHeight") == extent
 
 # A one-question group also remains bounded when all content fits in the view.
-single = next((i for i, group in enumerate(values["sections"]) if len(group["items"]) == 1), None)
-assert single is not None
+single = len(values["sections"]) - 1
+values["sections"][single]["items"] = values["sections"][single]["items"][:1]
+lem.changed.emit()
 w.setWidth(1050); w.setHeight(1000)
 QTest.qWait(100)
 jump_and_check(single, values["sections"][single]["items"][0]["id"])

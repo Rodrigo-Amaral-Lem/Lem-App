@@ -2,6 +2,7 @@
 // Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
 
 #include "Lem.h"
+#include "ReportBundle.h"
 #include <QGuiApplication>
 #include <QTemporaryDir>
 #include <QElapsedTimer>
@@ -24,6 +25,25 @@
             return false;                                                                          \
         }                                                                                          \
     } while (false)
+
+namespace {
+bool fillRequiredAnswers(Lem &client, const QJsonObject &draft) {
+    for (auto section : draft["template"].toObject()["sections"].toArray()) {
+        for (auto entry : section.toObject()["items"].toArray()) {
+            const auto item = entry.toObject();
+            const auto id = item["id"].toString();
+            if (item["optional"].toBool() || id == "FIN.02") continue;
+            client.answer(id, "NA", QStringLiteral("Não aplicável / fixture"));
+        }
+    }
+    QImage signature(40, 30, QImage::Format_RGB32);
+    signature.fill(Qt::black);
+    QByteArray png;
+    QBuffer buffer(&png);
+    return buffer.open(QIODevice::WriteOnly) && signature.save(&buffer, "PNG") &&
+           client.saveSignature("FIN.02", "data:image/png;base64," + QString::fromLatin1(png.toBase64()));
+}
+}
 
 struct LemReviewTest {
     static QByteArray read(const QString &path) {
@@ -435,7 +455,115 @@ struct LemReviewTest {
         CHECK(!client.busy() && client.m_current["photos"] == finalPhotos);
         return true;
     }
-    static bool rejectedClosure(const QString &root) {
+    static bool fieldIntegrity(const QString &root) {
+        Lem client(root);
+        client.demo();
+        CHECK(fillRequiredAnswers(client, client.m_current));
+        const auto id = client.m_current["id"].toString();
+        auto local = client.m_current;
+        for (const auto format : {"PNG", "JPEG"}) {
+            const auto path = root + "/" + format;
+            QImage image(25, 16, QImage::Format_RGB32);
+            image.fill(Qt::green);
+            CHECK(image.save(path, format));
+            const auto complete = read(path);
+            CHECK(write(path, complete.chopped(12)));
+            CHECK(!client.attachToReport(id, "EST.01", QUrl::fromLocalFile(path)));
+            CHECK(client.m_current["photos"] == local["photos"]);
+            CHECK(write(path, complete));
+            CHECK(client.attachToReport(id, "EST.01", QUrl::fromLocalFile(path)));
+            const auto photo = client.m_current["photos"].toArray().last().toObject();
+            const auto cached = QUrl(photo["path"].toString()).toLocalFile();
+            CHECK(write(cached, complete.chopped(12)));
+            client.finish();
+            CHECK(client.m_current["status"] == "draft" && client.message().contains("incompleta"));
+            auto forPdf = client.m_current;
+            forPdf["status"] = "closed";
+            QString error;
+            CHECK(ReportPdf::render(forPdf, &error).isEmpty() && error.contains("incompleta"));
+            CHECK(write(cached, complete));
+            local = client.m_current;
+        }
+        const auto started = local["started"];
+        client.m_current["started"] = QDateTime::currentDateTimeUtc().addDays(2).toString(Qt::ISODate);
+        client.finish();
+        CHECK(client.m_current["status"] == "draft" && client.message().contains("relógio"));
+        client.m_current["started"] = started;
+        const auto longNote = QStringLiteral("Âç").repeated(16000);
+        for (const auto &section : client.m_template["sections"].toArray())
+            for (const auto &entry : section.toObject()["items"].toArray()) {
+                const auto item = entry.toObject();
+                if (item["kind"] == "notes") client.answer(item["id"].toString(), "", longNote);
+            }
+        client.finish();
+        CHECK(client.m_current["status"] == "draft" && client.message().contains("demasiado grande"));
+        for (const auto &section : client.m_template["sections"].toArray())
+            for (const auto &entry : section.toObject()["items"].toArray()) {
+                const auto item = entry.toObject();
+                if (item["kind"] == "notes") client.answer(item["id"].toString(), "", "Ação Âmbar / East");
+            }
+        client.finish();
+        CHECK(client.m_current["status"] == "closed");
+        local = client.m_current;
+        CHECK(client.persist());
+        const auto cacheFile = client.cacheDir() + "/cache.json";
+        const auto beforeRefresh = read(cacheFile);
+        for (const auto body : {QByteArray("<html>Maintenance</html>"), QByteArray(), QByteArray("{}")})
+            CHECK(!client.getPhotos(QJsonDocument::fromJson(body).object(), id));
+        auto wrongId = local;
+        wrongId["id"] = "wrong-report";
+        wrongId["revision"] = 2;
+        CHECK(!client.getPhotos(wrongId, id));
+        CHECK(!client.m_reports.contains("") && !client.m_reports.contains("wrong-report"));
+        CHECK(client.m_current == local && read(cacheFile) == beforeRefresh);
+        auto cache = QJsonDocument::fromJson(beforeRefresh).object();
+        auto reports = cache["reports"].toObject();
+        reports[""] = QJsonObject{{"dirty", false}, {"offline_photos",false}, {"photos",QJsonArray{}}, {"last_access",1}};
+        cache["reports"] = reports;
+        CHECK(write(cacheFile, QJsonDocument(cache).toJson()));
+        Lem restarted(root);
+        restarted.demo();
+        CHECK(!restarted.localSaveError() && !restarted.m_reports.contains(""));
+        CHECK(restarted.openReport("demo-charger"));
+        restarted.answer("FIN.03", "", "Outro / other report");
+        CHECK(restarted.flushEdits() && restarted.m_reports.contains(id));
+
+        // A late manifest must retain newer local work and filter a pending deletion.
+        local["_order_item"] = "original-visit";
+        local["_conflict"] = true;
+        local["deleted_photos"] = QJsonArray{"removed"};
+        client.m_reports[id] = local;
+        auto sent = local;
+        sent["photos"] = QJsonArray{};
+        const QJsonObject remote{{"id", "from-peer"}, {"checkpoint", "EST.01"}, {"mime", "image/png"}};
+        auto removed = remote;
+        removed["id"] = "removed";
+        CHECK(client.mergeSync(sent, true, QJsonArray{remote, removed}));
+        const auto merged = client.m_reports[id].toObject();
+        CHECK(merged["photos"].toArray().size() == local["photos"].toArray().size() + 1);
+        CHECK(merged["photos"].toArray().last().toObject()["id"] == "from-peer");
+        CHECK(merged["deleted_photos"] == local["deleted_photos"] && merged["dirty"].toBool());
+        QString error;
+        QByteArray bytes;
+        QBuffer output(&bytes);
+        CHECK(output.open(QIODevice::WriteOnly));
+        CHECK(ReportBundle::archive(merged, output, &error, true));
+        CHECK(bytes.contains("original-visit") && bytes.contains("from-peer") && bytes.contains("server_only_photos"));
+        CHECK(bytes.contains(QStringLiteral("Ação Âmbar / East").toUtf8()) && bytes.contains("fotografias/"));
+        CHECK(!bytes.contains("%PDF-"));
+
+        const QJsonObject peer{{"id", "peer-report"}, {"owner_id", "other-tech"}};
+        const QJsonObject item{{"id", "original-visit"}, {"contract_id", client.m_contract},
+                               {"target", local["charger_id"]}, {"state", "pending"},
+                               {"available", true}, {"drafts", QJsonArray{peer}}};
+        client.m_orders = QJsonArray{QJsonObject{{"id", "order"}, {"started", true}, {"items", QJsonArray{item}}}};
+        CHECK(client.localOrderDrafts().value("original-visit").toMap().value("id") == id);
+        CHECK(client.prepareOrderReport("order", "original-visit") == "peer-report");
+        CHECK(client.prepareOrderReport("order", "original-visit", id) == id);
+        CHECK(client.prepareOrderReport("order", "original-visit", "unrelated-uuid") == "!");
+        return true;
+    }
+    static bool rejectedClosure(const QString &root, int code) {
         Lem client(root); client.demo();
         client.answer("MAN.14", "600 MΩ", "Medição preservada após atualização");
         CHECK(client.flushEdits());
@@ -450,7 +578,7 @@ struct LemReviewTest {
         const auto photos = report["photos"];
         client.m_current = report; client.m_reports[report["id"].toString()] = report;
         client.m_syncReport = report["id"].toString(); client.m_syncing = true;
-        client.syncFailed(422, "MAN.14: falta fotografia");
+        client.syncFailed(code, code == 413 ? "Report demasiado grande" : "MAN.14: falta fotografia");
         CHECK(client.m_current["status"] == "draft" && client.m_current["dirty"].toBool());
         CHECK(!client.m_current["template"].toObject().contains("frozen_upload"));
         CHECK(client.correctionAllowed(client.m_current));
@@ -463,7 +591,9 @@ struct LemReviewTest {
         // Equal answers do not imply equal forms: a rejected historical closure
         // may need a draft PUT solely to acknowledge the new template/marker.
         QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
-        for (int scenario = 0; scenario < 4; ++scenario) {
+        // 0–3 exercise form migration, 4–5 restored scope and ownership,
+        // 6 an over-acknowledgement, 7–8 direct and lost closure replies.
+        for (int scenario = 0; scenario < 9; ++scenario) {
             Lem client(root + QString::number(scenario)); client.demo();
             CHECK(client.flushEdits());
             QTcpServer server;
@@ -475,6 +605,12 @@ struct LemReviewTest {
             auto local = client.m_current;
             local["revision"] = 1; local["dirty"] = true;
             local.remove("_defer_photo_sync");
+            if (scenario == 4 || scenario == 5) {
+                local["_order_item"] = "visit";
+                local["_conflict"] = true;
+                local["_conflict_kind"] = "order_scope";
+            }
+            if (scenario >= 7) local["status"] = "closed";
             const auto id = local["id"].toString();
             client.m_current = local; client.m_reports = QJsonObject{{id, local}};
             auto remote = local;
@@ -482,6 +618,12 @@ struct LemReviewTest {
             schema["version"] = scenario < 2 ? 6 : 7;
             if (scenario == 1 || scenario == 3) schema["frozen_upload"] = true;
             remote["template"] = schema;
+            if (scenario == 5) remote["owner_id"] = "new-owner";
+            if (scenario == 6) remote["payload"] = QJsonObject{{"answers", QJsonObject{{"SEG.01", QJsonObject{{"value","OK"}}}}}};
+            if (scenario >= 7) {
+                remote["status"] = scenario == 7 ? "draft" : "closed";
+                remote["photos"] = QJsonArray{QJsonObject{{"id", "peer-photo"}, {"checkpoint","SITE.02"}, {"mime","image/png"}}};
+            }
             int puts = 0;
             QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
                 auto socket = server.nextPendingConnection();
@@ -502,7 +644,8 @@ struct LemReviewTest {
                         const auto body = QJsonDocument::fromJson(buffer->mid(end + 4, length)).object();
                         remote["template"] = local["template"];
                         remote["payload"] = body["payload"];
-                        remote["revision"] = remote["revision"].toInt() + 1;
+                        remote["status"] = body["status"];
+                        remote["revision"] = remote["revision"].toInt() + (scenario == 6 ? 2 : 1);
                     }
                     const auto body = QJsonDocument(remote).toJson(QJsonDocument::Compact);
                     socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
@@ -517,8 +660,18 @@ struct LemReviewTest {
             while (client.m_syncing && timer.elapsed() < 5000) QCoreApplication::processEvents();
             client.m_autoSync.stop();
             CHECK(!client.m_syncing);
-            CHECK(!client.m_current["dirty"].toBool());
-            CHECK(puts == (scenario == 2 ? 0 : 1));
+            if (scenario == 5 || scenario == 6) {
+                CHECK(client.m_current["dirty"].toBool() && client.m_current["revision"] == 1);
+                CHECK(puts == (scenario == 6 ? 1 : 0));
+                continue;
+            }
+            CHECK(!client.m_current["dirty"].toBool() && !client.m_current["_conflict"].toBool());
+            CHECK(puts == (scenario == 2 || scenario == 8 ? 0 : 1));
+            if (scenario >= 7) {
+                const auto photos = client.m_current["photos"].toArray();
+                CHECK(photos.size() == 1 && photos.first().toObject()["id"] == "peer-photo");
+                CHECK(photos.first().toObject()["uploaded"].toBool());
+            }
             CHECK(remote["template"].toObject()["version"] == local["template"].toObject()["version"]);
             CHECK(!remote["template"].toObject()["frozen_upload"].toBool());
             CHECK(remote["payload"] == local["payload"]);
@@ -568,7 +721,9 @@ int main(int argc, char **argv) {
     const bool ok = mode == "storage"     ? LemReviewTest::storage(root.path())
                     : mode == "signature" ? LemReviewTest::signature(root.path())
                     : mode == "rotation" ? LemReviewTest::rotation(root.path())
-                    : mode == "rejected-closure" ? LemReviewTest::rejectedClosure(root.path())
+                    : mode == "rejected-closure" ? (LemReviewTest::rejectedClosure(root.path() + "/validation", 422)
+                                                   && LemReviewTest::rejectedClosure(root.path() + "/size", 413))
+                    : mode == "field-integrity" ? LemReviewTest::fieldIntegrity(root.path())
                     : mode == "migration-sync" ? LemReviewTest::migrationSync(root.path())
                                           : LemReviewTest::cleanup(root.path());
     if (ok)

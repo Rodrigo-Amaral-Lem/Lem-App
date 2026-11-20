@@ -268,7 +268,9 @@ void Lem::startSync(bool manual) {
         const bool owned = report["owner_id"] == m_user["id"];
         const bool recheckIdentity = (manual || m_manualRestoredCorrections.contains(i.key())) &&
                                      retryableCorrectionIdentity(report);
-        if ((report["_conflict"].toBool() && !recheckIdentity) ||
+        const bool recheckOrder = report["_conflict_kind"] == "order_scope" &&
+            (manual || !m_syncConflicts.contains(i.key()));
+        if ((report["_conflict"].toBool() && !recheckIdentity && !recheckOrder) ||
             report.contains("_contract_unavailable") || (dirty && !owned))
             m_syncConflicts.insert(i.key());
         if (owned && dirty && correctionAllowed(report) && !m_syncConflicts.contains(i.key()) &&
@@ -343,7 +345,7 @@ void Lem::syncFailed(int code, QString message) {
         m_syncState = "Envio interrompido · report já não existe neste dispositivo";
         continueAfterRejection(m_syncState);
     } else if (rejected) {
-        if (code == 422 && m_reports.value(m_syncReport).toObject()["status"] == "closed") {
+        if ((code == 422 || code == 413) && m_reports.value(m_syncReport).toObject()["status"] == "closed") {
             // A rejected closure is still a draft on the server. Restore editing
             // with current rules, preserving answers/media from older offline apps.
             auto report = m_reports.value(m_syncReport).toObject();
@@ -371,6 +373,8 @@ void Lem::syncFailed(int code, QString message) {
             r["_conflict_reason"] = message;
             if (code == 409 && detail.toObject()["reason"] == "station_identity_conflict")
                 r["_conflict_kind"] = "station_identity_conflict";
+            else if (code == 403 && !r["_order_item"].toString().isEmpty())
+                r["_conflict_kind"] = "order_scope";
             else
                 r.remove("_conflict_kind");
             r["_edit_seq"] = r["_edit_seq"].toDouble() + 1;
@@ -402,9 +406,41 @@ void Lem::syncRequest(QString method, QString path, QByteArray body, Callback cb
             [this](int code, QString message) { syncFailed(code, message); });
 }
 
+QJsonArray Lem::reconcilePhotos(QJsonArray photos, const QJsonArray &serverPhotos, const QJsonArray &removed) const {
+    // Only the server can enumerate another device's uploads. Preserve local
+    // additions and tombstones made while the request was in flight.
+    const auto manifest = receivedPhotoPaths({{"photos", serverPhotos}})["photos"].toArray();
+    QSet<QString> remoteIds;
+    for (const auto &entry : manifest) {
+        const auto remote = entry.toObject();
+        const auto pid = remote["id"].toString();
+        remoteIds.insert(pid);
+        if (removed.contains(pid)) continue;
+        auto existing = std::find_if(photos.begin(), photos.end(), [&pid](const auto &value) {
+            return value.toObject()["id"] == pid;
+        });
+        if (existing == photos.end()) photos.append(remote);
+        else {
+            auto photo = (*existing).toObject();
+            if (photo["uploaded"].toBool()) {
+                auto merged = remote;
+                if (photo["digest"] == remote["digest"] && !photo["path"].toString().isEmpty())
+                    merged["path"] = photo["path"];
+                *existing = merged;
+            }
+        }
+    }
+    for (qsizetype i = photos.size(); i-- > 0;) {
+        const auto photo = photos[i].toObject();
+        if (photo["uploaded"].toBool() && !remoteIds.contains(photo["id"].toString()))
+            photos.removeAt(i);
+    }
+    return photos;
+}
+
 // Merge acknowledgements into the LATEST local report, never replace it with sent data.
 // Only matching edit sequences and fully acknowledged photos/deletions clear dirty.
-bool Lem::mergeSync(QJsonObject sent, bool complete) {
+bool Lem::mergeSync(QJsonObject sent, bool complete, QJsonValue serverPhotos) {
     const auto id = sent["id"].toString();
     if (!m_reports.contains(id)) {
         syncFailed(409, "Report local indisponível.");
@@ -430,6 +466,8 @@ bool Lem::mergeSync(QJsonObject sent, bool complete) {
         }
         photos[i] = p;
     }
+    if (serverPhotos.isArray())
+        photos = reconcilePhotos(photos, serverPhotos.toArray(), latest["deleted_photos"].toArray());
     latest["photos"] = photos;
     auto deleted = latest["deleted_photos"].toArray();
     const auto ackDeleted = sent["_ack_deleted"].toArray();
@@ -459,8 +497,8 @@ bool Lem::mergeSync(QJsonObject sent, bool complete) {
     const bool committedCorrection = complete && correction["state"] == "committed";
     const auto conflictKeys = {"_conflict", "_conflict_reason", "_conflict_kind"};
     // Keep the saved conflict until a clean replacement can reach the checkpoint.
-    const bool resolvedIdentity = committedCorrection && !latest["dirty"].toBool() &&
-                                  retryableCorrectionIdentity(previous);
+    const bool resolvedIdentity = complete && !latest["dirty"].toBool() &&
+        ((committedCorrection && retryableCorrectionIdentity(previous)) || previous["_conflict_kind"] == "order_scope");
     if (resolvedIdentity)
         for (const auto key : conflictKeys) latest.remove(key);
     if (committedCorrection) {
@@ -580,6 +618,7 @@ void Lem::syncNext(int index, QString notice) {
         syncRequest("PUT", "/api/reports/" + id,
                     compact({{"charger_id", local["charger_id"]},
                              {"station_identity_at_start", identityAtStart},
+                             {"work_item_id", local.value("_order_item")},
                              {"base_revision", local["revision"]},
                              {"checklist_version", local["template"].toObject()["version"]},
                              {"frozen_history", local["status"] == "closed" && local["template"].toObject()["version"].toInt() == 6 && local["correction"].toObject()["state"] != "editing"},
@@ -588,8 +627,12 @@ void Lem::syncNext(int index, QString notice) {
                              {"payload", local["payload"]}}),
                     [this, index, local](QByteArray data) mutable {
                         const auto saved = QJsonDocument::fromJson(data).object();
-                        if (!saved.contains("revision")) {
-                            syncFailed(0, "Resposta inválida do servidor.");
+                        if (!validRemoteReport(saved, local["id"].toString()) || saved["status"] != "draft" ||
+                            saved["charger_id"] != local["charger_id"] || saved["owner_id"] != local["owner_id"] ||
+                            saved["revision"].toInt() != local["revision"].toInt() + 1) {
+                            // Leave the in-flight journal at its previous base. GET on
+                            // retry must prove which payload the server accepted.
+                            syncFailed(0, "A revisão recebida não confirma este envio. A verificar novamente.");
                             return;
                         }
                         for (const auto &key : {"revision", "snapshot", "template", "started"})
@@ -598,7 +641,7 @@ void Lem::syncNext(int index, QString notice) {
                         // Record the server's representation, which can normalize
                         // answers during PUT. Keep the editable payload separate.
                         local["_inflight_delete_payload"] = saved.value("payload");
-                        if (mergeSync(local))
+                        if (mergeSync(local, false, saved["photos"]))
                             syncPhotos(index, local, 0);
                     });
     };
@@ -609,8 +652,17 @@ void Lem::syncNext(int index, QString notice) {
             syncNext(index + 1);
             return;
         }
-        if (r["revision"].toInt() == 0 && !remote["exists"].toBool()) {
+        if (r["revision"].toInt() == 0 && remote.value("exists") == QJsonValue(false)) {
             send(r);
+            return;
+        }
+        if (!validRemoteReport(remote, r["id"].toString())) {
+            syncFailed(0, "Resposta de report inválida. Os dados locais foram conservados.");
+            return;
+        }
+        if (remote["work_item_id"].isString() && r["_order_item"].isString() &&
+            remote["work_item_id"] != r["_order_item"]) {
+            syncFailed(409, "O report pertence a outra visita. A cópia local foi conservada.");
             return;
         }
         if (remote["charger_id"] != r["charger_id"]) {
@@ -660,7 +712,7 @@ void Lem::syncNext(int index, QString notice) {
             if (committedCorrection)
                 for (const auto &key : {"owner_id", "technician", "correction", "started", "finished", "updated", "snapshot"})
                     r[key] = remote[key];
-            if (mergeSync(r, true))
+            if (mergeSync(r, true, remote["photos"]))
             {
                 if (committedCorrection) receiveReplacement(remote["correction"].toObject()["source_id"].toString(), r["id"].toString());
                 syncNext(index + 1);
@@ -706,11 +758,11 @@ void Lem::syncNext(int index, QString notice) {
         // and clear the server's frozen-upload marker before evidence is sent.
         const auto remoteTemplate = remote["template"].toObject();
         const auto localTemplate = r["template"].toObject();
-        const bool sameForm = remoteTemplate["version"] == localTemplate["version"] &&
+        const bool sameForm = r["_conflict_kind"] != "order_scope" && remoteTemplate["version"] == localTemplate["version"] &&
             remoteTemplate["frozen_upload"].toBool() == localTemplate["frozen_upload"].toBool();
         r["_inflight_delete_payload"] = remote.value("payload");
         // Checkpoint a recovered deletion before sending any newer local answers.
-        if ((confirmedDelete || (samePayload && sameForm)) && !mergeSync(r))
+        if ((confirmedDelete || (samePayload && sameForm)) && !mergeSync(r, false, remote["photos"]))
             return;
         if (samePayload && sameForm)
             syncPhotos(index, r, 0);
@@ -826,6 +878,7 @@ void Lem::syncPhotos(int index, QJsonObject r, int photoIndex) {
         const bool correction = r["correction"].toObject()["state"] == "editing";
         syncRequest(correction ? "POST" : "PUT", "/api/reports/" + id + (correction ? "/correction/commit" : ""),
                     compact({{"charger_id", r["charger_id"]},
+                             {"work_item_id", r.value("_order_item")},
                              {"base_revision", r["revision"]},
                              {"checklist_version", r["template"].toObject()["version"]},
                              {"frozen_history", !correction && r["template"].toObject()["version"].toInt() == 6},
@@ -834,7 +887,8 @@ void Lem::syncPhotos(int index, QJsonObject r, int photoIndex) {
                              {"payload", r["payload"]}}),
                     [this, index, r](QByteArray data) mutable {
                         const auto saved = QJsonDocument::fromJson(data).object();
-                        if (!saved.contains("revision")) {
+                        if (!validRemoteReport(saved, r["id"].toString()) || saved["status"] != "closed" ||
+                            saved["charger_id"] != r["charger_id"] || saved["revision"].toInt() != r["revision"].toInt() + 1) {
                             syncFailed(0, "Resposta inválida ao concluir.");
                             return;
                         }
@@ -843,7 +897,7 @@ void Lem::syncPhotos(int index, QJsonObject r, int photoIndex) {
                         if (saved.contains("station_update")) r["station_update"] = saved["station_update"];
                         if (saved["correction"].toObject()["state"] == "committed")
                             for (const auto &key : {"owner_id", "technician", "correction"}) r[key] = saved[key];
-                        if (mergeSync(r, true))
+                        if (mergeSync(r, true, saved["photos"]))
                         {
                             if (saved["correction"].toObject()["state"] == "committed")
                                 receiveReplacement(saved["correction"].toObject()["source_id"].toString(), r["id"].toString());
@@ -1097,10 +1151,11 @@ void Lem::refreshReport() {
     emit changed();
     request(
         "GET", "/api/reports/" + id, {},
-        [this](QByteArray data) {
+        [this, id](QByteArray data) {
             auto report = QJsonDocument::fromJson(data).object();
             report["dirty"] = false;
-            getPhotos(report, 0);
+            if (m_current.value("id") != id || m_current.value("dirty").toBool()) { m_busy = false; emit changed(); return; }
+            getPhotos(report, id);
         },
         "application/json",
         [this, id](int code, QString message) {
@@ -1544,7 +1599,13 @@ void Lem::viewServerReport() {
             return;
         }
         auto r = m_reports.value(id).toObject();
-        r["_conflict_remote"] = QJsonDocument::fromJson(data).object();
+        const auto remote = QJsonDocument::fromJson(data).object();
+        if (!validRemoteReport(remote, id)) {
+            m_busy = false;
+            status("Resposta de report inválida. Os dados locais foram conservados.");
+            return;
+        }
+        r["_conflict_remote"] = remote;
         m_reports[id] = r;
         if (m_current.value("id").toString() == id)
             m_current = r;
@@ -1586,10 +1647,10 @@ void Lem::transferReport(QString ownerId) {
     request(
         "POST", "/api/reports/" + id + "/owner",
         compact({{"owner_id", ownerId}, {"base_revision", m_current["revision"]}}),
-        [this](QByteArray data) {
+        [this, id](QByteArray data) {
             auto r = QJsonDocument::fromJson(data).object();
             r["dirty"] = false;
-            getPhotos(r, 0);
+            if (!getPhotos(r, id)) return;
             status("Propriedade transferida. Só o novo proprietário pode editar ou concluir.");
         },
         "application/json",
@@ -1766,10 +1827,10 @@ void Lem::useServerReport() {
     const auto id = m_current.value("id").toString();
     m_busy = true;
     emit changed();
-    request("GET", "/api/reports/" + id, {}, [this](QByteArray data) {
+    request("GET", "/api/reports/" + id, {}, [this, id](QByteArray data) {
         auto r = QJsonDocument::fromJson(data).object();
         r["dirty"] = false;
-        getPhotos(r, 0);
+        if (!getPhotos(r, id)) return;
         status(
             "Versão atual do servidor aberta. As alterações anteriores estão no novo rascunho criado como cópia.");
     });

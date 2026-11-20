@@ -3,10 +3,65 @@
 
 #pragma once
 #include <QByteArray>
+#include <QBuffer>
+#include <QFile>
+#include <QImageReader>
 #include <QtEndian>
 #include <cmath>
 
 namespace EvidenceMedia {
+// QImageReader can synthesize an end marker for a truncated JPEG. Walk past
+// the length-delimited segments (including Exif thumbnails) to the real EOI.
+inline bool completeJpeg(QByteArrayView bytes) {
+    if (!bytes.startsWith(QByteArrayView("\xff\xd8", 2))) return false;
+    qsizetype offset = 2;
+    bool scan = false;
+    while (offset < bytes.size()) {
+        if (scan) {
+            offset = bytes.indexOf(char(0xff), offset);
+            if (offset < 0) return false;
+        }
+        if (quint8(bytes[offset]) != 0xff) return false;
+        while (offset < bytes.size() && quint8(bytes[offset]) == 0xff) ++offset;
+        if (offset == bytes.size()) return false;
+        const auto marker = quint8(bytes[offset++]);
+        if (marker == 0xd9) return scan;
+        if (scan && (marker == 0 || (marker >= 0xd0 && marker <= 0xd7))) continue;
+        if (offset + 2 > bytes.size()) return false;
+        const auto length = qFromBigEndian<quint16>(bytes.data() + offset);
+        if (length < 2 || length > bytes.size() - offset) return false;
+        offset += length;
+        scan = marker == 0xda;
+    }
+    return false;
+}
+
+inline bool completePng(QByteArrayView bytes) {
+    qsizetype offset = 8; // The reader has already identified the PNG signature.
+    while (offset + 12 <= bytes.size()) {
+        const auto length = qFromBigEndian<quint32>(bytes.data() + offset);
+        if (length > quint64(bytes.size() - offset - 12)) return false;
+        if (bytes.sliced(offset + 4, 4) == "IEND") return length == 0;
+        offset += qsizetype(length) + 12;
+    }
+    return false;
+}
+
+// Older profiles may already contain a truncated original that Qt can partially decode.
+inline bool readableStoredPhoto(const QString &path, const QString &mime) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || file.size() <= 0 || file.size() > 20 * 1024 * 1024) return false;
+    QByteArray bytes = file.readAll();
+    QBuffer input(&bytes);
+    if (!input.open(QIODevice::ReadOnly)) return false;
+    QImageReader reader(&input);
+    const auto size = reader.size();
+    if (!size.isValid() || qint64(size.width()) * size.height() > 40000000) return false;
+    if (mime == "image/jpeg" && (reader.format() != "jpeg" || !completeJpeg(bytes))) return false;
+    if (mime == "image/png" && (reader.format() != "png" || !completePng(bytes))) return false;
+    return !reader.read().isNull();
+}
+
 // Read ISO BMFF movie duration before attachment, also while offline. Do not trust
 // the filename or the camera's duration/size hints. Server validates codec/streams.
 inline QString videoMime(const QByteArray &bytes) {

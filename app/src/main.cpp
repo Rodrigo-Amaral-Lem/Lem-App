@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
     app.setOrganizationName("Lem");
     app.setApplicationName("Lem");
     app.setApplicationDisplayName("Lem");
-    app.setApplicationVersion("0.5.3");
+    app.setApplicationVersion("0.5.4");
 #ifdef Q_OS_ANDROID
     // Keep evidence if a platform window closure ends the process again.
     QObject::connect(&app, &QGuiApplication::lastWindowClosed, &app, []() {
@@ -88,6 +88,15 @@ int main(int argc, char **argv) {
             return 1;
         }
         if (instance->existing) return 0;
+    }
+#endif
+#ifndef Q_OS_ANDROID
+    // Own the profile before storage discovery or migration can write a journal.
+    const auto profile = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const auto profileLock = smoke || screenshot ? nullptr : AppStorage::lockWriter(profile);
+    if (!smoke && !screenshot && !profileLock) {
+        qWarning() << "Outro processo está a utilizar o perfil de Lem.";
+        return 1;
     }
 #endif
     Lem lem(smoke || screenshot ? temp.path() : AppStorage::prepare());

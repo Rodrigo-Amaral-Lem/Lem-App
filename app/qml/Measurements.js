@@ -24,6 +24,9 @@ function editorText(id, value) {
     return String(value || "").replace(new RegExp("\\s*" + unit(id) + "$", "i"), "");
 }
 function editorPattern(id) {
+    // Keep the whole mA entry visible, including a mistyped separator. Finish
+    // validates the integer, so subsequent digits cannot change its meaning.
+    if (milliamp(id)) return /[\s\S]*/;
     return digits(id) ? new RegExp("[0-9]{1," + digits(id) + "}" + decimals(id) + "") : /[\s\S]*/;
 }
 function format(id, value) {

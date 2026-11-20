@@ -28,6 +28,9 @@ for n in range(14,18):
  assert find_visual(w.contentItem(),'notes_'+key).isVisible()
  assert 'observação' in js(f'itemIssues(lem.sections[4].items.find(i=>i.id==="{key}")).join()')
  lem.answer(key,'600,5','Valor registado');QTest.qWait(20)
+ assert js(f'itemIssues(lem.sections[4].items.find(i=>i.id==="{key}")).join()') == 'Falta fotografia'
+ values['current']['photos'].append({'id':'photo-'+key, 'checkpoint':key, 'mime':'image/png', 'uploaded':True})
+ lem.changed.emit();QTest.qWait(20)
  assert js(f'itemIssues(lem.sections[4].items.find(i=>i.id==="{key}")).length')==0
  trigger('answer_'+key+'_NA');QTest.qWait(20)
  assert a['value']=='NA' and not a.get('assessment')

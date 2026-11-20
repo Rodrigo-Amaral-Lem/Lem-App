@@ -2,7 +2,15 @@
 # Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
 
 cmake_minimum_required(VERSION 3.25)
-project(Lem VERSION 0.5.3 LANGUAGES CXX)
+project(Lem VERSION 0.5.4 LANGUAGES CXX)
+set(report_limits_file "${CMAKE_CURRENT_SOURCE_DIR}/../shared/report-limits.json")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${report_limits_file}")
+file(READ "${report_limits_file}" report_limits)
+foreach(limit IN ITEMS payload_utf8_bytes answer_characters general_note_characters)
+ string(JSON limit_value GET "${report_limits}" "${limit}")
+ string(TOUPPER "${limit}" limit_name)
+ add_compile_definitions("LEM_${limit_name}=${limit_value}")
+endforeach()
 # Normal Qt Creator builds use the selected shared Qt kit.
 # The standalone packaging script explicitly enables the static-only option.
 option(LEM_WINDOWS_STANDALONE "Link Windows Qt/plugins/runtime into one Lem.exe" OFF)
@@ -97,8 +105,8 @@ set_target_properties(Lem PROPERTIES MACOSX_BUNDLE TRUE WIN32_EXECUTABLE TRUE MA
 if(ANDROID)
  set_property(TARGET Lem PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
  # Preserve the R1 scroll fix; Android version codes increase for every release.
- set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_NAME "0.5.3")
- set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_CODE 185)
+ set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_NAME "0.5.4")
+ set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_CODE 186)
 endif()
 include(GNUInstallDirs)
 install(TARGETS Lem
@@ -339,7 +347,7 @@ if(LEM_BUILD_TESTS)
  if(MSVC)
   target_compile_options(Lem-data-safety-test PRIVATE /utf-8)
  endif()
- foreach(scenario IN ITEMS storage signature rotation rejected-closure migration-sync cleanup)
+ foreach(scenario IN ITEMS storage signature rotation rejected-closure field-integrity migration-sync cleanup)
   add_test(NAME data-safety-${scenario} COMMAND Lem-data-safety-test ${scenario})
   set_tests_properties(data-safety-${scenario} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
  endforeach()

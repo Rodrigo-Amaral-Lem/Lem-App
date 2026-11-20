@@ -140,12 +140,12 @@ ScrollView {
                     required property var modelData
                     required property int index
                     Layout.fillWidth: true
-                    readonly property var localDraft: (controller.localOrderDrafts || {})[modelData.target] || null
+                    readonly property var localDraft: (controller.localOrderDrafts || {})[modelData.id] || null
                     readonly property bool localRecovery: !!localDraft && localDraft.item === modelData.id &&
-                        (modelData.state === "closed" || modelData.state === "invalid") && localDraft.id !== modelData.report_id &&
+                        (modelData.state === "closed" || modelData.state === "invalid" || !!peerDraft) && localDraft.id !== modelData.report_id &&
                         !modelData.drafts.some(d => d.id === localDraft.id)
                     readonly property var peerDraft: modelData.drafts.find(d => d.owner_id !== page.owner)
-                    readonly property bool peerOnly: !!peerDraft && !localDraft && !modelData.drafts.some(d => d.owner_id === page.owner)
+                    readonly property bool peerOnly: !!peerDraft && !modelData.drafts.some(d => d.owner_id === page.owner)
                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#bac6ca" }
                     Label { Layout.fillWidth: true; font.bold: true; wrapMode: Text.Wrap; text: (taskRow.index + 1) + ". " + taskRow.modelData.external_id + " · " + taskRow.modelData.contract }
                     Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: {
@@ -153,8 +153,8 @@ ScrollView {
                         if (item.state === "cancelled") return "Cancelada"
                         if (item.state === "invalid") return "Inválida · " + item.note
                         if (item.state === "closed") return item.report_removed ? "Relatório removido" : "Relatório fechado"
-                        if (taskRow.localDraft) return taskRow.localDraft.closed ? "Fechado · por sincronizar" : "Em preenchimento · por sincronizar"
                         if (taskRow.peerOnly) return "Em preenchimento · " + (taskRow.peerDraft.owner_name || "outro técnico")
+                        if (taskRow.localDraft) return taskRow.localDraft.closed ? "Fechado · por sincronizar" : "Em preenchimento · por sincronizar"
                         return item.drafts.length ? "Em preenchimento" : "Por fazer"
                     } }
                     OrderButton { text: page.expanded === taskRow.modelData.id ? "Ocultar informação" : "Informação do ID"; onClicked: page.expanded = page.expanded === taskRow.modelData.id ? "" : taskRow.modelData.id }
@@ -181,7 +181,7 @@ ScrollView {
                     OrderButton {
                         visible: taskRow.localRecovery
                         enabled: !controller.busy
-                        text: "Recuperar rascunho local"
+                        text: taskRow.localDraft && taskRow.localDraft.conflict ? "Consultar cópia local em conflito" : "Recuperar rascunho local"
                         onClicked: {
                             const rid = controller.prepareOrderReport(detail.order.id, taskRow.modelData.id, taskRow.localDraft.id)
                             if (rid !== "!") page.openReport(taskRow.modelData.target, rid)

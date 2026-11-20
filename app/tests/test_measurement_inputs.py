@@ -22,13 +22,16 @@ for key,valid,invalid in [("MAN.07","238,33","238,333"),("MAN.18","4564,4","1000
     field.setProperty("text",valid)
     assert field.property("acceptableInput")
     field.setProperty("text",invalid)
-    assert not field.property("acceptableInput")
+    if key in ("MAN.11", "MAN.12"):
+        assert find_visual(w.contentItem(), "integerError_" + key).property("visible")
+    else:
+        assert not field.property("acceptableInput")
     field.setProperty("text",valid)
     QMetaObject.invokeMethod(field,"editingFinished",Qt.ConnectionType.DirectConnection)
     assert values["current"]["payload"]["answers"][key]["value"]==valid+(" V" if key=="MAN.07" else " mA" if key in ("MAN.11","MAN.12") else " Ω")
 
 # Actual key events exercise the TextInput validator, not just acceptableInput.
-for key,typed,expected in [("MAN.07","1234","123"),("MAN.18","123456","12345"),("MAN.07","238,333","238,33"),("MAN.11","1234567","123456"),("MAN.12","30.5","305")]:
+for key,typed,expected in [("MAN.07","1234","123"),("MAN.18","123456","12345"),("MAN.07","238,333","238,33"),("MAN.11","1234567","1234567"),("MAN.12","3.0","3.0"),("MAN.12","3,0","3,0")]:
     field=find_visual(w.contentItem(),"value_"+key)
     QMetaObject.invokeMethod(field,"forceActiveFocus",Qt.ConnectionType.DirectConnection)
     QTest.keyClick(w,Qt.Key.Key_A,Qt.KeyboardModifier.ControlModifier)
@@ -36,6 +39,19 @@ for key,typed,expected in [("MAN.07","1234","123"),("MAN.18","123456","12345"),(
     for char in typed:
         QTest.keyClick(w,Qt.Key(ord(char)))
     assert field.property("text")==expected,(key,field.property("text"))
+
+# Paste must keep an invalid reading intact too. A subsequent explicit
+# correction is the only way to accept the intended integer and its unit.
+app.clipboard().setText("3.0")
+QTest.keyClick(w, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+QTest.keyClick(w, Qt.Key.Key_V, Qt.KeyboardModifier.ControlModifier)
+QTest.keyClick(w, Qt.Key.Key_Return)
+assert values["current"]["payload"]["answers"]["MAN.12"]["value"] == "3.0"
+assert find_visual(w.contentItem(), "integerError_MAN.12").property("visible")
+QTest.keyClick(w, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+QTest.keyClick(w, Qt.Key.Key_3)
+QTest.keyClick(w, Qt.Key.Key_Return)
+assert values["current"]["payload"]["answers"]["MAN.12"]["value"] == "3 mA"
 
 for key,value,nok in [("MAN.07","207 V",False),("MAN.07","253 V",False),("MAN.07","253,01 V",True),
                        ("MAN.04","360 V",False),("MAN.04","440,01 V",True),

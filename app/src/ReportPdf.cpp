@@ -8,6 +8,7 @@
 #include <QFontDatabase>
 #include <QFontMetricsF>
 #include <QImageReader>
+#include "EvidenceMedia.h"
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJSEngine>
@@ -124,6 +125,15 @@ QString ReportPdf::validate(const QJsonObject &report) {
 
 QByteArray ReportPdf::render(const QJsonObject &report, QString *error) {
     *error = validate(report); if (!error->isEmpty()) return {};
+    for (const auto &entry : report["photos"].toArray()) {
+        const auto photo = entry.toObject();
+        const auto mime = photo["mime"].toString();
+        if (!photo["uploaded"].toBool() && mime.startsWith("image/") &&
+            !EvidenceMedia::readableStoredPhoto(pathFor(photo), mime)) {
+            *error = "Fotografia incompleta em " + photo["checkpoint"].toString() + ". Obtenha o original antes de exportar.";
+            return {};
+        }
+    }
     static std::once_flag fonts;
     static bool fontsOk = false;
     std::call_once(fonts, [] {
