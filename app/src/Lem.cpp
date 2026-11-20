@@ -82,6 +82,12 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
     connect(&m_operationNotify, &QTimer::timeout, this, &Lem::operationChanged);
     connect(this, &Lem::changed, this, &Lem::operationChanged);
     connect(this, &Lem::localSaveStateChanged, this, &Lem::operationChanged);
+    auto *orderTimer = new QTimer(this);
+    orderTimer->setInterval(60000);
+    connect(orderTimer, &QTimer::timeout, this, [this] {
+        if (authenticated() && !m_savingOrder) refreshOrders();
+    });
+    orderTimer->start();
     m_editPool.setMaxThreadCount(1);
     m_exportPool.setMaxThreadCount(1);
     m_editTimer.setSingleShot(true);
@@ -101,13 +107,22 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
         // changed() also fires for every typed character: compare the small inputs
         // first, and convert/compare the complete catalogue only when they differ.
         QJsonArray reportSummaries;
+        QVariantMap localDrafts;
         for (auto it = m_reports.constBegin(); it != m_reports.constEnd(); ++it) {
             const auto r = it.value().toObject();
+            if (r["owner_id"] == m_user["id"] && r["dirty"].toBool() && r["correction"].toObject().isEmpty()) {
+                localDrafts.insert(r["charger_id"].toString(), QVariantMap{{"id", it.key()},
+                    {"item", r["_order_item"].toString()}, {"closed", r["status"] == "closed"}});
+            }
             const auto snapshot = r["snapshot"].toObject();
             reportSummaries.append(
                 QJsonArray{r["id"], r["charger_id"], r["status"], r["owner_id"], r["dirty"], r["revision"],
                            r["finished"], r["payload"].toObject()["finished"],
                            snapshot["charger"].toObject()["external_id"], snapshot["contract"].toObject()["name"]});
+        }
+        if (localDrafts != m_localOrderDrafts) {
+            m_localOrderDrafts = localDrafts;
+            emit localOrderDraftsChanged();
         }
         if (!m_rowsBuilt || m_rowsChargers != m_chargers || m_rowsReports != reportSummaries) {
             m_rowsBuilt = true;
@@ -271,6 +286,7 @@ QString Lem::cacheDir() const {
 // Restore the full checkpoint, then replay only newer journals owned by this user.
 // Deleted report IDs prevent an older journal from resurrecting a deleted report.
 void Lem::loadUser() {
+    resetOrders();
     resetStationCatalogue();
     m_manualSyncRequested = false;
     m_localReadError = false;
@@ -303,6 +319,9 @@ void Lem::loadUser() {
             if (o.contains(key) && !o.value(key).isObject()) valid = false;
         if (o.contains("contract") && !o.value("contract").isString()) valid = false;
         if (!valid) { m_localReadError = true; o = {}; }
+        m_orders = o["work_orders"].toArray();
+        m_planningDay = o["planning_day"].toString();
+        emit workOrderListChanged();
         m_contracts = o["contracts"].toArray();
         m_chargers = currentPcveRows(o["chargers"].toArray());
         m_reports = o["reports"].toObject();
@@ -408,6 +427,7 @@ QString Lem::writeCheckpoint(const QJsonObject &reports) {
                              {"reports", reports},
                              {"contract", m_contract},
                              {"catalogues", m_catalogues},
+                             {"work_orders", m_orders}, {"planning_day", m_planningDay},
                              {"historical_notes", m_historicalNotes},
                              {"catalogue_times", m_catalogueTimes},
                              {"station_catalogue", stationCache}});
@@ -469,6 +489,7 @@ QNetworkReply *Lem::request(QString method, QString path, QByteArray body, Callb
     NetworkSecurity::restrictRedirects(req);
     req.setRawHeader("X-Lem-Client-Version", QCoreApplication::applicationVersion().toUtf8());
     req.setRawHeader("X-Lem-Client-Platform", NetworkSecurity::clientPlatform());
+    req.setRawHeader("X-Lem-Work-Orders", "1");
     // The server sends nothing while it renders a PDF/ZIP with many photographs.
     const bool exporting = path.endsWith("/pdf") || path.endsWith("/bundle");
     req.setTransferTimeout(restoring ? 8000 : exporting ? 180000 : 30000);
@@ -725,6 +746,7 @@ bool Lem::saveSession() {
 void Lem::clearSession() {
     ++m_stationReportRequest;
     m_stationReports = {};
+    resetOrders();
     m_token.clear();
     m_pendingSessionToken.clear();
     m_sessionRetry.stop();
@@ -892,8 +914,38 @@ void Lem::refreshContracts(bool fromManualSync, bool includeStations) {
             }
             const auto previousContracts = m_contracts;
             m_contracts = document.array();
+            // Scope lives on each membership. Preserve other contracts offline and
+            // their report journals, including when the selected contract changes.
+            for (const auto &cid : m_catalogues.keys()) {
+                if (!allowedContracts.contains(cid)) {
+                    m_catalogues.remove(cid);
+                    m_catalogueTimes.remove(cid);
+                }
+            }
             for (const auto &cid : m_historicalNotes.keys())
                 if (!allowedContracts.contains(cid)) m_historicalNotes.remove(cid);
+            for (const auto &entry : m_contracts) {
+                const auto row = entry.toObject();
+                if (!row["order_only"].toBool()) continue;
+                const auto cid = row["id"].toString();
+                QSet<QString> allowed;
+                for (const auto &id : row["order_targets"].toArray()) allowed.insert(id.toString());
+                auto history = m_historicalNotes.value(cid).toObject();
+                for (const auto &id : history.keys()) if (!allowed.contains(id)) history.remove(id);
+                if (history.isEmpty()) m_historicalNotes.remove(cid);
+                else m_historicalNotes[cid] = history;
+                QJsonArray kept;
+                QSet<QString> cached;
+                for (const auto &value : m_catalogues.value(cid).toArray()) {
+                    const auto id = value.toObject()["id"].toString();
+                    if (allowed.contains(id)) { kept.append(value); cached.insert(id); }
+                }
+                // A server without order_targets cannot confirm the old scope.
+                if (cached != allowed || !row["order_targets"].isArray()) m_catalogueTimes.remove(cid);
+                if (m_catalogues.contains(cid)) m_catalogues[cid] = kept;
+                if (m_contract == cid) m_chargers = kept;
+            }
+            refreshOrders();
             // An older catalogue reply must not undo an acknowledged settings save.
             for (auto value : previousContracts) {
                 const auto contract = value.toObject();
@@ -904,11 +956,13 @@ void Lem::refreshContracts(bool fromManualSync, bool includeStations) {
             bool updateStations = false;
             if (m_user["role"] == "tech" && (m_stationCatalogueLoaded || m_stationCatalogueLoading)) {
                 QSet<QString> accessible;
+                // The independent PCVE catalogue is based on full contract grants.
+                // A contract may remain in the order menu after its full grant is revoked.
                 for (const auto &value : m_contracts)
-                    accessible.insert(value.toObject()["id"].toString());
+                    if (!value.toObject()["order_only"].toBool()) accessible.insert(value.toObject()["id"].toString());
                 QSet<QString> previous;
                 for (const auto &value : previousContracts)
-                    previous.insert(value.toObject()["id"].toString());
+                    if (!value.toObject()["order_only"].toBool()) previous.insert(value.toObject()["id"].toString());
                 updateStations = previous != accessible;
                 if (updateStations && !previous.subtract(accessible).isEmpty())
                     resetStationCatalogue();
@@ -1142,7 +1196,24 @@ bool Lem::openReport(QString chargerId, QString reportId) {
     for (auto v : m_contracts)
         if (v.toObject()["id"].toString() == m_contract)
             contract = v.toObject();
-    if (charger.isEmpty()) {
+    QString plannedItem;
+    for (const auto &entry : m_orders) {
+        const auto order = entry.toObject();
+        for (const auto &value : order["items"].toArray()) {
+            const auto item = value.toObject();
+            if (item["target"] != chargerId || item["state"] != "pending") continue;
+            if (order["started"].toBool()) plannedItem = item["id"].toString();
+            if (!item["drafts"].toArray().isEmpty()) {
+                status("Este ID já tem um rascunho. Abra o relatório existente ou peça a transferência ao administrador.");
+                return false;
+            }
+        }
+    }
+    if (contract["order_only"].toBool() && !orderAllowsDraft(chargerId)) {
+        status("Esta tarefa não está disponível para iniciar um relatório.");
+        return false;
+    }
+    if (charger.isEmpty() || contract.isEmpty()) {
         status("Carregador indisponível para iniciar a intervenção.");
         return false;
     }
@@ -1164,7 +1235,7 @@ bool Lem::openReport(QString chargerId, QString reportId) {
             answers[it.key()] = QJsonObject{{"value", details[it.value()]}, {"notes", ""}};
     answers["FIN.02"] = QJsonObject{{"value", m_user["name"]}, {"notes", ""}};
     const auto started = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
-    const QJsonObject draft{{"id", uuid()},
+    QJsonObject draft{{"id", uuid()},
                             {"charger_id", chargerId},
                             {"contract_id", m_contract},
                             {"presentation", contract["presentation"]},
@@ -1177,6 +1248,7 @@ bool Lem::openReport(QString chargerId, QString reportId) {
                             {"template", configured},
                             {"snapshot", QJsonObject{{"charger", details}, {"contract", contract}}},
                             {"started", started}};
+    if (!plannedItem.isEmpty()) draft["_order_item"] = plannedItem;
     if (!checkpointReport(draft, "O novo rascunho não foi criado. Tente novamente após verificar o armazenamento."))
         return false;
     // Only leave the previous report once we can open the new one.
@@ -1195,6 +1267,15 @@ void Lem::getPhotos(QJsonObject report, int index) {
     // Metadata first; remote originals are downloaded only on explicit demand.
     report["offline_photos"] =
         m_reports.value(report["id"].toString()).toObject()["offline_photos"].toBool();
+    report = receivedPhotoPaths(report);
+    m_current = withContractPresentation(Checklist::correctedDraft(report));
+    m_template = m_current["template"].toObject();
+    m_busy = false;
+    remember();
+    status("Report disponível. Fotografias antigas podem ser descarregadas quando necessário.");
+}
+
+QJsonObject Lem::receivedPhotoPaths(QJsonObject report) const {
     auto photos = report["photos"].toArray();
     for (int i = 0; i < photos.size(); ++i) {
         auto p = photos[i].toObject();
@@ -1205,11 +1286,7 @@ void Lem::getPhotos(QJsonObject report, int index) {
     }
     report["photos"] = photos;
     report["last_access"] = double(QDateTime::currentSecsSinceEpoch());
-    m_current = withContractPresentation(Checklist::correctedDraft(report));
-    m_template = m_current["template"].toObject();
-    m_busy = false;
-    remember();
-    status("Report disponível. Fotografias antigas podem ser descarregadas quando necessário.");
+    return report;
 }
 
 // Hot input path: update memory and queue a small journal instead of rewriting the cache.
@@ -1618,7 +1695,7 @@ void Lem::deleteReport(QString id) {
     const auto r = m_current;
     const bool admin = m_user["role"].toString() == "admin";
     if (r.isEmpty() ||
-        (!admin && (r["status"].toString() != "draft" || r["owner_id"] != m_user["id"]))) {
+        (!admin && (r["status"].toString() != "draft" || r["owner_id"] != m_user["id"] || isOrderRecovery(r)))) {
         status("Não tem permissão para apagar este report.");
         return;
     }
@@ -2132,6 +2209,7 @@ void Lem::saveStation(QString id, QString baseUpdated, QVariantMap fields) {
 }
 
 bool Lem::correctionAllowed(const QJsonObject &report) const {
+    if (isOrderRecovery(report)) return false;
     if (report["status"] == "draft" && report["template"].toObject()["frozen_upload"].toBool()) return false;
     const auto correction = report["correction"].toObject();
     return correction["state"] != "editing" || (desktopCorrections() && m_user["role"] == "admin" &&

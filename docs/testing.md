@@ -73,6 +73,8 @@ retention of correction-date inputs, retries and first-attempt success in `Main.
 For an isolated run, set `TMP` and `TEMP` to the task's scratch directory before invoking
 the runner. It disables the QML disk cache and prints results to the console.
 
+The compact PCVE navigation check also verifies that the work-order viewport ends above the sync toolbar. On Android, scroll to the last item of a multi-ID order and open its recovered draft.
+
 The wider `app/tests/test_*.py` collection covers navigation, scroll bounds, Android margins, import
 preview, feedback, export visibility and accounts. Most are standalone runners; do not assume
 `pytest app/tests` is their entry point. Read each runner's header and argument handling.
@@ -266,3 +268,5 @@ alone do not satisfy the user's instruction. Keep per-run evidence in ongoing_wo
 Also cover migration before automatic synchronization of a cached draft that has never been opened,
 including its in-flight payload and durable cache. Oversized HTTP 401/426 evidence responses must
 reach the failure callback with the authentication status, not the completed-file callback.
+
+Run `python app/tests/test_work_order_download.py <Lem-offline-test> <free-loopback-port>` with the sibling Server dependencies and matching Qt runtime. The runner seeds two closed reports on separate orders and checks the followed report and its original evidence on disk after administrator login.

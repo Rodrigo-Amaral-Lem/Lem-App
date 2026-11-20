@@ -62,6 +62,10 @@ private:
         if (scheduled != m_scheduled) {
             m_scheduled = scheduled;
             setFlag(jobClass, "setEnabled", scheduled);
+            const auto root = QJniObject::fromString(m_lem.storage());
+            auto context = QNativeInterface::QAndroidApplication::context();
+            QJniObject::callStaticMethod<void>("pt/lem/app/WorkOrderJob", "configure",
+                "(Landroid/content/Context;Ljava/lang/String;Z)V", context.object(), root.object<jstring>(), jboolean(scheduled));
         }
         const bool transfer = m_lem.authenticated() && m_lem.backgroundTransferActive() &&
                               (m_transfer || qGuiApp->applicationState() == Qt::ApplicationActive);
@@ -69,7 +73,7 @@ private:
             m_transfer = transfer;
             setFlag(transferClass, "setNeeded", transfer);
         }
-        if (!m_offered && m_lem.evidenceDownloadActive() &&
+        if (!m_offered && scheduled &&
             qGuiApp->applicationState() == Qt::ApplicationActive) {
             m_offered = true;
             auto context = QNativeInterface::QAndroidApplication::context();

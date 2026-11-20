@@ -56,6 +56,13 @@ class Lem : public QObject {
     Q_PROPERTY(QString photoDownloadState READ photoDownloadState NOTIFY changed)
     Q_PROPERTY(QVariantMap user READ user NOTIFY changed)
     Q_PROPERTY(QVariantList users READ users NOTIFY changed)
+    Q_PROPERTY(QVariantMap localOrderDrafts READ localOrderDrafts NOTIFY localOrderDraftsChanged)
+    Q_PROPERTY(bool currentOrderReadOnly READ currentOrderReadOnly NOTIFY changed)
+    Q_PROPERTY(QVariantList workOrders READ workOrders NOTIFY workOrderListChanged)
+    Q_PROPERTY(QVariantList workCandidates READ workCandidates NOTIFY workCandidatesChanged)
+    Q_PROPERTY(QString planningDay READ planningDay NOTIFY workOrderListChanged)
+    Q_PROPERTY(QString orderMessage READ orderMessage NOTIFY workOrdersChanged)
+    Q_PROPERTY(bool savingOrder READ savingOrder NOTIFY workOrdersChanged)
     Q_PROPERTY(QVariantList contracts READ contracts NOTIFY contractsChanged)
     Q_PROPERTY(QVariantList deletedContracts READ deletedContracts NOTIFY contractTrashChanged)
     Q_PROPERTY(QVariantList chargers READ chargers NOTIFY chargersChanged)
@@ -182,6 +189,20 @@ class Lem : public QObject {
     QString storage() const {
         return m_root;
     }
+    QVariantMap localOrderDrafts() const { return m_localOrderDrafts; }
+    bool currentOrderReadOnly() const { return isOrderRecovery(m_current); }
+    QVariantList workOrders() const { return m_orders.toVariantList(); }
+    QVariantList workCandidates() const { return m_orderCandidates.toVariantList(); }
+    QString planningDay() const { return m_planningDay; }
+    QString orderMessage() const { return m_orderReadError.isEmpty() ? m_orderMessage : m_orderReadError; }
+    bool savingOrder() const { return m_savingOrder; }
+    Q_INVOKABLE void refreshOrders(bool planner = false);
+    Q_INVOKABLE QString newOrderId() const;
+    Q_INVOKABLE void saveOrder(QVariantMap plan);
+    Q_INVOKABLE void cancelOrder(QString id, int revision);
+    Q_INVOKABLE void followOrder(QString id, bool follow);
+    Q_INVOKABLE void invalidateOrderItem(QString id, QString item, int revision, QString note);
+    Q_INVOKABLE QString prepareOrderReport(QString orderId, QString itemId, QString requestedReport = {});
     // Session/catalogue actions exposed to QML.
     Q_INVOKABLE QString connectorText(QString text) const { return Checklist::connectorText(text); }
     Q_INVOKABLE void demo();
@@ -271,6 +292,11 @@ class Lem : public QObject {
     void compatibilityChanged();
     void localSaveStateChanged();
     void sectionsChanged();
+    void localOrderDraftsChanged();
+    void workOrderListChanged();
+    void workCandidatesChanged();
+    void workOrdersChanged();
+    void workOrderSaved(QString id);
     void contractsChanged();
     void contractTrashChanged();
     void chargersChanged();
@@ -405,6 +431,21 @@ class Lem : public QObject {
     mutable QVariantMap m_currentProjection, m_photoProjection;
     mutable QJsonArray m_projectedPhotos;
     QJsonArray m_notifiedContracts;
+    QJsonArray m_orders, m_orderCandidates;
+    QString m_planningDay, m_orderMessage, m_orderReadError;
+    quint64 m_orderRead = 0;
+    bool m_savingOrder = false;
+    struct FollowedReport { int revision; int photoCount; };
+    QHash<QString, FollowedReport> m_followedReports;
+    QVariantMap m_localOrderDrafts;
+    bool isOrderRecovery(const QJsonObject &report) const;
+    QSet<QString> m_attemptedDownloads;
+    bool m_orderDownload = false;
+    void resetOrders();
+    void writeOrder(QString id, QString path, QJsonObject body);
+    bool orderAllowsDraft(QString target) const;
+    void receiveFollowedReports();
+    QJsonObject receivedPhotoPaths(QJsonObject report) const;
     void refreshContracts(bool fromManualSync, bool includeStations = false);
     void refreshCatalogue(QString id, bool force = false);
     void resetStationCatalogue();

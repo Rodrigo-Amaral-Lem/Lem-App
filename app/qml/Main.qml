@@ -1111,6 +1111,7 @@ ApplicationWindow {
     }
     function leaveReport() {
         const origin = stationReportOrigin;
+        if (origin && origin.order && origin.userId === lem.user.id) { page = "orders"; return; }
         if (page !== "report" || !origin || origin.userId !== pcvePage.userId) {
             page = "catalog";
             return;
@@ -1336,6 +1337,12 @@ ApplicationWindow {
         }).length;
     }
     function navigateBack() {
+        if (page === "orders") {
+            if (Qt.inputMethod.visible) Qt.inputMethod.hide();
+            else if (orderPage.mode === "list") page = "catalog";
+            else orderPage.goBack();
+            return;
+        }
         if (Qt.inputMethod.visible)
             Qt.inputMethod.hide();
         else
@@ -1346,7 +1353,7 @@ ApplicationWindow {
         objectName: "reportBackShortcut"
         // Android's Back sequence must not also bind a keyboard's Backspace.
         sequences: win.androidCamera ? ["Back"] : [StandardKey.Back]
-        enabled: !win.splashActive && (win.page === "report" || win.page === "pcves")
+        enabled: !win.splashActive && (win.page === "report" || win.page === "pcves" || win.page === "orders")
                  && !reviewDialog.opened && !groupDialog.opened && !detailsDialog.opened && !pcveDetailsDialog.opened
                  && !pcveEditDialog.opened && !pcveImportDialog.opened && !contractNotesDialog.visible
                  && !photoPreview.opened && !cropDialog.opened && !removePhotoDialog.opened && !deleteReportDialog.opened
@@ -1359,11 +1366,11 @@ ApplicationWindow {
     readonly property var importPreviewList: contractExcelPanel.previewList
     property string photoItem: ""
     property string exportKind: "pdf"
-    property bool canDeleteReport: !!win.reportData.id && (lem.user.role === "admin" || (win.reportData.status === "draft" && win.reportData.owner_id === lem.user.id))
+    property bool canDeleteReport: !!win.reportData.id && (lem.user.role === "admin" || (!lem.currentOrderReadOnly && win.reportData.status === "draft" && win.reportData.owner_id === lem.user.id))
     // Presentation guard for protected/closed/other-owned reports. Server checks are authoritative.
     readonly property bool correctingReport: !!win.reportData.correction && win.reportData.correction.state === "editing"
     readonly property bool correctionPermitted: !correctingReport || (!!lem.desktopCorrections && lem.user.role === "admin" && win.reportData.correction.editor_id === lem.user.id)
-    property bool editing: !(win.reportData.template || {}).frozen_upload && correctionPermitted && !win.reportData._conflict && win.reportData.id !== undefined && win.reportData.status !== "closed" && win.reportData.owner_id === lem.user.id
+    property bool editing: !lem.currentOrderReadOnly && !(win.reportData.template || {}).frozen_upload && correctionPermitted && !win.reportData._conflict && win.reportData.id !== undefined && win.reportData.status !== "closed" && win.reportData.owner_id === lem.user.id
     property var fields: [
         {
             key: "external_id",
@@ -1402,6 +1409,9 @@ ApplicationWindow {
             label: "Número(s) de série"
         },
         {
+            key: "operator",
+            label: "Operador atual"
+        }, {
             key: "manufacturer",
             label: "Fabricante"
         },
@@ -1471,7 +1481,7 @@ ApplicationWindow {
             "id": "external_id", "identificador": "external_id", "id de pcve": "external_id",
             "id do carregador": "external_id", "série": "serial", "nº(s) série": "serial",
             "station id": "external_id", "id do pcve": "external_id",
-            "cpe": "cpe", "fornecimento": "energy_supply", "tomadas": "connectors", "notas": "contract_notes"
+            "operador": "operator", "operador atual": "operator", "cpe": "cpe", "fornecimento": "energy_supply", "tomadas": "connectors", "notas": "contract_notes"
         };
         for (const raw of headers) {
             const header = raw.trim();
@@ -1529,7 +1539,7 @@ ApplicationWindow {
                     visible: win.page === "report" && (win.compact || !!win.stationReportOrigin)
                     symbol: "left"
                     implicitWidth: win.touchHeight
-                    Accessible.name: win.stationReportOrigin ? "Voltar ao PCVE" : "Voltar aos contratos"
+                    Accessible.name: win.stationReportOrigin && win.stationReportOrigin.order ? "Voltar à ordem" : win.stationReportOrigin ? "Voltar ao PCVE" : "Voltar aos contratos"
                     onClicked: {
                         Qt.inputMethod.hide();
                         win.leaveReport();
@@ -1565,6 +1575,14 @@ ApplicationWindow {
                     checked: win.page === "catalog"
                     enabled: !lem.busy
                     onClicked: win.page = "catalog"
+                }
+                UiButton {
+                    objectName: "workOrdersButton"
+                    text: "Ordens"
+                    Accessible.name: "Ordens de trabalho"
+                    visible: win.width > 640 && !!lem.user.id
+                    checked: win.page === "orders"
+                    onClicked: win.page = "orders"
                 }
                 UiButton {
                     objectName: "pcveCatalogueButton"
@@ -1613,6 +1631,12 @@ ApplicationWindow {
                             palette: lightPalette
                             text: "Contratos"
                             onTriggered: win.page = "catalog"
+                        }
+                        Base.MenuItem {
+                            text: "Ordens de trabalho"
+                            visible: !!lem.user.id
+                            implicitHeight: visible ? win.touchHeight : 0
+                            onTriggered: win.page = "orders"
                         }
                         Base.MenuItem {
                             objectName: "pcveCatalogueMenuItem"
@@ -4226,7 +4250,7 @@ ApplicationWindow {
             if (pending && !lem.busy) {
                 win.pendingReportOpen = null;
                 if (lem.contractId() === pending.contractId &&
-                    (!pending.origin || (pcveDetailsDialog.visible && pcveDetailsDialog.stationId === pending.origin.stationId))) {
+                    (!pending.origin || (pending.origin.order && win.page === "orders" && pending.origin.userId === lem.user.id) || (pcveDetailsDialog.visible && pcveDetailsDialog.stationId === pending.origin.stationId))) {
                     if (lem.current.id === pending.id) {
                         win.stationReportOrigin = pending.origin;
                         win.page = "report";
@@ -4831,6 +4855,16 @@ ApplicationWindow {
                     }
                 }
             }
+        }
+        WorkOrders {
+            id: orderPage
+            visible: win.page === "orders"
+            anchors.fill: parent
+            anchors.margins: win.pageGap
+            // The footer overlays the viewport. Keep the last order action reachable.
+            anchors.bottomMargin: win.pageBottomInset
+            controller: lem
+            onOpenReport: (target, rid) => win.openCatalogReport(target, rid, {order: true, userId: lem.user.id})
         }
         Item {
             id: pcvePage

@@ -258,7 +258,12 @@ def checks():
         QTest.qWait(100)
         assert js('navigationButton.hovered && !navigationButton.ToolTip.visible')
         pointer_click("navigationButton")
-        assert js('navMenu.itemAt(1).text === "PCVEs" && !navigationButton.ToolTip.visible')
+        pcve_menu = next(i for i in range(js("navMenu.count"))
+                         if js(f"navMenu.itemAt({i}).objectName") == "pcveCatalogueMenuItem")
+        assert js(f'navMenu.itemAt({pcve_menu}).text === "PCVEs" && !navigationButton.ToolTip.visible')
+        # Both pages share the mobile navigation and footer. The bottom of the
+        # work-order viewport must leave its final action above the sync button.
+        assert js('orderPage.mapToItem(appFooter, 0, orderPage.height).y <= 0')
         pointer_click("pcveCatalogueMenuItem")
         assert js('page === "pcves" && pcveList.count === 3 && !contractChrome.visible')
         # Preserve the selected card's screen position and the history scroll,
@@ -303,7 +308,7 @@ def checks():
         values["user"] = {}
         values["stations"] = []
         lem.changed.emit()
-        assert not js('navMenu.itemAt(1).visible')
+        assert not js(f'navMenu.itemAt({pcve_menu}).visible')
         assert not errors, errors
         print("PASS: independent PCVE menu, search, live data, offline navigation, desktop edit and Excel preview")
         print("Previews:", PREVIEW_DIR)

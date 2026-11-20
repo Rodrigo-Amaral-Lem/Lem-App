@@ -8,6 +8,7 @@ Part of LEM. See the accompanying LICENSE for license terms and warranty disclai
     android:installLocation="auto"
     android:versionCode="-- %%INSERT_VERSION_CODE%% --"
     android:versionName="-- %%INSERT_VERSION_NAME%% --">
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -61,6 +62,8 @@ Part of LEM. See the accompanying LICENSE for license terms and warranty disclai
 
         <service android:name=".TransferService" android:exported="false"
             android:foregroundServiceType="dataSync" android:stopWithTask="true" />
+        <service android:name=".WorkOrderJob" android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
         <service android:name=".CatalogueJob" android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
 

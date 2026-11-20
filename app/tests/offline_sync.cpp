@@ -8,6 +8,7 @@
 #include <QTemporaryDir>
 #include <QEventLoop>
 #include <QElapsedTimer>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QTimer>
 #include <QImage>
@@ -254,7 +255,7 @@ int main(int argc, char **argv) {
     QDesktopServices::setUrlHandler("file", &exportViewer, "view");
     // These integration fixtures only contact the disposable loopback server.
     QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
-    app.setApplicationVersion("0.5.0");
+    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.5.0"));
     app.setOrganizationName("Lem-Offline-Test");
     app.setApplicationName("Lem Offline Test");
     const auto args = app.arguments();
@@ -265,6 +266,30 @@ int main(int argc, char **argv) {
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsRoot + "/settings");
     QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, settingsRoot + "/system-settings");
+    if (args.size() == 6 && args[1] == "--work-order-download") {
+        Lem observer(temp.path() + "/observer");
+        observer.setServer(args[2]);
+        observer.login("admin@lem.pt", qEnvironmentVariable("LEM_ORDER_TEST_PASSWORD"));
+        CHECK(until([&] { return observer.authenticated() && observer.workOrders().size() == 2; }));
+        // No navigation or manual download: verify the durable copy, original bytes
+        // and absence of the other administrator's unsubscribed report.
+        const QString followed = args[3], ignored = args[4];
+        CHECK(until([&] {
+            const auto report = LemReviewTest::persistedReport(observer, followed);
+            const auto files = report["photos"].toArray();
+            if (report["status"] != "closed" || !report["offline_photos"].toBool() || files.size() != 1)
+                return false;
+            const auto path = QUrl(files[0].toObject()["path"].toString()).toLocalFile();
+            if (path.isEmpty()) return false;
+            QFile evidence(path);
+            return evidence.open(QIODevice::ReadOnly) &&
+                   QCryptographicHash::hash(evidence.readAll(), QCryptographicHash::Sha256).toHex() == args[5].toLatin1();
+        }));
+        CHECK(observer.current().value("id").toString().isEmpty());
+        CHECK(LemReviewTest::persistedReport(observer, ignored).isEmpty());
+        qInfo() << "PASS followed report and verified original received automatically";
+        return 0;
+    }
     if (args.contains("--resume-delete-ack")) return resumeDeleteAck(state);
     QImage image(64, 48, QImage::Format_RGB32);
     image.fill(Qt::darkCyan);

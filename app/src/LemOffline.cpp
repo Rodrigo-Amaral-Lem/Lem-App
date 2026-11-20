@@ -496,6 +496,7 @@ bool Lem::mergeSync(QJsonObject sent, bool complete) {
         emit changed();
         return false;
     }
+    if (complete && latest["status"] == "closed" && !m_orders.isEmpty()) refreshOrders();
     emit changed();
     return true;
 }
@@ -979,6 +980,9 @@ void Lem::refreshCatalogue(QString id, bool force) {
     const auto last = m_catalogueTimes[id].toDouble();
     if (!force && m_catalogues.contains(id) && QDateTime::currentSecsSinceEpoch() - last < 15 * 60)
         return;
+    // Some normal callers open an authorised membership before their first
+    // contracts listing arrives. A known or refreshing scope can revoke it.
+    const bool hadContractScope = m_refreshing || !m_contracts.isEmpty();
     m_catalogueLoading = true;
     m_refreshing = true;
     emit changed();
@@ -991,13 +995,23 @@ void Lem::refreshCatalogue(QString id, bool force) {
     };
     request(
         "GET", "/api/contracts/" + id + "/chargers", {},
-        [this, id, failed](QByteArray data) {
+        [this, id, failed, hadContractScope](QByteArray data) {
             const auto document = QJsonDocument::fromJson(data);
             if (!validMembershipCatalogue(document, id)) {
                 failed(0, {});
                 return;
             }
             auto rows = document.array();
+            QJsonObject contract;
+            for (const auto &entry : m_contracts)
+                if (entry.toObject()["id"] == id) contract = entry.toObject();
+            if (contract.isEmpty() && (hadContractScope || !m_contracts.isEmpty())) { failed(0, {}); return; }
+            if (contract["order_only"].toBool() && contract["order_targets"].isArray()) {
+                QSet<QString> allowed;
+                for (const auto &target : contract["order_targets"].toArray()) allowed.insert(target.toString());
+                for (qsizetype i = rows.size(); i-- > 0;)
+                    if (!allowed.contains(rows[i].toObject()["id"].toString())) rows.removeAt(i);
+            }
             // A catalogue GET can race a single-ID read or a confirmed notes edit.
             // Retain the newer notes without masking report/PCVE catalogue updates.
             auto history = m_historicalNotes.value(id).toObject();
@@ -1270,6 +1284,7 @@ void Lem::photoDownloadFinished(QString reportId, QString photoId, bool success)
     }
     // Queue advancement is deferred so error callbacks cannot recurse through an entire batch.
     QTimer::singleShot(0, this, [this] { pumpPhotoBatch(); });
+    QTimer::singleShot(0, this, &Lem::receiveFollowedReports);
     emit changed();
 }
 void Lem::fetchPhoto(QString photoId) {
