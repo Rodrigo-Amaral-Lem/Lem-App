@@ -23,6 +23,8 @@ inline QString component(QString text, const QString &fallback, int maximum) {
 inline QString identifier(const QJsonObject &report) {
     const auto snapshot = report["snapshot"].toObject();
     const auto charger = component(snapshot["charger"].toObject()["external_id"].toString(), "Carregador", 72);
+    const auto reference = snapshot["intervention"].toObject()["reference"].toString();
+    if (!reference.isEmpty()) return charger + "_" + component(reference, "Intervenção", 112);
     const auto contract = component(snapshot["contract"].toObject()["name"].toString(), "Contrato", 112);
     return charger + "_" + contract;
 }

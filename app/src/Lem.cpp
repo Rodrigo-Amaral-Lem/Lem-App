@@ -98,6 +98,9 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
     connect(&m_operationNotify, &QTimer::timeout, this, &Lem::operationChanged);
     connect(this, &Lem::changed, this, &Lem::operationChanged);
     connect(this, &Lem::localSaveStateChanged, this, &Lem::operationChanged);
+    m_orderExpiry.setSingleShot(true);
+    m_orderExpiry.setTimerType(Qt::PreciseTimer);
+    connect(&m_orderExpiry, &QTimer::timeout, this, &Lem::expireCachedOrders);
     auto *orderTimer = new QTimer(this);
     orderTimer->setInterval(60000);
     connect(orderTimer, &QTimer::timeout, this, [this] {
@@ -199,6 +202,7 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
         connect(qGuiApp, &QGuiApplication::applicationStateChanged, this,
                 [this](Qt::ApplicationState state) {
                     if (state == Qt::ApplicationActive) {
+                        expireCachedOrders();
                         if (sessionPending()) m_sessionRetry.start(0);
                         scheduleSync(1500);
 #ifdef Q_OS_ANDROID
@@ -342,6 +346,15 @@ void Lem::loadUser() {
         m_chargers = currentPcveRows(o["chargers"].toArray());
         m_reports = o["reports"].toObject();
         m_contract = o["contract"].toString();
+        // Startup opens the preventive catalogue. Restore intervention scopes when
+        // their own menu or work order is opened, including offline.
+        for (const auto &entry : m_contracts) {
+            if (entry.toObject()["id"] == m_contract && entry.toObject().contains("intervention")) {
+                m_contract.clear();
+                m_chargers = {};
+                break;
+            }
+        }
         m_catalogues = o["catalogues"].toObject();
         m_historicalNotes = o["historical_notes"].toObject();
         for (const auto &key : m_catalogues.keys())
@@ -413,6 +426,8 @@ void Lem::loadUser() {
         report["photos"] = photos; m_reports[id] = report;
     }
     applyContractPresentations();
+    // The checkpoint and its edit journals are fully restored before a purge writes them.
+    expireCachedOrders();
     if (m_localReadError) storageWritable();
     else {
         emit localSaveStateChanged();
@@ -1218,12 +1233,21 @@ bool Lem::openReport(QString chargerId, QString reportId) {
     for (auto v : m_contracts)
         if (v.toObject()["id"].toString() == m_contract)
             contract = v.toObject();
+    const auto job = contract["intervention"].toObject();
+    if (!job.isEmpty() && !job["report_id"].toString().isEmpty()) {
+        status("Esta intervenção já tem um relatório. Abra o relatório existente.");
+        return false;
+    }
     QString plannedItem;
     for (const auto &entry : m_orders) {
         const auto order = entry.toObject();
         for (const auto &value : order["items"].toArray()) {
             const auto item = value.toObject();
             if (item["target"] != chargerId || item["state"] != "pending") continue;
+            if (!job.isEmpty() && !order["started"].toBool()) {
+                status("A ordem desta intervenção ainda não começou.");
+                return false;
+            }
             if (order["started"].toBool()) plannedItem = item["id"].toString();
             if (!item["drafts"].toArray().isEmpty()) {
                 status("Este ID já tem um rascunho. Abra o relatório existente ou peça a transferência ao administrador.");
@@ -1257,6 +1281,11 @@ bool Lem::openReport(QString chargerId, QString reportId) {
             answers[it.key()] = QJsonObject{{"value", details[it.value()]}, {"notes", ""}};
     answers["FIN.02"] = QJsonObject{{"value", m_user["name"]}, {"notes", ""}};
     const auto started = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    QJsonObject snapshot{{"charger", details}, {"contract", contract}};
+    if (!job.isEmpty()) {
+        snapshot["contract"] = job["contract"];
+        snapshot["intervention"] = QJsonObject{{"id", job["id"]}, {"kind", job["kind"]}, {"reference", job["reference"]}};
+    }
     QJsonObject draft{{"id", uuid()},
                             {"charger_id", chargerId},
                             {"contract_id", m_contract},
@@ -1268,7 +1297,7 @@ bool Lem::openReport(QString chargerId, QString reportId) {
                             {"payload", QJsonObject{{"answers", answers}, {"started", started}}},
                             {"photos", QJsonArray{}},
                             {"template", configured},
-                            {"snapshot", QJsonObject{{"charger", details}, {"contract", contract}}},
+                            {"snapshot", snapshot},
                             {"started", started}};
     if (!plannedItem.isEmpty()) draft["_order_item"] = plannedItem;
     if (!checkpointReport(draft, "O novo rascunho não foi criado. Tente novamente após verificar o armazenamento."))
@@ -1278,6 +1307,7 @@ bool Lem::openReport(QString chargerId, QString reportId) {
     m_current = draft;
     m_template = configured;
     status("Novo rascunho guardado no dispositivo.");
+    emit draftCreated(draft["id"].toString());
     return true;
 }
 
@@ -2065,7 +2095,7 @@ void Lem::loadStationReports(QString stationId) {
             : physicalId == stationId;
         if (!belongs) continue;
         const QJsonObject row{{"id", report["id"]}, {"charger_id", report["charger_id"]},
-                              {"contract_id", cid}, {"contract", contract["name"]},
+                              {"contract_id", cid}, {"contract", snapshot["intervention"].toObject()["reference"].toString(contract["name"].toString())},
                               {"status", report["status"]}, {"started", report["started"]},
                               {"identifier", ReportNaming::identifier(report)}};
         cached.append(row);
@@ -2186,6 +2216,15 @@ void Lem::exchangeContractNotes(const QString &cid, const QString &id, const QJs
                 record["notes_revision"] = prior["notes_revision"];
             }
             bool listed = false;
+            for (qsizetype i = 0; i < m_contracts.size(); ++i) {
+                auto scope = m_contracts[i].toObject();
+                auto job = scope["intervention"].toObject();
+                if (job["id"] != id || job["notes_revision"].toInt() > record["notes_revision"].toInt()) continue;
+                job["notes_revision"] = record["notes_revision"];
+                job["notes"] = record["contract_notes"];
+                scope["intervention"] = job;
+                m_contracts[i] = scope;
+            }
             for (qsizetype i = 0; i < rows.size(); ++i) {
                 auto row = rows[i].toObject();
                 if (row["id"] != id) continue;

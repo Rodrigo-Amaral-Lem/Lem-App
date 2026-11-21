@@ -1,0 +1,137 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#include "Lem.h"
+#include <QFile>
+#include <QJsonDocument>
+
+namespace {
+QString serverMessage(QString error) {
+    // Multipart errors can append the transport description after the JSON body.
+    const auto body = error.left(error.lastIndexOf('}') + 1).toUtf8();
+    const auto detail = QJsonDocument::fromJson(body).object()["detail"].toString();
+    return detail.isEmpty() ? QStringLiteral("Verifique os campos e a ligação ao servidor.") : detail;
+}
+}
+
+QVariantList Lem::contracts() const {
+    QVariantList rows;
+    for (const auto &entry : m_contracts)
+        if (!entry.toObject().contains("intervention")) rows.append(entry.toVariant());
+    return rows;
+}
+
+QVariantList Lem::interventions() const {
+    QVariantList rows;
+    for (const auto &entry : m_contracts) {
+        const auto scope = entry.toObject();
+        if (scope.contains("intervention")) {
+            auto job = scope["intervention"].toObject();
+            job["order_only"] = scope["order_only"].toBool();
+            rows.append(job.toVariantMap());
+        }
+    }
+    return rows;
+}
+
+void Lem::leaveInterventionScope() {
+    for (const auto &entry : m_contracts) {
+        if (entry.toObject()["id"] == m_contract && entry.toObject().contains("intervention")) {
+            selectContract({});
+            return;
+        }
+    }
+}
+
+QString Lem::prepareIntervention(QString id) {
+    if (m_busy || attachingFiles() || !m_qveCopyTarget.isEmpty()) return "!";
+    for (const auto &entry : m_contracts) {
+        const auto scope = entry.toObject();
+        const auto job = scope["intervention"].toObject();
+        if (job["id"] != id || scope["order_only"].toBool()) continue;
+        selectContract(id);
+        if (m_contract != id) return "!";
+        if (m_chargers.isEmpty()) {
+            m_chargers.append(QJsonObject{{"id", id}, {"contract_id", id}, {"station_id", job["station_id"]},
+                {"external_id", job["external_id"]}, {"details", job["details"]},
+                {"contract_notes", job["notes"]}, {"notes_revision", job["notes_revision"]}});
+            emit changed();
+        }
+        for (const auto &entry : m_reports) {
+            const auto report = entry.toObject();
+            if (report["charger_id"] == id && report["owner_id"] == m_user["id"] && report["dirty"].toBool() &&
+                report["correction"].toObject().isEmpty()) return report["id"].toString();
+        }
+        // A report may have synced since the last contracts refresh.
+        const auto reports = m_chargers.first().toObject()["reports"].toArray();
+        const auto known = job["report_id"].toString();
+        if (!known.isEmpty() && !m_deletedReports.contains(known)) return known;
+        if (!reports.isEmpty()) return reports.first().toObject()["id"].toString();
+        for (const auto &entry : m_reports) {
+            const auto report = entry.toObject();
+            if (report["charger_id"] == id && !m_deletedReports.contains(report["id"].toString()) &&
+                report["correction"].toObject().isEmpty()) return report["id"].toString();
+        }
+        return {};
+    }
+    return "!";
+}
+
+void Lem::loadCorrectiveContracts(QString stationId) {
+    if (!authenticated() || m_user["role"] != "admin") return;
+    const auto token = m_token;
+    QString path = "/api/corrective-contracts";
+    if (!stationId.isEmpty()) path += "?station_id=" + stationId;
+    request("GET", path, {}, [this, token, stationId](QByteArray bytes) {
+        if (token != m_token) return;
+        const auto data = QJsonDocument::fromJson(bytes);
+        emit correctiveContractsReceived(stationId, data.array().toVariantList(),
+            data.isArray() ? QString{} : QStringLiteral("Lista de contratos inválida."));
+    }, "application/json", [this, token, stationId](int, QString error) {
+        if (token == m_token) emit correctiveContractsReceived(stationId, {}, serverMessage(error));
+    });
+}
+
+void Lem::writeIntervention(QString id, QString suffix, QVariantMap fields) {
+    const auto token = m_token;
+    if (!authenticated()) { emit interventionSaved(id, false, "É necessária uma ligação ao servidor."); return; }
+    request("PUT", "/api/interventions/" + id + suffix, QJsonDocument(QJsonObject::fromVariantMap(fields)).toJson(),
+        [this, id, token](QByteArray bytes) {
+            if (token != m_token) return;
+            const auto data = QJsonDocument::fromJson(bytes).object();
+            bool saved = data["id"] == id;
+            emit interventionSaved(id, saved, saved ? "Intervenção guardada." : "Confirmação inválida. Tente novamente.");
+            if (saved) refresh();
+        }, "application/json", [this, token, id](int, QString error) {
+            if (token == m_token) emit interventionSaved(id, false, serverMessage(error));
+        });
+}
+
+void Lem::createIntervention(QString id, QVariantMap fields) { writeIntervention(id, {}, fields); }
+void Lem::shareIntervention(QString id, QVariantMap fields) { writeIntervention(id, "/share", fields); }
+
+void Lem::importCorrectiveContract(QString id, QVariantMap fields, QUrl workbook) {
+    if (!authenticated() || m_user["role"] != "admin") {
+        emit interventionSaved(id, false, "A importação exige uma sessão de administrador.");
+        return;
+    }
+    QFile file(localPath(workbook));
+    if (!file.open(QIODevice::ReadOnly)) { emit interventionSaved(id, false, "Não foi possível abrir o Excel."); return; }
+    const auto limit = 20 * 1024 * 1024;
+    const auto bytes = file.read(limit + 1);
+    if (bytes.isEmpty() || bytes.size() > limit || file.error() != QFile::NoError) {
+        emit interventionSaved(id, false, "Selecione um Excel válido até 20 MB.");
+        return;
+    }
+    QList<QPair<QString, QString>> form;
+    for (const auto &key : {"company", "name", "start", "end"}) form.append({key, fields.value(key).toString()});
+    const auto token = m_token;
+    multipart("PUT", "/api/corrective-contracts/" + id, form, "contrato.xlsx", bytes,
+        [this, token, id](QByteArray bytes) {
+            if (token != m_token) return;
+            const auto result = QJsonDocument::fromJson(bytes).object();
+            const bool saved = result["id"] == id && result["count"].toInt() > 0;
+            emit interventionSaved(id, saved, saved ? QString("Contrato criado com %1 IDs.").arg(result["count"].toInt())
+                                                   : QStringLiteral("Confirmação inválida. Tente novamente."));
+        }, [this, token, id](int, QString error) {
+            if (token == m_token) emit interventionSaved(id, false, serverMessage(error));
+        });
+}

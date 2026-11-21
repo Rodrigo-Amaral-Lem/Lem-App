@@ -64,6 +64,7 @@ class Lem : public QObject {
     Q_PROPERTY(QString orderMessage READ orderMessage NOTIFY workOrdersChanged)
     Q_PROPERTY(bool savingOrder READ savingOrder NOTIFY workOrdersChanged)
     Q_PROPERTY(QVariantList contracts READ contracts NOTIFY contractsChanged)
+    Q_PROPERTY(QVariantList interventions READ interventions NOTIFY contractsChanged)
     Q_PROPERTY(QVariantList deletedContracts READ deletedContracts NOTIFY contractTrashChanged)
     Q_PROPERTY(QVariantList chargers READ chargers NOTIFY chargersChanged)
     Q_PROPERTY(QVariantList stations READ stations NOTIFY stationsChanged)
@@ -154,9 +155,14 @@ class Lem : public QObject {
     QVariantList users() const {
         return m_users.toVariantList();
     }
-    QVariantList contracts() const {
-        return m_contracts.toVariantList();
-    }
+    QVariantList contracts() const;
+    QVariantList interventions() const;
+    Q_INVOKABLE void loadCorrectiveContracts(QString stationId);
+    Q_INVOKABLE void createIntervention(QString id, QVariantMap fields);
+    Q_INVOKABLE void shareIntervention(QString id, QVariantMap fields);
+    Q_INVOKABLE void importCorrectiveContract(QString id, QVariantMap fields, QUrl workbook);
+    Q_INVOKABLE QString prepareIntervention(QString id);
+    Q_INVOKABLE void leaveInterventionScope();
     QVariantList deletedContracts() const {
         return m_deletedContracts.toVariantList();
     }
@@ -287,6 +293,7 @@ class Lem : public QObject {
     Q_INVOKABLE QString defaultExport(QString kind) const;
   signals:
     void changed();
+    void draftCreated(QString reportId);
     // Frequent progress updates: do not use changed() for every transferred byte.
     void operationChanged();
     void compatibilityChanged();
@@ -297,6 +304,8 @@ class Lem : public QObject {
     void workCandidatesChanged();
     void workOrdersChanged();
     void workOrderSaved(QString id);
+    void correctiveContractsReceived(QString stationId, QVariantList contracts, QString error);
+    void interventionSaved(QString id, bool saved, QString message);
     void contractsChanged();
     void contractTrashChanged();
     void chargersChanged();
@@ -310,6 +319,7 @@ class Lem : public QObject {
     void contractExportCancelled();
 
   private:
+    void writeIntervention(QString id, QString suffix, QVariantMap fields);
     struct ContractExportJob {
         QString contractId, contractName, kind, directory, token, server;
         QJsonObject presentation;
@@ -432,6 +442,7 @@ class Lem : public QObject {
     mutable QJsonArray m_projectedPhotos;
     QJsonArray m_notifiedContracts;
     QJsonArray m_orders, m_orderCandidates;
+    QTimer m_orderExpiry;
     QString m_planningDay, m_orderMessage, m_orderReadError;
     quint64 m_orderRead = 0;
     bool m_savingOrder = false;
@@ -442,6 +453,8 @@ class Lem : public QObject {
     QSet<QString> m_attemptedDownloads;
     bool m_orderDownload = false;
     void resetOrders();
+    QJsonArray retainedOrders(QJsonArray orders);
+    void expireCachedOrders();
     void writeOrder(QString id, QString path, QJsonObject body);
     bool orderAllowsDraft(QString target) const;
     void receiveFollowedReports();

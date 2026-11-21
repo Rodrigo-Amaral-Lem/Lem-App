@@ -306,7 +306,7 @@ int main(int argc, char **argv) {
     QDesktopServices::setUrlHandler("file", &exportViewer, "view");
     // These integration fixtures only contact the disposable loopback server.
     QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
-    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.5.4"));
+    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.6.0"));
     app.setOrganizationName("Lem-Offline-Test");
     app.setApplicationName("Lem Offline Test");
     const auto args = app.arguments();
@@ -404,8 +404,21 @@ int main(int argc, char **argv) {
         CHECK(same.open(QIODevice::ReadOnly));
         CHECK(same.readAll() == before);
         same.close();
+        // A cold offline launch must expire only old cancellations and replay the newer draft journal.
+        const auto clock = QDateTime::currentDateTimeUtc();
+        const QJsonObject activeOrder{{"id", "active-order"}};
+        const QJsonObject recentOrder{{"id", "recent-cancellation"},
+                                      {"cancelled_at", clock.addSecs(-23 * 3600).toString(Qt::ISODateWithMs)}};
+        const QJsonObject expiredOrder{{"id", "expired-cancellation"},
+                                       {"cancelled_at", clock.addSecs(-25 * 3600).toString(Qt::ISODateWithMs)}};
+        auto orderCache = read(cache);
+        orderCache["work_orders"] = QJsonArray{expiredOrder, recentOrder, activeOrder};
+        CHECK(write(cache, orderCache));
         Lem restored(temp.path() + "/journal");
         restored.demo();
+        const QJsonArray retained{recentOrder, activeOrder};
+        CHECK(restored.workOrders() == retained.toVariantList());
+        CHECK(read(cache)["work_orders"].toArray() == retained);
         restored.openReport("", rid);
         CHECK(
             restored.current()["payload"].toMap()["answers"].toMap()["SITE.02"].toMap()["notes"] ==

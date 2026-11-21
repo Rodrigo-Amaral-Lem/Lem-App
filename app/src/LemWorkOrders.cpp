@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "Lem.h"
 #include "SafeStorage.h"
+#include <QDateTime>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QUuid>
@@ -9,7 +10,33 @@ QString Lem::newOrderId() const {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
+QJsonArray Lem::retainedOrders(QJsonArray orders) {
+    const auto now = QDateTime::currentDateTimeUtc();
+    const qint64 retentionMs = 24LL * 60 * 60 * 1000;
+    qint64 nextExpiry = 0;
+    for (auto i = orders.size(); i > 0; --i) {
+        const auto cancelled = QDateTime::fromString(orders.at(i - 1).toObject()["cancelled_at"].toString(), Qt::ISODate);
+        if (!cancelled.isValid()) continue;
+        const auto remaining = now.msecsTo(cancelled.addMSecs(retentionMs));
+        if (remaining <= 0) orders.removeAt(i - 1);
+        else if (!nextExpiry || remaining < nextExpiry) nextExpiry = remaining;
+    }
+    m_orderExpiry.stop();
+    if (nextExpiry) m_orderExpiry.start(int(qMin(nextExpiry, retentionMs)));
+    return orders;
+}
+
+void Lem::expireCachedOrders() {
+    const auto kept = retainedOrders(m_orders);
+    if (kept.size() == m_orders.size()) return;
+    m_orders = kept;
+    emit workOrderListChanged();
+    emit changed();
+    if (!m_localReadError) persist();
+}
+
 void Lem::resetOrders() {
+    m_orderExpiry.stop();
     ++m_orderRead;
     m_orders = {};
     m_orderCandidates = {};
@@ -34,7 +61,7 @@ void Lem::refreshOrders(bool planner) {
         const auto data = QJsonDocument::fromJson(bytes).object();
         if (!data["orders"].isArray() || !data["today"].isString()) return;
         m_orderReadError.clear();
-        const auto orders = data["orders"].toArray();
+        const auto orders = retainedOrders(data["orders"].toArray());
         const auto day = data["today"].toString();
         if (m_orders != orders || day != m_planningDay) {
             m_orders = orders;
@@ -143,6 +170,7 @@ bool Lem::orderAllowsDraft(QString target) const {
 }
 
 bool Lem::isOrderRecovery(const QJsonObject &report) const {
+    if (report["work_item_expired"].toBool() && report["status"] == "draft") return true;
     if (m_user["role"] != "tech" || report["status"] != "draft") return false;
     const auto target = report["charger_id"].toString();
     for (const auto &value : m_orders) {
@@ -187,7 +215,8 @@ QString Lem::prepareOrderReport(QString orderId, QString itemId, QString request
             bool listed = false;
             for (const auto &row : m_chargers) if (row.toObject()["id"] == target) listed = true;
             if (!listed) m_chargers.append(QJsonObject{{"id",target},{"contract_id",cid},
-                {"station_id",item["station_id"]},{"external_id",item["external_id"]},{"details",item["details"]}});
+                {"station_id",item["station_id"]},{"external_id",item["external_id"]},{"details",item["details"]},
+                {"contract_notes",item["contract_notes"]}, {"notes_revision",item["notes_revision"]}});
             if (!requestedReport.isEmpty()) return requestedReport;
             if (!item["report_id"].toString().isEmpty()) return item["report_id"].toString();
             if (!drafts.isEmpty()) {

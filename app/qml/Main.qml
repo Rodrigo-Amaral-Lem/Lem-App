@@ -1094,6 +1094,15 @@ ApplicationWindow {
     }
     property var stationReportOrigin: null
     property var pendingReportOpen: null
+    property string draftNeedingNotes: ""
+    Connections {
+        target: lem
+        ignoreUnknownSignals: true
+        function onDraftCreated(reportId) {
+            win.draftNeedingNotes = reportId;
+            if (win.page === "report") win.showEntryNotes();
+        }
+    }
     function openStationReport(contractId, chargerId, reportId) {
         const stationId = pcveDetailsDialog.stationId;
         const index = pcveList.model.findIndex(row => row.id === stationId);
@@ -1111,6 +1120,7 @@ ApplicationWindow {
     }
     function leaveReport() {
         const origin = stationReportOrigin;
+        if (origin && origin.intervention && origin.userId === lem.user.id) { page = "interventions"; return; }
         if (origin && origin.order && origin.userId === lem.user.id) { page = "orders"; return; }
         if (page !== "report" || !origin || origin.userId !== pcvePage.userId) {
             page = "catalog";
@@ -1156,6 +1166,8 @@ ApplicationWindow {
         }
     }
     onPageChanged: {
+        if ((page === "catalog" || page === "admin") && typeof lem.leaveInterventionScope === "function")
+            lem.leaveInterventionScope();
         if (contractNotesDialog) contractNotesDialog.dismiss();
         pendingReportOpen = null;
         if (page === "catalog")
@@ -1177,9 +1189,18 @@ ApplicationWindow {
         if (page !== "report") {
             stationReportOrigin = null;
             lem.reportSyncBoundary();
-        } else if (lem.user.role === "tech") {
-            showReportNotes(true);
-        }
+        } else showEntryNotes();
+    }
+    function showEntryNotes() {
+        const created = !!draftNeedingNotes && draftNeedingNotes === lem.current.id;
+        draftNeedingNotes = "";
+        // Both roles see available instructions on creation. Keep the technician's reminder on revisits.
+        if (created || lem.user.role === "tech") showReportNotes(true);
+    }
+    function showInterventions(kind, station) {
+        jobsPage.list(kind);
+        page = "interventions";
+        if (station) jobsPage.begin(station);
     }
     function showReportNotes(automatic) {
         const report = lem.current;
@@ -1338,6 +1359,12 @@ ApplicationWindow {
         }).length;
     }
     function navigateBack() {
+        if (page === "interventions") {
+            if (Qt.inputMethod.visible) Qt.inputMethod.hide();
+            else if (jobsPage.mode === "list") page = "catalog";
+            else jobsPage.back();
+            return;
+        }
         if (page === "orders") {
             if (Qt.inputMethod.visible) Qt.inputMethod.hide();
             else if (orderPage.mode === "list") page = "catalog";
@@ -1354,7 +1381,7 @@ ApplicationWindow {
         objectName: "reportBackShortcut"
         // Android's Back sequence must not also bind a keyboard's Backspace.
         sequences: win.androidCamera ? ["Back"] : [StandardKey.Back]
-        enabled: !win.splashActive && (win.page === "report" || win.page === "pcves" || win.page === "orders")
+        enabled: !win.splashActive && (win.page === "report" || win.page === "pcves" || win.page === "orders" || win.page === "interventions")
                  && !reviewDialog.opened && !groupDialog.opened && !detailsDialog.opened && !pcveDetailsDialog.opened
                  && !pcveEditDialog.opened && !pcveImportDialog.opened && !contractNotesDialog.visible
                  && !photoPreview.opened && !cropDialog.opened && !removePhotoDialog.opened && !deleteReportDialog.opened
@@ -1540,7 +1567,8 @@ ApplicationWindow {
                     visible: win.page === "report" && (win.compact || !!win.stationReportOrigin)
                     symbol: "left"
                     implicitWidth: win.touchHeight
-                    Accessible.name: win.stationReportOrigin && win.stationReportOrigin.order ? "Voltar à ordem" : win.stationReportOrigin ? "Voltar ao PCVE" : "Voltar aos contratos"
+                    Accessible.name: win.stationReportOrigin && win.stationReportOrigin.intervention ? "Voltar à intervenção" :
+                                     win.stationReportOrigin && win.stationReportOrigin.order ? "Voltar à ordem" : win.stationReportOrigin ? "Voltar ao PCVE" : "Voltar aos contratos"
                     onClicked: {
                         Qt.inputMethod.hide();
                         win.leaveReport();
@@ -1571,7 +1599,7 @@ ApplicationWindow {
                 }
                 UiButton {
                     implicitHeight: win.touchHeight
-                    visible: win.width > 640
+                    visible: win.width > 820
                     text: "Contratos"
                     checked: win.page === "catalog"
                     enabled: !lem.busy
@@ -1581,23 +1609,36 @@ ApplicationWindow {
                     objectName: "workOrdersButton"
                     text: "Ordens"
                     Accessible.name: "Ordens de trabalho"
-                    visible: win.width > 640 && !!lem.user.id
+                    visible: win.width > 820 && !!lem.user.id
                     checked: win.page === "orders"
                     onClicked: win.page = "orders"
                 }
                 UiButton {
                     objectName: "pcveCatalogueButton"
                     text: "PCVEs"
-                    visible: win.width > 640 && !!lem.user.id
+                    visible: win.width > 820 && !!lem.user.id
                     checked: win.page === "pcves"
                     enabled: !lem.busy
                     onClicked: win.page = "pcves"
                 }
                 UiButton {
+                    text: "Intervenções"
+                    visible: win.width > 820 && !!lem.user.id
+                    checked: win.page === "interventions"
+                    enabled: !lem.busy
+                    onClicked: jobMenu.open()
+                    Base.Menu {
+                        id: jobMenu
+                        y: parent.height
+                        Base.MenuItem { text: "Manutenções corretivas"; onTriggered: win.showInterventions("corrective") }
+                        Base.MenuItem { text: "Comissionamentos"; onTriggered: win.showInterventions("commissioning") }
+                    }
+                }
+                UiButton {
                     implicitHeight: win.touchHeight
                     text: "Gestão"
                     checked: win.page === "admin"
-                    visible: win.width > 640 && lem.user.role === "admin"
+                    visible: win.width > 820 && lem.user.role === "admin"
                     enabled: !lem.busy
                     onClicked: {
                         win.page = "admin";
@@ -1611,7 +1652,7 @@ ApplicationWindow {
                     Accessible.name: "Abrir navegação"
                     objectName: "navigationButton"
                     symbol: "menu"
-                    visible: win.width <= 640 && win.page !== "report"
+                    visible: win.width <= 820 && win.page !== "report"
                     onClicked: navMenu.visible = !navMenu.visible
                     Base.Menu {
                         id: navMenu
@@ -1647,6 +1688,18 @@ ApplicationWindow {
                             visible: !!lem.user.id
                             enabled: !lem.busy
                             onTriggered: win.page = "pcves"
+                        }
+                        Base.MenuItem {
+                            text: "Manutenções corretivas"
+                            visible: !!lem.user.id
+                            implicitHeight: visible ? win.touchHeight : 0
+                            onTriggered: win.showInterventions("corrective")
+                        }
+                        Base.MenuItem {
+                            text: "Comissionamentos"
+                            visible: !!lem.user.id
+                            implicitHeight: visible ? win.touchHeight : 0
+                            onTriggered: win.showInterventions("commissioning")
                         }
                         Base.MenuItem {
                             implicitHeight: visible ? win.touchHeight : 0
@@ -2549,6 +2602,7 @@ ApplicationWindow {
         property string reportId: ""
         property string externalId: ""
         property string contractName: ""
+        readonly property bool intervention: !!contractId && chargerId === contractId
         property string note: ""
         property int revision: -1
         property int editRevision: -1
@@ -2571,7 +2625,8 @@ ApplicationWindow {
             ownerId = lem.user.id || "";
             reportId = win.page === "report" ? lem.current.id : "";
             externalId = label || row.external_id || "";
-            contractName = ((lem.contracts || []).find(c => c.id === cid) || {}).name || "";
+            contractName = ((lem.contracts || []).find(c => c.id === cid) || {}).name ||
+                           ((lem.interventions || []).find(j => j.id === cid) || {}).reference || "";
             const cached = row.notes_revision !== undefined || typeof lem.historicalContractNotes !== "function"
                          ? row : lem.historicalContractNotes(cid, id);
             note = cached.contract_notes || "";
@@ -2583,7 +2638,7 @@ ApplicationWindow {
             loading = lem.authenticated && typeof lem.loadContractNotes === "function";
             notice = "";
             editor.text = note;
-            if (!automatic || note.length) open();
+            if (!automatic || note.trim().length) open();
             // The membership cache makes notes immediate and works offline. The
             // per-ID read also discovers edits made since the last catalogue refresh.
             if (loading)
@@ -2632,8 +2687,8 @@ ApplicationWindow {
                 } else if (page.editing && page.revision !== page.editRevision)
                     page.notice = "As notas mudaram. Copie o texto que pretende manter e escolha Cancelar para consultar a versão atual.";
                 if (!page.editing) editor.text = page.note;
-                if (page.automatic) {
-                    if (page.note.length) page.open();
+                if (page.automatic && !page.editing) {
+                    if (page.note.trim().length) page.open();
                     else if (page.visible) page.dismiss();
                 }
             }
@@ -2717,13 +2772,14 @@ ApplicationWindow {
                 TextArea {
                     id: editor
                     objectName: "contractNotesText"
-                    Accessible.name: contractNotesDialog.editing ? "Texto das notas" : "Notas do contrato"
+                    Accessible.name: contractNotesDialog.editing ? "Texto das notas" :
+                                     contractNotesDialog.intervention ? "Notas da intervenção" : "Notas do contrato"
                     textFormat: TextEdit.PlainText
                     wrapMode: TextEdit.Wrap
                     selectByMouse: true
                     readOnly: !contractNotesDialog.editing || contractNotesDialog.saving
                     placeholderText: contractNotesDialog.editing ? "Escreva as notas deste ID…"
-                                     : contractNotesDialog.revision >= 0 ? "Sem notas para este PCVE neste contrato."
+                                     : contractNotesDialog.revision >= 0 ? (contractNotesDialog.intervention ? "Sem notas para esta intervenção." : "Sem notas para este PCVE neste contrato.")
                                      : contractNotesDialog.loading ? "A consultar as notas…" : "Notas indisponíveis neste dispositivo."
                 }
             }
@@ -3108,6 +3164,18 @@ ApplicationWindow {
                         font.bold: true
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true
+                    }
+                    UiButton {
+                        visible: lem.authenticated && lem.user.role === "admin"
+                        text: "Nova corretiva"
+                        Layout.fillWidth: true
+                        onClicked: win.showInterventions("corrective", pcveDetailsDialog.station)
+                    }
+                    UiButton {
+                        visible: lem.authenticated
+                        text: "Novo comissionamento"
+                        Layout.fillWidth: true
+                        onClicked: win.showInterventions("commissioning", pcveDetailsDialog.station)
                     }
                     Repeater {
                         model: pcveDetailsDialog.currentFields
@@ -4251,11 +4319,12 @@ ApplicationWindow {
             if (pending && !lem.busy) {
                 win.pendingReportOpen = null;
                 if (lem.contractId() === pending.contractId &&
-                    (!pending.origin || (pending.origin.order && win.page === "orders" && pending.origin.userId === lem.user.id) || (pcveDetailsDialog.visible && pcveDetailsDialog.stationId === pending.origin.stationId))) {
+                    (!pending.origin || (pending.origin.intervention && win.page === "interventions" && pending.origin.userId === lem.user.id) ||
+                     (pending.origin.order && win.page === "orders" && pending.origin.userId === lem.user.id) || (pcveDetailsDialog.visible && pcveDetailsDialog.stationId === pending.origin.stationId))) {
                     if (lem.current.id === pending.id) {
                         win.stationReportOrigin = pending.origin;
                         win.page = "report";
-                    } else if (pending.origin) {
+                    } else if (pending.origin && pending.origin.stationId) {
                         lem.loadStationReports(pending.origin.stationId);
                     }
                 }
@@ -4857,6 +4926,17 @@ ApplicationWindow {
                 }
             }
         }
+        Interventions {
+            id: jobsPage
+            visible: win.page === "interventions"
+            anchors.fill: parent
+            anchors.margins: win.pageGap
+            anchors.bottomMargin: win.pageBottomInset
+            controller: lem
+            onOpenReport: (target, rid) => win.openCatalogReport(target, rid, {intervention: true, userId: lem.user.id})
+            onOpenNotes: (id, externalId) => contractNotesDialog.showFor(id, id, externalId, false)
+            onOpenOrder: id => { win.page = "orders"; orderPage.choose(id); }
+        }
         WorkOrders {
             id: orderPage
             visible: win.page === "orders"
@@ -5072,7 +5152,13 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     spacing: 2
                     UiLabel {
-                        text: win.reportData.snapshot ? win.reportData.snapshot.charger.external_id : "A abrir report…"
+                        text: {
+                            const snapshot = win.reportData.snapshot
+                            if (!snapshot) return "A abrir report…"
+                            const kind = (snapshot.intervention || {}).kind
+                            const label = kind === "corrective" ? "Corretiva · " : kind === "commissioning" ? "Comissionamento · " : ""
+                            return label + snapshot.charger.external_id
+                        }
                         font.pixelSize: win.compact ? 18 : 24
                         font.bold: true
                         wrapMode: Text.Wrap

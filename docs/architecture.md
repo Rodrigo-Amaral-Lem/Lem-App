@@ -12,6 +12,7 @@ copy is not a durable edit.
 | [Lem.h](../app/src/Lem.h) | Public properties/actions, notifications and operation guards |
 | [Lem.cpp](../app/src/Lem.cpp) | Catalogue/report navigation, answer editing, media admission, persistence and closure |
 | [LemOffline.cpp](../app/src/LemOffline.cpp) | Journals, synchronization, acknowledgements, conflicts and independent copies |
+| [LemInterventions.cpp](../app/src/LemInterventions.cpp) | Corrective contracts and station jobs, direct assignments and offline access to the report for a particular visit |
 | [LemReportGroups.cpp](../app/src/LemReportGroups.cpp) | Scoped QVE/measurement copying, signature drawing/photo import and multi-file evidence |
 | [Main.qml](../app/qml/Main.qml) | Pages, controls, group tabs, review dialogs and evidence actions |
 | [ReportPdf.cpp](../app/src/ReportPdf.cpp) | Native Qt painting bridge for the common PDF layout and local evidence |
@@ -230,6 +231,8 @@ recovery flow.
 The WorkOrders screen uses LemWorkOrders.cpp for scoped planning, revisioned edits and report navigation. The account-scoped cache preserves the last accepted list. Existing report synchronization uploads a technician's draft. The server resolves the corresponding membership on acceptance. The server publishes membership IDs for limited contracts so refreshing one contract preserves all other authorised offline rows. Offline edits carry their work item ID for recovery after a colleague finishes. Desktop compares both revision and attachment count for followed drafts and fetches missing originals into the private evidence cache. WorkOrderJob polls the authenticated inbox independently of the Android activity using the existing encrypted session, system notification permission and a per-installation receipt identifier.
 
 ### Durable field handoffs
+
+A cancelled order leaves the account cache 24 elapsed hours after its recorded cancellation. A local timer updates an open list or detail view, including offline. Loading a profile, resuming the app and receiving a fresh list also enforce the cutoff. Reports and evidence have their own retention lifecycle.
 
 Desktop locks the profile before migration or journal replay. The lock lives beside the profile so copying legacy files preserves the active lock. A second process can write after the first exits.
 

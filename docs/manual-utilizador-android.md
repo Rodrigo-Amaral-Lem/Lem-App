@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para Android
 
-Android · Aplicação 0.5.4 · Edição 2.13 · 20 de novembro de 2026
+Android · Aplicação 0.6.0 · Edição 2.15 · 20 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-android.pdf](manual-utilizador-android.pdf).
 
@@ -20,13 +20,13 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. Utilize o toque para selecionar opções e deslize o dedo para percorrer as perguntas. O botão de retrocesso do sistema permite regressar ao ecrã anterior quando aplicável.
 
-Este manual descreve a versão 0.5.4 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. As capturas mostram a app num emulador Android, em orientação vertical.
+Este manual descreve a versão 0.6.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. As capturas mostram a app num emulador Android, em orientação vertical.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
 
 ### Consultar as notas do contrato
 
-Ao abrir um report, o técnico vê as **Notas** desse PCVE quando há texto. Escolha **Voltar ao report** para abrir o formulário ou **Notas do PCVE** no menu para reler as instruções. A última leitura fica disponível sem rede, mesmo depois de o ID sair do contrato.
+Ao criar um rascunho, o técnico ou administrador vê as **Notas** do PCVE ou da intervenção se houver texto. Com as notas vazias, abre diretamente o formulário. O técnico volta a ver as instruções ao reabrir o report. Escolha **Voltar ao report** para continuar ou consulte as notas no menu do report. A última leitura fica disponível sem rede, mesmo depois de o ID sair do contrato.
 
 O administrador pode abrir o ícone de notas junto à seta do cartão, escolher **Editar notas** e **Guardar**. Para apagar as notas, guarde o campo vazio. No Excel, uma célula **Notas** vazia também apaga a nota do ID. Omitir a coluna conserva o texto. Se a pré-visualização indicar uma fórmula por calcular, recalcule a folha e guarde o ficheiro antes de importar.
 
@@ -89,11 +89,23 @@ O cartão **Concluído** indica que esse PCVE tem uma intervenção fechada no c
 
 Em **Ordens** (no menu de navegação, **Ordens de trabalho**), escolha uma ordem para consultar os técnicos, as datas e os IDs de cada contrato. **Informação do ID** mostra a ficha e as notas do contrato antes da visita. **Operador** identifica quem opera o PCVE e **Cliente** identifica o cliente do trabalho. Podem ser entidades diferentes.
 
-O administrador escolhe **Nova ordem**, indica o início e o prazo, seleciona técnicos e acrescenta os IDs por fazer. **Subir** e **Descer** organizam a sequência sugerida. Em **Editar ordem** pode ajustar o prazo e a equipa. Depois do início, a data inicial fica fixa. Um ID com rascunho em curso permanece na ordem. Antes do dia de início, **Cancelar ordem** e **Confirmar cancelamento** libertam os IDs pendentes. A ordem fica no histórico, com a data de cancelamento e o mesmo código.
+O administrador escolhe **Nova ordem**, indica o início e o prazo, seleciona técnicos e acrescenta os IDs por fazer. **Subir** e **Descer** organizam a sequência sugerida. Em **Editar ordem** pode ajustar o prazo e a equipa. Depois do início, a data inicial fica fixa. Um ID com rascunho em curso permanece na ordem. Antes do dia de início, **Cancelar ordem** e **Confirmar cancelamento** libertam os IDs pendentes. A ordem é eliminada 24 horas após o cancelamento. Os relatórios e os anexos já guardados são conservados.
 
 A partir do dia de início em Lisboa, o técnico pode escolher qualquer ID e **Abrir intervenção**. Para trabalhar sem rede, atualize a ordem após o início enquanto ainda tem ligação. O seu rascunho offline aparece como **Em preenchimento · por sincronizar**. **Consultar rascunho** abre o trabalho do colega identificado na ordem. **Consultar cópia local em conflito** abre o seu trabalho da mesma visita. Se recuperar a atribuição, sincronize. Para entregar o trabalho a outro técnico, escolha **Guardar cópia para entrega**. O ZIP inclui as respostas e os anexos disponíveis no dispositivo. Se a intervenção for impossível, escolha **Assinalar impedimento**, escreva o motivo e confirme em **Marcar inválida**. O ID continua por fazer no contrato e pode voltar a ser planeado. A última tarefa resolvida regista a hora de fecho. **Recuperar rascunho** abre uma cópia anterior para consulta. **Relatório removido** identifica um documento apagado após o fecho.
 
 O criador segue a ordem automaticamente. Os restantes administradores podem escolher **Seguir** e qualquer administrador pode gerir a ordem. Autorize as notificações da app para receber atribuições e avisos de início. Os seguidores recebem os impedimentos e a conclusão. O Android verifica os avisos com rede; o aviso de início é entregue no próprio dia, entre as 07h00 e as 20h00 de Lisboa.
+
+### Corretivas e comissionamentos
+
+Abra **Manutenções corretivas** no menu de navegação ou em **Intervenções**. Para criar um contrato, o administrador escolhe **Contratos de corretivas** e **Importar contrato**. Preencha o cliente, o nome e as datas. Use a primeira folha de um ficheiro XLSX com um ID já registado por linha na coluna A, sem cabeçalho. Um ID desconhecido ou repetido impede a importação de toda a folha.
+
+O nome segue o formato **Ano_Cliente_NomeContrato**, com o ano do início. As datas podem começar a partir de 1 de janeiro do ano atual. A data final pode coincidir com o início ou chegar ao segundo aniversário. Ambos os dias contam para a cobertura do PCVE.
+
+1. Na ficha do PCVE, escolha **Nova corretiva**, ou procure o ID no menu das corretivas. A app sugere o contrato válido com início mais recente. Pode escolher outro contrato válido da lista ou **Sem contrato** para uma visita esporádica.
+2. Escreva as **Notas para o técnico** e escolha **Criar corretiva**. Pode atribuí-la a um técnico na criação ou mais tarde em **Guardar atribuição**. Para a incluir numa ordem, procure a referência **COR-…** em **Nova ordem** ou **Editar ordem**. Uma ordem pode reunir corretivas e preventivas do mesmo PCVE.
+3. O técnico abre a intervenção que lhe foi atribuída. Se estiver numa ordem, abre-a por essa ordem. Cada corretiva conserva a sua referência, as notas e o seu relatório.
+
+Para comissionar um PCVE, abra a ficha ou o menu **Comissionamentos** e escolha **Novo comissionamento**. O técnico pode criar o seu próprio comissionamento para um PCVE a que tenha acesso. Cada comissionamento recebe uma referência **COM-…** e dispensa contrato. Corretivas e comissionamentos usam as perguntas, fotografias obrigatórias e assinatura do formulário preventivo atual. O tipo de intervenção aparece no PDF.
 
 ## 04 Preencher e navegar no relatório
 

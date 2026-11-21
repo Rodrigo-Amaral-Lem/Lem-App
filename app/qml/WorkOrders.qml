@@ -46,6 +46,10 @@ ScrollView {
     readonly property var candidates: controller.workCandidates || []
     readonly property string owner: controller.user.id || ""
     onOwnerChanged: { mode = "list"; selectedId = ""; plan = {}; targets = []; technicians = []; invalidId = ""; expanded = ""; }
+    onOrdersChanged: if (mode === "detail" && selectedId && !orders.some(o => o.id === selectedId)) {
+        selectedId = "";
+        mode = "list";
+    }
     onVisibleChanged: if (visible && controller.authenticated) controller.refreshOrders()
     onModeChanged: { cancelId = ""; contentItem.contentY = 0; invalidId = ""; expanded = ""; }
     clip: true
@@ -78,6 +82,10 @@ ScrollView {
             !order.started ? "Agendada" : order.due < controller.planningDay ? "Em atraso" : "Em curso")
     }
     function localTime(value) { return value ? new Date(value).toLocaleString(Qt.locale("pt_PT")) : "" }
+    function taskLabel(item) {
+        const kind = item.kind === "corrective" ? "Corretiva " + item.reference : "Preventiva"
+        return item.external_id + " · " + kind + " · " + item.contract
+    }
     Connections {
         target: page.controller
         ignoreUnknownSignals: true
@@ -129,7 +137,7 @@ ScrollView {
             }
             ColumnLayout {
                 visible: !!page.cancelId && page.cancelId === detail.order.id && !detail.order.cancelled_at
-                Label { Layout.fillWidth: true; text: "Os IDs por fazer ficam disponíveis para outras ordens. O histórico fica guardado."; wrapMode: Text.Wrap }
+                Label { Layout.fillWidth: true; text: "Os IDs por fazer ficam disponíveis para outras ordens. A ordem será eliminada 24 horas após o cancelamento."; wrapMode: Text.Wrap }
                 OrderButton { text: "Manter ordem"; enabled: !controller.savingOrder; onClicked: page.cancelId = "" }
                 OrderButton { text: "Confirmar cancelamento"; enabled: controller.authenticated && !controller.savingOrder; onClicked: { controller.cancelOrder(detail.order.id, page.cancelRevision); page.cancelId = "" } }
             }
@@ -147,7 +155,7 @@ ScrollView {
                     readonly property var peerDraft: modelData.drafts.find(d => d.owner_id !== page.owner)
                     readonly property bool peerOnly: !!peerDraft && !modelData.drafts.some(d => d.owner_id === page.owner)
                     Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#bac6ca" }
-                    Label { Layout.fillWidth: true; font.bold: true; wrapMode: Text.Wrap; text: (taskRow.index + 1) + ". " + taskRow.modelData.external_id + " · " + taskRow.modelData.contract }
+                    Label { Layout.fillWidth: true; font.bold: true; wrapMode: Text.Wrap; text: (taskRow.index + 1) + ". " + page.taskLabel(taskRow.modelData) }
                     Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: {
                         const item = taskRow.modelData
                         if (item.state === "cancelled") return "Cancelada"
@@ -251,7 +259,7 @@ ScrollView {
                     required property var modelData
                     required property int index
                     Layout.fillWidth: true
-                    Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: (planned.index + 1) + ". " + planned.modelData.external_id + " · " + planned.modelData.contract }
+                    Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: (planned.index + 1) + ". " + page.taskLabel(planned.modelData) }
                     RowLayout {
                         OrderButton { text: "Subir"; enabled: planned.index > 0; onClicked: page.move(planned.index, -1) }
                         OrderButton { text: "Descer"; enabled: planned.index + 1 < page.targets.length; onClicked: page.move(planned.index, 1) }
@@ -261,11 +269,11 @@ ScrollView {
             }
             TextField { implicitHeight: 44; id: search; Layout.fillWidth: true; placeholderText: "Pesquisar ID ou contrato"; Accessible.name: placeholderText; onTextChanged: page.searchTerm = text.trim().toLowerCase() }
             readonly property var matches: page.mode === "edit" ? page.candidates.filter(c =>
-                !page.targets.some(t => t.target === c.target) && (c.external_id + " " + c.contract).toLowerCase().includes(page.searchTerm)) : []
+                !page.targets.some(t => t.target === c.target) && page.taskLabel(c).toLowerCase().includes(page.searchTerm)) : []
             id: editor
             Repeater {
                 model: editor.matches.slice(0, 40)
-                delegate: OrderButton { required property var modelData; Layout.fillWidth: true; text: "+ " + modelData.external_id + " · " + modelData.contract; onClicked: page.targets = page.targets.concat([modelData]) }
+                delegate: OrderButton { required property var modelData; Layout.fillWidth: true; text: "+ " + page.taskLabel(modelData); onClicked: page.targets = page.targets.concat([modelData]) }
             }
             Label { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: editor.matches.length > 40; text: "Refine a pesquisa para ver os restantes IDs." }
             OrderButton {

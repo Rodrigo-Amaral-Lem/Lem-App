@@ -11,6 +11,7 @@ history = {}
 
 
 def install(attrs):
+    attrs["draftCreated"] = Signal(str)
     attrs["historicalContractNotes"] = Slot(str, str, result="QVariantMap", name="historicalContractNotes")(
         lambda self, cid, key: history.get((cid, key), {}))
     attrs["contractNotesReceived"] = Signal("QVariantMap", bool)
@@ -32,7 +33,7 @@ def row(note="", revision=0):
             "notes_revision": revision, "contract_notes": note, "reports": [], "details": {}}
 
 
-def enter(note, role="tech", online=True):
+def enter(note, role="tech", online=True, created=False):
     js('page = "catalog"')
     values["chargers"] = [row(note, 1)]
     values["user"] = dict(values["user"], id="account", role=role)
@@ -40,12 +41,28 @@ def enter(note, role="tech", online=True):
     values["current"] = dict(values["current"], id="report", charger_id="membership", contract_id="contract")
     lem.chargersChanged.emit()
     lem.changed.emit()
+    if created:
+        lem.draftCreated.emit("report")
     js('page = "report"')
     QTest.qWait(50)
 
 
 def checks():
     try:
+        for role in ("tech", "admin"):
+            enter("Ângela: verificar ligação. Check inlet.", role, online=False, created=True)
+            assert js("contractNotesDialog.visible && contractNotesDialog.note.includes('ligação')")
+            js("contractNotesDialog.dismiss()")
+            QTest.qWait(100)
+            enter("  \n ", role, created=True)
+            assert not js("contractNotesDialog.visible")
+            lem.contractNotesReceived.emit(row("", 2), False)
+            assert not js("contractNotesDialog.visible")
+            # A late reading for this same draft may supply the first non-empty instructions.
+            lem.contractNotesReceived.emit(row("Instruções Âncora / North", 3), False)
+            assert js("contractNotesDialog.visible && contractNotesDialog.note.includes('Âncora')")
+            js("contractNotesDialog.dismiss()")
+            QTest.qWait(100)
         enter("Chave no portão", online=False)
         assert js("contractNotesDialog.visible && contractNotesDialog.note === 'Chave no portão'")
         assert not find_visual(w.contentItem(), "editContractNotes").isVisible()
@@ -94,7 +111,7 @@ def checks():
         assert not js("contractNotesDialog.editing") and editor.property("text") == "Texto concorrente"
         js("contractNotesDialog.dismiss()")
         assert not [e for e in errors if "TypeError" in e or "ReferenceError" in e], errors
-        print("PASS technician offline opening, menu and refresh, admin editing, conflict recovery and contract isolation.")
+        print("PASS new drafts with notes and blank notes for both roles, offline opening, refresh, admin editing and contract isolation.")
         app.exit(0)
     except Exception:
         traceback.print_exc()

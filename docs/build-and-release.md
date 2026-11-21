@@ -1,12 +1,13 @@
 # Build and release the client
 
-This guide describes the current `0.5.4` source. Run all commands from the **App repository
+This guide describes the current `0.6.0` source. Run all commands from the **App repository
 root**, which contains `app/`, `shared/` and `docs/`. Build and staging examples use ignored
 subdirectories of `build/`; no sibling working directory is required.
 
-The current version is **0.5.4**, Android code **186**, checklist **7**. Minimum and latest
-client are **0.5.4**. Upgrade the server and clients together. The API requires the originating
-work item on new visit-scoped reports so delayed uploads cannot complete another visit.
+The current version is **0.6.0**, Android code **188**, checklist **7**. The minimum client
+is **0.5.5**. This version can sign in and receives an update notice for **0.6.0**. Install the
+server update before distributing the app. Earlier clients cannot represent mixed work orders
+or export corrective and commissioning reports correctly.
 Prepare detailed messages and user-executed `git commit -S` commands under the
 [version policy](../../Common/docs/maintenance.md#version-policy).
 
@@ -256,7 +257,7 @@ python -m unittest discover -s tools/tests -v
 ### Qt Creator and device checks
 
 Use an Android Qt kit, compatible SDK/NDK/JDK and the desired ABIs in Qt Creator. The project
-currently declares package ID `pt.lem.app`, version name `0.5.4`, and version code **186**.
+currently declares package ID `pt.lem.app`, version name `0.6.0`, and version code **188**.
 Increase the version code for a future Android release. Changing a package ID creates a different
 installation; synchronize outstanding reports before switching or uninstalling.
 
