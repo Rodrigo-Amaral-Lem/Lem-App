@@ -282,7 +282,7 @@ def check_delete_ack(client, run_native, args, folder):
     state = ("--state", str(folder))
     first = run_native(*args, *state, "--delete-ack")
     url = "http://127.0.0.1:18765"
-    auth = {"X-Lem-Client-Version": os.environ.get("LEM_TEST_CLIENT_VERSION", "0.7.0")}
+    auth = {"X-Lem-Client-Version": os.environ.get("LEM_TEST_CLIENT_VERSION", "0.8.0")}
     login = client.post(url + "/api/login", headers=auth,
                         json={"email": "admin@lem.pt", "password": "IntegrationPassword123!"})
     auth["Authorization"] = "Bearer " + login.raise_for_status().json()["token"]

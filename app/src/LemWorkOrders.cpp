@@ -38,6 +38,7 @@ void Lem::expireCachedOrders() {
 void Lem::resetOrders() {
     m_orderExpiry.stop();
     ++m_orderRead;
+    ++m_candidateRead;
     m_orders = {};
     m_orderCandidates = {};
     m_orderMessage.clear();
@@ -103,15 +104,16 @@ void Lem::refreshOrders(bool planner) {
     });
     if (!planner || m_user["role"] != "admin") return;
     loadUsers();
-    request("GET", "/api/work-order-candidates", {}, [this, token](QByteArray bytes) {
-        if (token != m_token) return;
+    const auto candidateRead = ++m_candidateRead;
+    request("GET", "/api/work-order-candidates", {}, [this, token, candidateRead](QByteArray bytes) {
+        if (token != m_token || candidateRead != m_candidateRead) return;
         const auto data = QJsonDocument::fromJson(bytes);
         if (data.isArray() && m_orderCandidates != data.array()) {
             m_orderCandidates = data.array();
             emit workCandidatesChanged();
         }
-    }, "application/json", [this, token](int, QString) {
-        if (token != m_token) return;
+    }, "application/json", [this, token, candidateRead](int, QString) {
+        if (token != m_token || candidateRead != m_candidateRead) return;
         m_orderMessage = "Não foi possível atualizar os IDs disponíveis.";
         emit workOrdersChanged();
     });
@@ -170,8 +172,8 @@ bool Lem::orderAllowsDraft(QString target) const {
 }
 
 bool Lem::isOrderRecovery(const QJsonObject &report) const {
-    if (report["work_item_expired"].toBool() && report["status"] == "draft") return true;
-    if (m_user["role"] != "tech" || report["status"] != "draft") return false;
+    if (report["status"] != "draft" && !report["dirty"].toBool()) return false;
+    if (report["work_item_expired"].toBool() || report["work_item_recovery"].toBool()) return true;
     const auto target = report["charger_id"].toString();
     for (const auto &value : m_orders) {
         for (const auto &entry : value.toObject()["items"].toArray()) {

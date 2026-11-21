@@ -409,6 +409,7 @@ void Lem::loadUser() {
     // A .part/QSaveFile temporary is never considered complete evidence.
     for (const auto &id : m_reports.keys()) {
         auto report = m_reports[id].toObject();
+        recoverOrderStartConflict(report);
         if (report["_conflict"].toBool() && !report.contains("_conflict_kind") &&
             !report["_order_item"].toString().isEmpty() &&
             report["_conflict_reason"] == "Contrato ou tarefa não atribuídos para esta operação.")

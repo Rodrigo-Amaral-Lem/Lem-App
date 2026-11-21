@@ -274,3 +274,5 @@ Run `python app/tests/test_work_order_download.py <Lem-offline-test> <free-loopb
 ## Field handoff regressions
 
 Run CTest with `LEM_BUILD_TESTS=ON` for profile writer exclusion, malformed refreshes, over-acknowledgements, local photo and time validation, attachment reconciliation, and online export checks. Run `python app/tests/test_order_reconnection.py <Lem-offline-test> <private-port>` against the sibling Server tests to remove and restore a technician's work-order grant across a restart. It verifies the same report UUID, Portuguese and English text, and the original photograph's digest. Use `test_measurement_inputs.py` for typed and pasted integer mA inputs.
+
+Run `python app/tests/test_order_start_retry.py <Lem-offline-test> <private-port>` for an individual offline draft blocked by a future order. It covers recovery of an earlier saved conflict after cancellation, automatic retry after the start and protection against a different edit on another device. It compares the report UUID, bilingual notes and photograph bytes.

@@ -30,6 +30,20 @@ QByteArray compact(QJsonObject o) {
     return QJsonDocument(o).toJson(QJsonDocument::Compact);
 }
 
+constexpr int orderStartRecheckMs = 30000;
+
+bool orderHasNotStarted(const QString &message) {
+    // The earlier server returned this planning refusal as a plain string.
+    return message == QStringLiteral("A ordem desta intervenção ainda não começou.");
+}
+
+void deferUntilOrderStarts(QJsonObject &report, qint64 retryAfter) {
+    report.remove("_conflict");
+    report.remove("_conflict_reason");
+    report.remove("_conflict_kind");
+    report["_order_start_retry_at"] = double(retryAfter);
+}
+
 bool retryableCorrectionIdentity(const QJsonObject &report) {
     if (!report["_conflict"].toBool() || report.contains("_replacement_id") || report["status"] != "closed" ||
         report["correction"].toObject()["state"] != "editing")
@@ -40,6 +54,15 @@ bool retryableCorrectionIdentity(const QJsonObject &report) {
            report["_conflict_reason"].toString().startsWith("Os dados do carregador foram corrigidos noutro report;");
 }
 } // namespace
+
+void Lem::recoverOrderStartConflict(QJsonObject &report) {
+    if (report.value("dirty").toBool() && report.value("_conflict").toBool() &&
+        !report.contains("_conflict_kind") && orderHasNotStarted(report.value("_conflict_reason").toString())) {
+        deferUntilOrderStarts(report, QDateTime::currentMSecsSinceEpoch());
+        report["_edit_seq"] = report["_edit_seq"].toDouble() + 1;
+    }
+}
+
 namespace {
 bool writeJournal(const QString &path, const QByteArray &bytes) {
 #ifdef LEM_TESTING
@@ -262,6 +285,8 @@ void Lem::startSync(bool manual) {
         m_retryNotBefore = 0;
     }
     QStringList ids;
+    const auto now = QDateTime::currentMSecsSinceEpoch();
+    qint64 nextOrderRetry = 0;
     for (auto i = m_reports.begin(); i != m_reports.end(); ++i) {
         const auto report = i.value().toObject();
         const bool dirty = report["dirty"].toBool();
@@ -274,8 +299,16 @@ void Lem::startSync(bool manual) {
             report.contains("_contract_unavailable") || (dirty && !owned))
             m_syncConflicts.insert(i.key());
         if (owned && dirty && correctionAllowed(report) && !m_syncConflicts.contains(i.key()) &&
-            (manual || !report["_defer_photo_sync"].toBool()))
-            ids << i.key();
+            (manual || !report["_defer_photo_sync"].toBool())) {
+            const auto retryAt = report["_order_start_retry_at"].toInteger();
+            const auto remaining = retryAt - now;
+            // A clock adjustment must not strand a retry beyond its normal interval.
+            if (!manual && remaining > 0 && remaining <= orderStartRecheckMs) {
+                if (!nextOrderRetry || retryAt < nextOrderRetry) nextOrderRetry = retryAt;
+            } else {
+                ids << i.key();
+            }
+        }
     }
     if (ids.isEmpty()) {
         m_syncState =
@@ -284,6 +317,10 @@ void Lem::startSync(bool manual) {
                        ? "Fotografias guardadas · envio ao mudar de grupo ou sair do report"
                        : "Existem reports que precisam de atenção")
                 : "Sem envios pendentes";
+        if (nextOrderRetry) {
+            if (m_syncConflicts.isEmpty()) m_syncState = "A aguardar o início da ordem · guardado no dispositivo";
+            scheduleSync(int(qMin(nextOrderRetry - now, qint64(orderStartRecheckMs))));
+        }
         emit changed();
         // Manual synchronization also receives current server state for observers.
         if (manual) refreshContracts(true);
@@ -304,7 +341,8 @@ void Lem::startSync(bool manual) {
 // protect conflicting work; 422 needs attention; 401 needs login; other failures retry.
 void Lem::syncFailed(int code, QString message) {
     // Own the JSON value: operator[] on a temporary object leaves a dangling ref.
-    const auto detail = QJsonDocument::fromJson(message.toUtf8()).object().value("detail");
+    const auto response = QJsonDocument::fromJson(message.toUtf8()).object();
+    const auto detail = response.value("detail");
     if (detail.isString())
         message = detail.toString();
     else if (detail.isObject() && detail.toObject()["message"].isString())
@@ -345,6 +383,19 @@ void Lem::syncFailed(int code, QString message) {
         m_syncState = "Envio interrompido · report já não existe neste dispositivo";
         continueAfterRejection(m_syncState);
     } else if (rejected) {
+        if (code == 409 && (response["reason"] == "work_order_not_started" || orderHasNotStarted(message))) {
+            // Preserve the draft and let unrelated reports finish this batch.
+            auto report = m_reports.value(m_syncReport).toObject();
+            deferUntilOrderStarts(report, QDateTime::currentMSecsSinceEpoch() + orderStartRecheckMs);
+            report["_edit_seq"] = report["_edit_seq"].toDouble() + 1;
+            m_reports[m_syncReport] = report;
+            if (m_current["id"] == m_syncReport) m_current = report;
+            m_syncConflicts.remove(m_syncReport);
+            saveEdits(report);
+            persist();
+            continueAfterRejection(message + " Dados locais conservados.");
+            return;
+        }
         if ((code == 422 || code == 413) && m_reports.value(m_syncReport).toObject()["status"] == "closed") {
             // A rejected closure is still a draft on the server. Restore editing
             // with current rules, preserving answers/media from older offline apps.
@@ -369,6 +420,7 @@ void Lem::syncFailed(int code, QString message) {
         }
         if (code == 409 || code == 403) {
             auto r = m_reports.value(m_syncReport).toObject();
+            r.remove("_order_start_retry_at");
             r["_conflict"] = true;
             r["_conflict_reason"] = message;
             if (code == 409 && detail.toObject()["reason"] == "station_identity_conflict")
@@ -481,6 +533,7 @@ bool Lem::mergeSync(QJsonObject sent, bool complete, QJsonValue serverPhotos) {
         latest.remove("_inflight_delete_payload");
     }
     if (complete) {
+        latest.remove("_order_start_retry_at");
         bool uploaded = true;
         for (auto p : photos)
             if (!p.toObject()["uploaded"].toBool())

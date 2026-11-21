@@ -248,4 +248,8 @@ and its selected background shows whether it is active. Both icons are drawn, in
 
 Open the order to see who owns the accepted draft. A distinct unsent copy remains available through the local recovery action. On restored access, synchronize the original report. For a permanent handoff, save its recovery ZIP and give it to the new owner. Retain the original device copy until the recipient checks the answers and attachments. A later visit to the same membership has a separate item ID.
 
+For a replanned corrective or commissioning visit, start its draft from the new order. The draft and evidence from the impeded visit remain available through recovery. If the office schedules a future order while an individually shared report is offline, the App keeps it pending and rechecks the start restriction on Sync. It also rechecks automatically while online.
+
+For an individual handoff, first sync the outgoing technician's changes. In the intervention, the administrator selects the next technician under **Atribuição individual** and chooses **Transferir atribuição e rascunho**. The new technician receives the same draft and its synchronized evidence. If another user changes the draft before the action, review the refreshed intervention and try again.
+
 A decimal point or comma in an integer mA reading remains visible until corrected. Review and correct the value before closure. A rejected oversized report reopens under its original ID. The device keeps its evidence and checks the finish against the recorded start.

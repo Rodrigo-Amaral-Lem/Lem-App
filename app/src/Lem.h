@@ -413,6 +413,7 @@ class Lem : public QObject {
     QString cacheDir() const;
     void remember();
     void scheduleSync(int delay = 8000);
+    static void recoverOrderStartConflict(QJsonObject &report);
     void startSync(bool manual);
     bool releasePhotoSync(QString reportId);
     void syncFailed(int code, QString message);
@@ -444,7 +445,7 @@ class Lem : public QObject {
     QJsonArray m_orders, m_orderCandidates;
     QTimer m_orderExpiry;
     QString m_planningDay, m_orderMessage, m_orderReadError;
-    quint64 m_orderRead = 0;
+    quint64 m_orderRead = 0, m_candidateRead = 0;
     bool m_savingOrder = false;
     struct FollowedReport { int revision; int photoCount; };
     QHash<QString, FollowedReport> m_followedReports;

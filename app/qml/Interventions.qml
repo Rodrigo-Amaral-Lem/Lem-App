@@ -37,7 +37,10 @@ ScrollView {
         mode === "detail" && job ? job.reference : (corrective ? "Manutenções corretivas" : "Comissionamentos")
     clip: true
     contentWidth: availableWidth
-    onModeChanged: contentItem.contentY = 0
+    onModeChanged: {
+        contentItem.contentY = 0
+        if (mode === "detail" && admin && controller.authenticated) controller.loadUsers()
+    }
     onOwnerChanged: { saving = false; requestId = ""; mode = "list"; station = null; coverage = []; message = ""; selectedId = "" }
 
     function list(type) {
@@ -252,6 +255,7 @@ ScrollView {
             ComboBox {
                 id: share
                 visible: page.admin
+                enabled: !page.controller.busy && !page.saving
                 implicitHeight: 44
                 Layout.fillWidth: true
                 model: page.team
@@ -259,15 +263,25 @@ ScrollView {
                 Accessible.name: "Partilhar com técnico"
                 currentIndex: Math.max(0, page.team.findIndex(u => u.id === ((page.job || {}).technician || "")))
             }
+            Line {
+                visible: changeAssignee.movesDraft
+                text: "O rascunho e as evidências guardadas no servidor passam para o técnico selecionado."
+            }
             Action {
+                id: changeAssignee
+                readonly property var technician: page.team[share.currentIndex] || null
+                readonly property bool changesTechnician: !!page.job && !!technician &&
+                    technician.id !== (page.job.technician || "")
+                readonly property bool movesDraft: page.admin && changesTechnician && !!technician.id && !!page.job.handoff
                 visible: page.admin
-                text: "Guardar atribuição"
-                enabled: page.controller.authenticated && !page.saving && !!page.job &&
-                         !!page.team[share.currentIndex] && page.team[share.currentIndex].id !== (page.job.technician || "")
+                text: movesDraft ? "Transferir atribuição e rascunho" : "Guardar atribuição"
+                enabled: page.controller.authenticated && !page.controller.busy && !page.saving && changesTechnician
                 onClicked: {
+                    const body = {technician: technician.id || null, previous: page.job.technician || null}
+                    if (movesDraft) body.handoff = page.job.handoff
                     page.saving = true
                     page.requestId = page.selectedId
-                    page.controller.shareIntervention(page.selectedId, {technician: page.team[share.currentIndex].id || null, previous: page.job.technician || null})
+                    page.controller.shareIntervention(page.selectedId, body)
                 }
             }
         }

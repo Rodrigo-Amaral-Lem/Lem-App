@@ -68,8 +68,6 @@ ScrollView {
         search.text = ""
         mode = "edit"
     }
-    readonly property var eligibleTechnicians: technicians.filter(id =>
-        (controller.users || []).some(user => user.id === id && user.role === "tech"))
     function move(index, step) {
         let rows = targets.slice()
         rows.splice(index + step, 0, rows.splice(index, 1)[0])
@@ -246,7 +244,14 @@ ScrollView {
                 text: "Atribuição anterior sem perfil de técnico · " + previous.map(t => t.name).join(", ")
             }
             Repeater {
-                model: page.mode === "edit" ? (controller.users || []).filter(t => t.role === "tech") : []
+                model: {
+                    if (page.mode !== "edit") return []
+                    const directory = (controller.users || []).filter(t => t.role === "tech")
+                    const assigned = page.selected && page.plan.revision ? page.selected.technicians : []
+                    // Keep assigned technicians visible while the directory is incomplete.
+                    return directory.concat(assigned.filter(t => (!t.role || t.role === "tech") &&
+                        !directory.some(user => user.id === t.id)))
+                }
                 delegate: CheckBox {
                     implicitHeight: 44
                     required property var modelData
@@ -288,8 +293,8 @@ ScrollView {
             Label { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: editor.matches.length > 40; text: "Refine a pesquisa para ver os restantes IDs." }
             OrderButton {
                 text: "Guardar ordem"; Layout.fillWidth: true
-                enabled: !controller.savingOrder && controller.authenticated && page.eligibleTechnicians.length && page.targets.length && /^\d{4}-\d{2}-\d{2}$/.test(start.text) && /^\d{4}-\d{2}-\d{2}$/.test(due.text) && due.text >= start.text
-                onClicked: controller.saveOrder({id: page.plan.id, revision: page.plan.revision, start: start.text, due: due.text, technicians: page.eligibleTechnicians, targets: page.targets.map(t => t.target)})
+                enabled: !controller.savingOrder && controller.authenticated && page.technicians.length && page.targets.length && /^\d{4}-\d{2}-\d{2}$/.test(start.text) && /^\d{4}-\d{2}-\d{2}$/.test(due.text) && due.text >= start.text
+                onClicked: controller.saveOrder({id: page.plan.id, revision: page.plan.revision, start: start.text, due: due.text, technicians: page.technicians, targets: page.targets.map(t => t.target)})
             }
         }
     }

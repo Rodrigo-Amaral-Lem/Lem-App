@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para Android
 
-Android · Aplicação 0.7.0 · Edição 2.17 · 21 de novembro de 2026
+Android · Aplicação 0.8.0 · Edição 2.18 · 21 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-android.pdf](manual-utilizador-android.pdf).
 
@@ -20,7 +20,7 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. Utilize o toque para selecionar opções e deslize o dedo para percorrer as perguntas. O botão de retrocesso do sistema permite regressar ao ecrã anterior quando aplicável.
 
-Este manual descreve a versão 0.7.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. As capturas mostram a app num emulador Android, em orientação vertical.
+Este manual descreve a versão 0.8.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. As capturas mostram a app num emulador Android, em orientação vertical.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
 
@@ -91,7 +91,7 @@ Em **Ordens** (no menu de navegação, **Ordens de trabalho**), escolha uma orde
 
 O administrador escolhe **Nova ordem**, indica o início e o prazo, seleciona técnicos e acrescenta os IDs por fazer. **Subir** e **Descer** organizam a sequência sugerida. Em **Editar ordem** pode ajustar o prazo, a equipa e as intervenções por fazer. Depois do início, a data inicial fica fixa. Um ID com rascunho em curso permanece na ordem. Antes do dia de início, **Cancelar ordem** e **Confirmar cancelamento** libertam os IDs pendentes. A ordem é eliminada 24 horas após o cancelamento. Os relatórios e os anexos já guardados são conservados.
 
-A partir do dia de início em Lisboa, o técnico pode escolher qualquer ID e **Abrir intervenção**. Para trabalhar sem rede, atualize a ordem após o início enquanto ainda tem ligação. O seu rascunho offline aparece como **Em preenchimento · por sincronizar**. **Consultar rascunho** abre o trabalho do colega identificado na ordem. **Consultar cópia local em conflito** abre o seu trabalho da mesma visita. Se recuperar a atribuição, sincronize. Para entregar o trabalho a outro técnico, escolha **Guardar cópia para entrega**. O ZIP inclui as respostas e os anexos disponíveis no dispositivo. Se a intervenção for impossível, escolha **Assinalar impedimento**, escreva o motivo e confirme em **Marcar inválida**. O administrador pode planear outra visita para concluir o trabalho. A última tarefa resolvida regista a hora de fecho. **Recuperar rascunho** abre uma cópia anterior para consulta. **Relatório removido** identifica um documento apagado após o fecho.
+A partir do dia de início em Lisboa, o técnico pode escolher qualquer ID e **Abrir intervenção**. Para trabalhar sem rede, atualize a ordem após o início enquanto ainda tem ligação. O seu rascunho offline aparece como **Em preenchimento · por sincronizar**. **Consultar rascunho** abre o trabalho do colega identificado na ordem. **Consultar cópia local em conflito** abre o seu trabalho da mesma visita. Se recuperar a atribuição, sincronize. Para entregar o trabalho a outro técnico, escolha **Guardar cópia para entrega**. O ZIP inclui as respostas e os anexos disponíveis no dispositivo. Se a intervenção for impossível, escolha **Assinalar impedimento**, escreva o motivo e confirme em **Marcar inválida**. O administrador pode planear uma nova visita com um rascunho próprio. A última tarefa resolvida regista a hora de fecho. **Recuperar rascunho** abre uma cópia anterior para consulta. **Relatório removido** identifica um documento apagado após o fecho.
 
 O criador segue a ordem. Qualquer administrador pode geri-la ou escolher **Seguir** para receber impedimentos e a conclusão. Autorize as notificações de atribuição e início. O aviso de início é entregue com rede das 07h00 às 20h00 de Lisboa, no próprio dia.
 
@@ -102,8 +102,8 @@ Abra **Manutenções corretivas** no menu de navegação ou em **Intervenções*
 O nome segue o formato **Ano_Cliente_NomeContrato**, com o ano do início. As datas podem começar a partir de 1 de janeiro do ano atual. A data final pode coincidir com o início ou chegar ao segundo aniversário. Ambos os dias contam para a cobertura do PCVE.
 
 1. Na ficha do PCVE, escolha **Nova corretiva**, ou procure o ID no menu das corretivas. A app sugere o contrato válido com início mais recente. Pode escolher outro contrato válido da lista ou **Sem contrato** para uma visita esporádica.
-2. Escreva as **Notas para o técnico** e escolha **Criar corretiva**. Pode atribuí-la a um técnico na criação ou mais tarde em **Guardar atribuição**. Para a incluir numa ordem, procure a referência **COR-…** em **Nova ordem** ou **Editar ordem**.
-3. O técnico abre a intervenção que lhe foi atribuída. Se estiver numa ordem, abre-a por essa ordem. Cada corretiva conserva a sua referência, as notas e o seu relatório.
+2. Escreva as **Notas para o técnico** e escolha **Criar corretiva**. Atribua-a na criação ou em **Guardar atribuição**. Para a incluir numa ordem, pesquise **COR-…**.
+3. O técnico abre a visita atribuída pela ordem, quando existe. Para entregar um rascunho sincronizado, o administrador escolhe o novo técnico e **Transferir atribuição e rascunho**. A referência, as notas, o rascunho e os anexos enviados seguem juntos.
 
 Para comissionar um PCVE, abra a ficha ou o menu **Comissionamentos** e escolha **Novo comissionamento**. O técnico pode criar o seu próprio comissionamento para um PCVE a que tenha acesso. O administrador pode incluir o comissionamento numa **Nova ordem** ou **Editar ordem**. Pesquise pelo ID do PCVE ou pela referência **COM-…**. Uma ordem pode juntar preventivas, corretivas e comissionamentos do mesmo PCVE. O técnico abre o comissionamento pela ordem quando esta começa. O comissionamento continua sem contrato e usa o mesmo formulário preventivo que a corretiva. O tipo de intervenção aparece no PDF.
 
@@ -293,6 +293,8 @@ Pode voltar ao ecrã inicial ou mudar de aplicação enquanto descarrega evidên
 ### Quando a rede falha
 
 Conserve o relatório existente e tente novamente com ligação estável. Não apague um rascunho, não limpe os dados da app e não crie duplicados para resolver uma falha temporária de envio.
+
+Se uma ordem futura adiar o envio, a app conserva o rascunho e volta a tentar quando a ordem começa ou é cancelada. Use **Sinc.** para verificar de imediato.
 
 ## 11 Preparar o trabalho sem rede
 

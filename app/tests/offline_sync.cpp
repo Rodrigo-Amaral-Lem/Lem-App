@@ -24,6 +24,7 @@
 #include <QSettings>
 #include <QDesktopServices>
 #include <QUuid>
+#include <algorithm>
 #include <functional>
 #define CHECK(c)                                                                                   \
     do {                                                                                           \
@@ -63,6 +64,9 @@ public slots:
 struct LemReviewTest {
     static QJsonObject persistedReport(const Lem &client, const QString &id) {
         return read(client.cacheDir() + "/cache.json")["reports"].toObject()[id].toObject();
+    }
+    static QString checkpoint(const Lem &client) {
+        return client.cacheDir() + "/cache.json";
     }
 
     static void cachedReport(Lem &client, QJsonObject report) {
@@ -300,13 +304,81 @@ static int restoredVisit(const QStringList &args) {
     return 0;
 }
 
+static int deferredOrderStart(const QStringList &args) {
+    const auto server = args[2], root = args[3], target = args[4], scenario = args[5];
+    const auto profile = root + "/profile", originalPath = root + "/original.png";
+    const auto observation = QStringLiteral("Ligação revista na Âncora / inspected on site.");
+    QString id, checkpoint;
+    const auto login = [&](Lem &client) {
+        client.setServer(server);
+        client.login("pending-visit@example.invalid", qEnvironmentVariable("LEM_ORDER_TEST_PASSWORD"));
+        return until([&] {
+            if (!client.authenticated() || client.busy() || client.refreshing()) return false;
+            const auto jobs = client.interventions();
+            return std::any_of(jobs.cbegin(), jobs.cend(),
+                [&](const auto &job) { return job.toMap()["id"] == target; });
+        });
+    };
+    {
+        Lem client(profile);
+        CHECK(login(client));
+        CHECK(write(root + "/opened", {}));
+        CHECK(until([&] { return QFile::exists(root + "/offline"); }));
+        CHECK(client.prepareIntervention(target).isEmpty() && client.openReport(target));
+        id = client.current()["id"].toString();
+        client.answer("FIN.03", "", observation);
+        QImage original(80, 60, QImage::Format_RGB32);
+        original.fill(Qt::darkGreen);
+        CHECK(original.save(originalPath));
+        client.attach("FIN.03", QUrl::fromLocalFile(originalPath));
+        CHECK(until([&] { return !client.saving() && client.current()["photos"].toList().size() == 1; }));
+        CHECK(write(root + "/saved", {{"id", id}}));
+        CHECK(until([&] { return QFile::exists(root + "/planned"); }));
+        client.sync();
+        CHECK(until([&] { return !client.syncing() && client.current()["_order_start_retry_at"].toDouble() > 0; }));
+        CHECK(!client.current()["_conflict"].toBool() && notes(client, "FIN.03") == observation);
+        CHECK(LemReviewTest::persistedReport(client, id)["_order_start_retry_at"].toInteger() > 0);
+        checkpoint = LemReviewTest::checkpoint(client);
+        CHECK(write(root + "/deferred", {}));
+        CHECK(until([&] { return QFile::exists(root + "/unblocked"); }));
+    }
+    if (scenario == "legacy") {
+        // An already installed client may have written the original 409 as a conflict.
+        auto cache = read(checkpoint);
+        auto reports = cache["reports"].toObject();
+        auto old = reports[id].toObject();
+        old.remove("_order_start_retry_at");
+        old["_conflict"] = true;
+        old["_conflict_reason"] = "A ordem desta intervenção ainda não começou.";
+        reports[id] = old;
+        cache["reports"] = reports;
+        CHECK(write(checkpoint, cache));
+    }
+    Lem restarted(profile);
+    CHECK(login(restarted));
+    CHECK(restarted.prepareIntervention(target) == id && restarted.openReport(target, id));
+    if (scenario == "legacy" || scenario == "stale") restarted.sync();
+    if (scenario == "stale") {
+        CHECK(until([&] { return !restarted.syncing() && restarted.current()["_conflict"].toBool(); }));
+        CHECK(notes(restarted, "FIN.03") == observation);
+        CHECK(!restarted.current().contains("_order_start_retry_at"));
+    } else {
+        CHECK(until([&] { return !restarted.syncing() && !restarted.current()["dirty"].toBool(); }, 45000));
+        CHECK(restarted.current()["id"] == id && notes(restarted, "FIN.03") == observation);
+        CHECK(!restarted.current()["_conflict"].toBool() && !restarted.current().contains("_order_start_retry_at"));
+        CHECK(restarted.current()["photos"].toList().value(0).toMap()["uploaded"].toBool());
+    }
+    qInfo() << "Checked deferred order start" << scenario << "for" << id;
+    return 0;
+}
+
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
     ExportViewer exportViewer;
     QDesktopServices::setUrlHandler("file", &exportViewer, "view");
     // These integration fixtures only contact the disposable loopback server.
     QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
-    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.7.0"));
+    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.8.0"));
     app.setOrganizationName("Lem-Offline-Test");
     app.setApplicationName("Lem Offline Test");
     const auto args = app.arguments();
@@ -353,6 +425,7 @@ int main(int argc, char **argv) {
         qInfo() << "PASS: two desktop processes and a restarted controller retained both offline drafts";
     }
     if (args.size() == 8 && args[1] == "--restored-visit") return restoredVisit(args);
+    if (args.size() == 6 && args[1] == "--order-start-retry") return deferredOrderStart(args);
     if (args.size() == 6 && args[1] == "--work-order-download") {
         Lem observer(temp.path() + "/observer");
         observer.setServer(args[2]);

@@ -58,17 +58,23 @@ QString Lem::prepareIntervention(QString id) {
         for (const auto &entry : m_reports) {
             const auto report = entry.toObject();
             if (report["charger_id"] == id && report["owner_id"] == m_user["id"] && report["dirty"].toBool() &&
-                report["correction"].toObject().isEmpty()) return report["id"].toString();
+                report["correction"].toObject().isEmpty() && !isOrderRecovery(report)) return report["id"].toString();
         }
         // A report may have synced since the last contracts refresh.
         const auto reports = m_chargers.first().toObject()["reports"].toArray();
         const auto known = job["report_id"].toString();
-        if (!known.isEmpty() && !m_deletedReports.contains(known)) return known;
-        if (!reports.isEmpty()) return reports.first().toObject()["id"].toString();
+        if (!known.isEmpty() && !m_deletedReports.contains(known) &&
+            !isOrderRecovery(m_reports.value(known).toObject())) return known;
+        for (const auto &entry : reports) {
+            const auto summary = entry.toObject();
+            const auto reportId = summary["id"].toString();
+            if (!reportId.isEmpty() && !m_deletedReports.contains(reportId) && !isOrderRecovery(summary) &&
+                !isOrderRecovery(m_reports.value(reportId).toObject())) return reportId;
+        }
         for (const auto &entry : m_reports) {
             const auto report = entry.toObject();
             if (report["charger_id"] == id && !m_deletedReports.contains(report["id"].toString()) &&
-                report["correction"].toObject().isEmpty()) return report["id"].toString();
+                report["correction"].toObject().isEmpty() && !isOrderRecovery(report)) return report["id"].toString();
         }
         return {};
     }
@@ -100,8 +106,10 @@ void Lem::writeIntervention(QString id, QString suffix, QVariantMap fields) {
             bool saved = data["id"] == id;
             emit interventionSaved(id, saved, saved ? "Intervenção guardada." : "Confirmação inválida. Tente novamente.");
             if (saved) refresh();
-        }, "application/json", [this, token, id](int, QString error) {
-            if (token == m_token) emit interventionSaved(id, false, serverMessage(error));
+        }, "application/json", [this, token, id](int code, QString error) {
+            if (token != m_token) return;
+            emit interventionSaved(id, false, serverMessage(error));
+            if (code == 409) refresh();
         });
 }
 

@@ -236,6 +236,10 @@ The WorkOrders screen uses LemWorkOrders.cpp for scoped planning, revisioned edi
 
 ### Durable field handoffs
 
+The temporary `work_order_not_started` reply defers only its report. The cache stores the retry time alongside the UUID, answers and evidence. Manual Sync can recheck immediately. Automatic Sync rechecks after a short interval even when the intervention's future order belongs to a different crew. On load, an older checkpoint with the specific planning refusal is eligible again. Revision and ownership failures keep their normal conflict handling.
+
+Intervention catalogues select the current report and identify read-only recovery drafts. The individual handoff uses the selected technician plus the report ID and revision from the catalogue. A server acknowledgement refreshes the intervention.
+
 A cancelled order leaves the account cache 24 elapsed hours after its recorded cancellation. A local timer updates an open list or detail view, including offline. Loading a profile, resuming the app and receiving a fresh list also enforce the cutoff. Reports and evidence have their own retention lifecycle.
 
 Desktop locks the profile before migration or journal replay. The lock lives beside the profile so copying legacy files preserves the active lock. A second process can write after the first exits.
