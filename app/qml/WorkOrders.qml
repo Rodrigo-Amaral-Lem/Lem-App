@@ -83,8 +83,11 @@ ScrollView {
     }
     function localTime(value) { return value ? new Date(value).toLocaleString(Qt.locale("pt_PT")) : "" }
     function taskLabel(item) {
-        const kind = item.kind === "corrective" ? "Corretiva " + item.reference : "Preventiva"
-        return item.external_id + " · " + kind + " · " + item.contract
+        const kind = item.kind === "commissioning" ? "Comissionamento" :
+                     item.kind === "corrective" ? "Corretiva" : "Preventiva"
+        const reference = item.reference ? " " + item.reference : ""
+        const contract = item.contract ? " · " + item.contract : ""
+        return item.external_id + " · " + kind + reference + contract
     }
     Connections {
         target: page.controller
@@ -267,7 +270,14 @@ ScrollView {
                     }
                 }
             }
-            TextField { implicitHeight: 44; id: search; Layout.fillWidth: true; placeholderText: "Pesquisar ID ou contrato"; Accessible.name: placeholderText; onTextChanged: page.searchTerm = text.trim().toLowerCase() }
+            TextField {
+                implicitHeight: 44
+                id: search
+                Layout.fillWidth: true
+                placeholderText: "Pesquisar ID, referência ou contrato"
+                Accessible.name: placeholderText
+                onTextChanged: page.searchTerm = text.trim().toLowerCase()
+            }
             readonly property var matches: page.mode === "edit" ? page.candidates.filter(c =>
                 !page.targets.some(t => t.target === c.target) && page.taskLabel(c).toLowerCase().includes(page.searchTerm)) : []
             id: editor

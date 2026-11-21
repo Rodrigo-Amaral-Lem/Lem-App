@@ -228,6 +228,10 @@ recovery flow.
 
 ## Work orders
 
+The planner can combine preventive memberships, corrective interventions and commissioning
+interventions, including separate visits at the same PCVE. References identify individual
+interventions in the picker and the saved order. A commissioning row has no commercial contract.
+
 The WorkOrders screen uses LemWorkOrders.cpp for scoped planning, revisioned edits and report navigation. The account-scoped cache preserves the last accepted list. Existing report synchronization uploads a technician's draft. The server resolves the corresponding membership on acceptance. The server publishes membership IDs for limited contracts so refreshing one contract preserves all other authorised offline rows. Offline edits carry their work item ID for recovery after a colleague finishes. Desktop compares both revision and attachment count for followed drafts and fetches missing originals into the private evidence cache. WorkOrderJob polls the authenticated inbox independently of the Android activity using the existing encrypted session, system notification permission and a per-installation receipt identifier.
 
 ### Durable field handoffs
