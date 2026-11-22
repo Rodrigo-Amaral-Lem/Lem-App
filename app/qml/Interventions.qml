@@ -28,9 +28,7 @@ ScrollView {
     readonly property var job: jobs.find(j => j.id === selectedId) || null
     readonly property var team: [{id: "", name: "Sem atribuição individual"}].concat(
         (controller.users || []).filter(u => u.role === "tech"))
-    readonly property var order: !job ? null : (controller.workOrders || []).find(o =>
-        !o.cancelled_at && o.items.some(i => i.target === selectedId && i.state === "pending")) ||
-        (job.order_only ? (controller.workOrders || []).find(o => o.items.some(i => i.target === selectedId && i.state !== "cancelled")) : null)
+    readonly property var order: orderForJob(job)
     readonly property string heading: mode === "contracts" ? "Contratos de corretivas" :
         mode === "import" ? "Importar contrato de corretivas" : mode === "pick" ? "Escolher PCVE" :
         mode === "create" ? (corrective ? "Nova corretiva" : "Novo comissionamento") :
@@ -42,6 +40,17 @@ ScrollView {
         if (mode === "detail" && admin && controller.authenticated) controller.loadUsers()
     }
     onOwnerChanged: { saving = false; requestId = ""; mode = "list"; station = null; coverage = []; message = ""; selectedId = "" }
+
+    function orderForJob(currentJob) {
+        if (!currentJob) return null
+        const orders = (controller.workOrders || []).filter(order => !order.cancelled_at)
+        const belongs = item => item.target === currentJob.id
+        const pending = orders.find(order => order.items.some(item => belongs(item) && item.state === "pending"))
+        if (pending || !currentJob.order_only) return pending || null
+        const result = orders.find(order => order.items.some(item => belongs(item) && item.state === "closed"
+            && item.report_id === currentJob.report_id))
+        return result || orders.find(order => order.items.some(item => belongs(item) && item.state !== "cancelled")) || null
+    }
 
     function list(type) {
         kind = type

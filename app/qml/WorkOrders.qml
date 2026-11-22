@@ -149,7 +149,12 @@ ScrollView {
                     required property var modelData
                     required property int index
                     Layout.fillWidth: true
-                    readonly property var localDraft: (controller.localOrderDrafts || {})[modelData.id] || null
+                    readonly property var localDraft: {
+                        const drafts = controller.localOrderDrafts || {}
+                        const unbound = modelData.state === "pending" && modelData.kind !== "preventive"
+                            && modelData.drafts.length === 0 ? drafts[modelData.target] : null
+                        return drafts[modelData.id] || unbound || null
+                    }
                     readonly property bool localRecovery: !!localDraft && localDraft.item === modelData.id &&
                         (modelData.state === "closed" || modelData.state === "invalid" || !!peerDraft) && localDraft.id !== modelData.report_id &&
                         !modelData.drafts.some(d => d.id === localDraft.id)

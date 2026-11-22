@@ -37,6 +37,10 @@ bool orderHasNotStarted(const QString &message) {
     return message == QStringLiteral("A ordem desta intervenção ainda não começou.");
 }
 
+bool workGrantDenied(const QString &message) {
+    return message == QStringLiteral("Contrato ou tarefa não atribuídos para esta operação.");
+}
+
 void deferUntilOrderStarts(QJsonObject &report, qint64 retryAfter) {
     report.remove("_conflict");
     report.remove("_conflict_reason");
@@ -55,12 +59,17 @@ bool retryableCorrectionIdentity(const QJsonObject &report) {
 }
 } // namespace
 
-void Lem::recoverOrderStartConflict(QJsonObject &report) {
-    if (report.value("dirty").toBool() && report.value("_conflict").toBool() &&
-        !report.contains("_conflict_kind") && orderHasNotStarted(report.value("_conflict_reason").toString())) {
+void Lem::recoverOrderSyncConflict(QJsonObject &report) {
+    if (!report.value("dirty").toBool() || !report.value("_conflict").toBool() || report.contains("_conflict_kind"))
+        return;
+    const auto message = report.value("_conflict_reason").toString();
+    if (orderHasNotStarted(message))
         deferUntilOrderStarts(report, QDateTime::currentMSecsSinceEpoch());
-        report["_edit_seq"] = report["_edit_seq"].toDouble() + 1;
-    }
+    else if (workGrantDenied(message) && (independentIntervention(report) || !report["_order_item"].toString().isEmpty()))
+        report["_conflict_kind"] = "order_scope";
+    else
+        return;
+    report["_edit_seq"] = report["_edit_seq"].toDouble() + 1;
 }
 
 namespace {
@@ -232,11 +241,23 @@ void Lem::suspendContractSync(QString contractId, QString reason) {
 
 void Lem::reconcileContractSync(bool fromManualSync) {
     QSet<QString> available;
-    for (const auto &entry : m_contracts) available.insert(entry.toObject()["id"].toString());
+    QSet<QString> individualInterventions;
+    for (const auto &entry : m_contracts) {
+        const auto contract = entry.toObject();
+        const auto id = contract["id"].toString();
+        available.insert(id);
+        if (contract.contains("intervention") && !contract["order_only"].toBool())
+            individualInterventions.insert(id);
+    }
     bool resumed = false;
     for (const auto &id : m_reports.keys()) {
         auto report = m_reports.value(id).toObject();
-        if (!report.contains("_contract_unavailable") || !available.contains(report["contract_id"].toString())) continue;
+        const auto contractId = report["contract_id"].toString();
+        // Direct grants may be restored without any change to the crew's orders.
+        if (report.value("_conflict_kind") == "order_scope" && independentIntervention(report) &&
+            individualInterventions.contains(contractId))
+            resumed |= m_syncConflicts.remove(id);
+        if (!report.contains("_contract_unavailable") || !available.contains(contractId)) continue;
         report.remove("_contract_unavailable");
         m_reports[id] = report;
         // A manual Sync may first need to rediscover a restored contract. Give
@@ -425,7 +446,8 @@ void Lem::syncFailed(int code, QString message) {
             r["_conflict_reason"] = message;
             if (code == 409 && detail.toObject()["reason"] == "station_identity_conflict")
                 r["_conflict_kind"] = "station_identity_conflict";
-            else if (code == 403 && !r["_order_item"].toString().isEmpty())
+            else if (code == 403 && (!r["_order_item"].toString().isEmpty() ||
+                     (independentIntervention(r) && workGrantDenied(message))))
                 r["_conflict_kind"] = "order_scope";
             else
                 r.remove("_conflict_kind");
@@ -811,7 +833,9 @@ void Lem::syncNext(int index, QString notice) {
         // and clear the server's frozen-upload marker before evidence is sent.
         const auto remoteTemplate = remote["template"].toObject();
         const auto localTemplate = r["template"].toObject();
-        const bool sameForm = r["_conflict_kind"] != "order_scope" && remoteTemplate["version"] == localTemplate["version"] &&
+        const bool needsVisitBinding = r["_order_item"].isString() && !remote["work_item_id"].isString();
+        const bool sameForm = !needsVisitBinding && r["_conflict_kind"] != "order_scope" &&
+            remoteTemplate["version"] == localTemplate["version"] &&
             remoteTemplate["frozen_upload"].toBool() == localTemplate["frozen_upload"].toBool();
         r["_inflight_delete_payload"] = remote.value("payload");
         // Checkpoint a recovered deletion before sending any newer local answers.
@@ -1015,22 +1039,32 @@ void Lem::applyStationRecords(const QJsonArray &incoming, bool complete, QJsonAr
         const auto keepNewer = [&latest](const QJsonObject &row) {
             auto current = latest.find(row["id"].toString());
             if (current != latest.end() && row["details"].isObject() &&
-                row["updated"].toString() > current->value("updated").toString())
+                row["updated"].toString() >= current->value("updated").toString())
                 current.value() = row;
         };
         for (const auto &value : m_stations) keepNewer(value.toObject());
         for (const auto &value : m_chargers) keepNewer(canonical(value.toObject()));
         for (const auto &catalogue : std::as_const(m_catalogues))
             for (const auto &value : catalogue.toArray()) keepNewer(canonical(value.toObject()));
+        // A local closure updates the order and membership details before the
+        // server issues a new station timestamp. Keep those corrections when
+        // an in-flight listing still has the same timestamp.
+        for (const auto &order : m_orders)
+            for (const auto &entry : order.toObject()["items"].toArray())
+                keepNewer(canonical(entry.toObject()));
 
-        const auto patchMemberships = [&latest](QJsonArray &rows) {
+        const auto patchRow = [&latest](QJsonObject &row) {
+            const auto station = latest.constFind(row.value("station_id").toString());
+            if (station == latest.cend() ||
+                row.value("station_updated").toString() > station->value("updated").toString()) return;
+            row["external_id"] = station->value("external_id");
+            row["details"] = station->value("details");
+            row["station_updated"] = station->value("updated");
+        };
+        const auto patchMemberships = [&patchRow](QJsonArray &rows) {
             for (qsizetype i = 0; i < rows.size(); ++i) {
                 auto row = rows.at(i).toObject();
-                const auto station = latest.constFind(row["station_id"].toString());
-                if (station == latest.cend()) continue;
-                row["external_id"] = station->value("external_id");
-                row["details"] = station->value("details");
-                row["station_updated"] = station->value("updated");
+                patchRow(row);
                 rows[i] = row;
             }
         };
@@ -1041,6 +1075,7 @@ void Lem::applyStationRecords(const QJsonArray &incoming, bool complete, QJsonAr
             m_catalogues[id] = rows;
         }
         if (memberships) patchMemberships(*memberships);
+        updateWorkOrderStations(patchRow);
     }
 
     // Only a complete GET can establish visibility of new IDs or remove old ones.

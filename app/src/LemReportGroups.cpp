@@ -63,21 +63,27 @@ void Lem::applyClosedIdentity(const QJsonObject &report) {
     if (changes.isEmpty()) return;
     const auto stationId = authoritative.isEmpty() ? snapshot["station_id"].toString() : authoritative["station_id"].toString();
     const auto externalId = authoritative.isEmpty() ? snapshot["external_id"].toString() : authoritative["external_id"].toString();
-    auto patch = [&](QJsonArray rows, const QString &stationKey) {
+    const auto patchRow = [&](QJsonObject &row, const QString &stationKey) {
+        const auto rowStation = row.value(stationKey).toString();
+        const bool same = !stationId.isEmpty() && !rowStation.isEmpty()
+            ? rowStation == stationId : !externalId.isEmpty() && row.value("external_id") == externalId;
+        if (!same || !row.value("details").isObject()) return;
+        auto details = row.value("details").toObject();
+        for (auto it = changes.begin(); it != changes.end(); ++it) details[it.key()] = it.value();
+        row["details"] = details;
+    };
+    const auto patch = [&patchRow](QJsonArray rows, const QString &stationKey) {
         for (int i = 0; i < rows.size(); ++i) {
             auto row = rows[i].toObject();
-            const bool same = !stationId.isEmpty() && !row[stationKey].toString().isEmpty()
-                ? row[stationKey].toString() == stationId : !externalId.isEmpty() && row["external_id"].toString() == externalId;
-            if (!same) continue;
-            auto details = row["details"].toObject();
-            for (auto it = changes.begin(); it != changes.end(); ++it) details[it.key()] = it.value();
-            row["details"] = details; rows[i] = row;
+            patchRow(row, stationKey);
+            rows[i] = row;
         }
         return rows;
     };
     m_stations = patch(m_stations, "id");
     m_chargers = patch(m_chargers, "station_id");
     for (auto key : m_catalogues.keys()) m_catalogues[key] = patch(m_catalogues[key].toArray(), "station_id");
+    updateWorkOrderStations([&patchRow](QJsonObject &item) { patchRow(item, "station_id"); });
 }
 
 QVariantList Lem::qveCopySources() const { return groupCopySources("QVE"); }

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-"""Run the native client through a planning deferral and an independent server edit."""
+"""Run the native client through planning and individual-assignment changes."""
 
 import argparse
 from contextlib import ExitStack
@@ -34,6 +34,7 @@ OBSERVATION = "Ligação revista na Âncora / inspected on site."
 
 
 def exercise(executable, port, scenario):
+    grant_restored = scenario in ("individual", "legacy-individual")
     admin_password = "Admin9!" + secrets.token_hex(12)
     field_password = "Field9!" + secrets.token_hex(12)
     os.environ.update(ADMIN_EMAIL="admin@lem.pt", ADMIN_PASSWORD=admin_password)
@@ -82,7 +83,8 @@ def exercise(executable, port, scenario):
             station, = ok(api.get("/api/stations", headers=admin))
             target = str(uuid4())
             ok(api.put(f"/api/interventions/{target}", headers=admin, json={
-                "kind": "commissioning", "station_id": station["id"], "technician": tech["id"],
+                "kind": "corrective" if grant_restored else "commissioning",
+                "station_id": station["id"], "technician": tech["id"],
             }))
 
             runner = uvicorn.Server(uvicorn.Config(app, log_level="warning", lifespan="off"))
@@ -104,6 +106,9 @@ def exercise(executable, port, scenario):
                 rid = json.loads(saved.read_bytes())["id"]
                 endpoint = f"/api/reports/{rid}"
                 assert ok(api.get(endpoint + "/exists", headers=field))["exists"] is False
+                share_path = f"/api/interventions/{target}/share"
+                if grant_restored:
+                    ok(api.put(share_path, headers=admin, json={"previous": tech["id"], "technician": next_id}))
                 order_id = str(uuid4())
                 itinerary = f"/api/work-orders/{order_id}"
                 order = ok(api.put(itinerary, headers=admin, json={
@@ -114,11 +119,13 @@ def exercise(executable, port, scenario):
                 offline.clear()
                 (state / "planned").touch()
                 wait_for(lambda: (state / "deferred").exists(), "temporary refusal persisted", process)
-                assert (endpoint, 409) in attempts
+                assert (endpoint, 403 if grant_restored else 409) in attempts
                 if scenario == "started":
                     order_started.set()
                 else:
                     ok(api.put(itinerary + "/cancel", headers=admin, json={"revision": order["revision"]}))
+                if grant_restored:
+                    ok(api.put(share_path, headers=admin, json={"previous": next_id, "technician": tech["id"]}))
                 if scenario == "stale":
                     other = report(target)
                     other["payload"]["answers"]["FIN.03"] = {"value": "", "notes": "Outros dados / other device."}
@@ -150,5 +157,5 @@ if __name__ == "__main__":
     parser.add_argument("executable", type=Path)
     parser.add_argument("port", type=int)
     args = parser.parse_args()
-    for scenario in ("legacy", "started", "stale"):
+    for scenario in ("legacy", "started", "stale", "individual", "legacy-individual"):
         exercise(args.executable.resolve(), args.port, scenario)

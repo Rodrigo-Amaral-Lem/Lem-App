@@ -306,6 +306,7 @@ static int restoredVisit(const QStringList &args) {
 
 static int deferredOrderStart(const QStringList &args) {
     const auto server = args[2], root = args[3], target = args[4], scenario = args[5];
+    const bool grantRestored = scenario == "individual" || scenario == "legacy-individual";
     const auto profile = root + "/profile", originalPath = root + "/original.png";
     const auto observation = QStringLiteral("Ligação revista na Âncora / inspected on site.");
     QString id, checkpoint;
@@ -335,21 +336,31 @@ static int deferredOrderStart(const QStringList &args) {
         CHECK(write(root + "/saved", {{"id", id}}));
         CHECK(until([&] { return QFile::exists(root + "/planned"); }));
         client.sync();
-        CHECK(until([&] { return !client.syncing() && client.current()["_order_start_retry_at"].toDouble() > 0; }));
-        CHECK(!client.current()["_conflict"].toBool() && notes(client, "FIN.03") == observation);
-        CHECK(LemReviewTest::persistedReport(client, id)["_order_start_retry_at"].toInteger() > 0);
+        CHECK(until([&] {
+            const auto current = client.current();
+            return !client.syncing() && (grantRestored ? current["_conflict_kind"] == "order_scope"
+                                                       : current["_order_start_retry_at"].toDouble() > 0);
+        }));
+        CHECK(client.current()["_conflict"].toBool() == grantRestored && notes(client, "FIN.03") == observation);
+        const auto saved = LemReviewTest::persistedReport(client, id);
+        if (grantRestored)
+            CHECK(saved["_conflict_kind"] == "order_scope" && saved["_order_item"].toString().isEmpty());
+        else
+            CHECK(saved["_order_start_retry_at"].toInteger() > 0);
         checkpoint = LemReviewTest::checkpoint(client);
         CHECK(write(root + "/deferred", {}));
         CHECK(until([&] { return QFile::exists(root + "/unblocked"); }));
     }
-    if (scenario == "legacy") {
-        // An already installed client may have written the original 409 as a conflict.
+    if (scenario == "legacy" || scenario == "legacy-individual") {
+        // An installed client may still have a refusal without its retry classification.
         auto cache = read(checkpoint);
         auto reports = cache["reports"].toObject();
         auto old = reports[id].toObject();
         old.remove("_order_start_retry_at");
+        old.remove("_conflict_kind");
         old["_conflict"] = true;
-        old["_conflict_reason"] = "A ordem desta intervenção ainda não começou.";
+        old["_conflict_reason"] = grantRestored ? "Contrato ou tarefa não atribuídos para esta operação."
+                                               : "A ordem desta intervenção ainda não começou.";
         reports[id] = old;
         cache["reports"] = reports;
         CHECK(write(checkpoint, cache));
@@ -357,7 +368,8 @@ static int deferredOrderStart(const QStringList &args) {
     Lem restarted(profile);
     CHECK(login(restarted));
     CHECK(restarted.prepareIntervention(target) == id && restarted.openReport(target, id));
-    if (scenario == "legacy" || scenario == "stale") restarted.sync();
+    if (scenario == "legacy" || scenario == "stale" || scenario == "legacy-individual")
+        restarted.sync();
     if (scenario == "stale") {
         CHECK(until([&] { return !restarted.syncing() && restarted.current()["_conflict"].toBool(); }));
         CHECK(notes(restarted, "FIN.03") == observation);
@@ -378,7 +390,7 @@ int main(int argc, char **argv) {
     QDesktopServices::setUrlHandler("file", &exportViewer, "view");
     // These integration fixtures only contact the disposable loopback server.
     QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
-    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.8.0"));
+    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.9.0"));
     app.setOrganizationName("Lem-Offline-Test");
     app.setApplicationName("Lem Offline Test");
     const auto args = app.arguments();

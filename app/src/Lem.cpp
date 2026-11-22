@@ -130,8 +130,10 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
         for (auto it = m_reports.constBegin(); it != m_reports.constEnd(); ++it) {
             const auto r = it.value().toObject();
             if (r["owner_id"] == m_user["id"] && r["dirty"].toBool() && r["correction"].toObject().isEmpty()) {
-                localDrafts.insert(r["_order_item"].toString(r["charger_id"].toString()), QVariantMap{{"id", it.key()},
-                    {"item", r["_order_item"].toString()}, {"conflict", r["_conflict"].toBool()}, {"closed", r["status"] == "closed"}});
+                const auto item = r["_order_item"].toString();
+                if (!item.isEmpty() || canBindInterventionDraft(r))
+                    localDrafts.insert(item.isEmpty() ? r["charger_id"].toString() : item, QVariantMap{{"id", it.key()},
+                        {"item", item}, {"conflict", r["_conflict"].toBool()}, {"closed", r["status"] == "closed"}});
             }
             const auto snapshot = r["snapshot"].toObject();
             reportSummaries.append(
@@ -409,11 +411,7 @@ void Lem::loadUser() {
     // A .part/QSaveFile temporary is never considered complete evidence.
     for (const auto &id : m_reports.keys()) {
         auto report = m_reports[id].toObject();
-        recoverOrderStartConflict(report);
-        if (report["_conflict"].toBool() && !report.contains("_conflict_kind") &&
-            !report["_order_item"].toString().isEmpty() &&
-            report["_conflict_reason"] == "Contrato ou tarefa não atribuídos para esta operação.")
-            report["_conflict_kind"] = "order_scope";
+        recoverOrderSyncConflict(report);
         auto photos = report["photos"].toArray();
         for (int i = 0; i < photos.size(); ++i) {
             auto photo = photos[i].toObject();
@@ -2478,6 +2476,7 @@ void Lem::finish() {
     const auto previousChargers = m_chargers;
     const auto previousCatalogues = m_catalogues;
     const auto previousStations = m_stations;
+    const auto previousOrders = m_orders;
     m_current.remove("_defer_photo_sync");
     m_current["status"] = "closed";
     auto payload = m_current["payload"].toObject();
@@ -2524,6 +2523,10 @@ void Lem::finish() {
         m_chargers = previousChargers;
         m_catalogues = previousCatalogues;
         m_stations = previousStations;
+        if (m_orders != previousOrders) {
+            m_orders = previousOrders;
+            emit workOrderListChanged();
+        }
         emit changed();
         return;
     }

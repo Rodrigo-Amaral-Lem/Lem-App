@@ -3,8 +3,61 @@
 #include "SafeStorage.h"
 #include <QDateTime>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonDocument>
 #include <QUuid>
+
+namespace {
+QJsonArray mapOrderStations(QJsonArray orders, const std::function<void(QJsonObject &)> &update) {
+    for (qsizetype i = 0; i < orders.size(); ++i) {
+        auto order = orders.at(i).toObject();
+        auto items = order["items"].toArray();
+        for (qsizetype j = 0; j < items.size(); ++j) {
+            auto item = items.at(j).toObject();
+            // The listing omits station details for detached or cancelled work.
+            if (item.value("state") == "cancelled" ||
+                (item.value("station_updated").toString().isEmpty() && item.value("details").toObject().isEmpty()))
+                continue;
+            update(item);
+            items[j] = item;
+        }
+        order["items"] = items;
+        orders[i] = order;
+    }
+    return orders;
+}
+
+QJsonArray retainStationDetails(QJsonArray orders, const QJsonArray &cachedOrders) {
+    QHash<QString, QJsonObject> cachedStations;
+    for (const auto &order : cachedOrders) {
+        for (const auto &entry : order.toObject()["items"].toArray()) {
+            const auto item = entry.toObject();
+            const auto id = item["station_id"].toString();
+            const auto revision = item["station_updated"].toString();
+            if (!id.isEmpty() && !revision.isEmpty() && item["details"].isObject() &&
+                revision > cachedStations.value(id).value("station_updated").toString())
+                cachedStations.insert(id, item);
+        }
+    }
+    return mapOrderStations(orders, [&cachedStations](QJsonObject &item) {
+        const auto revision = item.value("station_updated").toString();
+        const auto cached = cachedStations.value(item.value("station_id").toString());
+        // The same server revision can still carry an identity corrected
+        // locally while its closing report waits for synchronization.
+        if (!revision.isEmpty() && cached.value("station_updated").toString() >= revision) {
+            item["details"] = cached["details"];
+            item["station_updated"] = cached["station_updated"];
+        }
+    });
+}
+} // namespace
+
+void Lem::updateWorkOrderStations(const std::function<void(QJsonObject &)> &update) {
+    const auto patched = mapOrderStations(m_orders, update);
+    if (m_orders == patched) return;
+    m_orders = patched;
+    emit workOrderListChanged();
+}
 
 QString Lem::newOrderId() const {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -62,7 +115,7 @@ void Lem::refreshOrders(bool planner) {
         const auto data = QJsonDocument::fromJson(bytes).object();
         if (!data["orders"].isArray() || !data["today"].isString()) return;
         m_orderReadError.clear();
-        const auto orders = retainedOrders(data["orders"].toArray());
+        const auto orders = retainStationDetails(retainedOrders(data["orders"].toArray()), m_orders);
         const auto day = data["today"].toString();
         if (m_orders != orders || day != m_planningDay) {
             m_orders = orders;
@@ -187,6 +240,17 @@ bool Lem::isOrderRecovery(const QJsonObject &report) const {
     return false;
 }
 
+bool Lem::independentIntervention(const QJsonObject &report) {
+    return report["_order_item"].toString().isEmpty() && report["work_item_id"].toString().isEmpty() &&
+           !report["snapshot"].toObject()["intervention"].toObject().isEmpty();
+}
+
+bool Lem::canBindInterventionDraft(const QJsonObject &report) const {
+    return report["dirty"].toBool() && report["revision"].toInt() == 0 && report["owner_id"] == m_user["id"] &&
+           report["correction"].toObject().isEmpty() && independentIntervention(report) && !isOrderRecovery(report) &&
+           (!report["_conflict"].toBool() || report["_conflict_kind"] == "order_scope");
+}
+
 // Prepare the same report editor as the contract catalogue, including local unsent drafts.
 // An empty return starts a draft; "!" means that navigation must stay in the order.
 QString Lem::prepareOrderReport(QString orderId, QString itemId, QString requestedReport) {
@@ -217,7 +281,8 @@ QString Lem::prepareOrderReport(QString orderId, QString itemId, QString request
             bool listed = false;
             for (const auto &row : m_chargers) if (row.toObject()["id"] == target) listed = true;
             if (!listed) m_chargers.append(QJsonObject{{"id",target},{"contract_id",cid},
-                {"station_id",item["station_id"]},{"external_id",item["external_id"]},{"details",item["details"]},
+                {"station_id",item["station_id"]},{"station_updated",item["station_updated"]},
+                {"external_id",item["external_id"]},{"details",item["details"]},
                 {"contract_notes",item["contract_notes"]}, {"notes_revision",item["notes_revision"]}});
             if (!requestedReport.isEmpty()) return requestedReport;
             if (!item["report_id"].toString().isEmpty()) return item["report_id"].toString();
@@ -230,6 +295,22 @@ QString Lem::prepareOrderReport(QString orderId, QString itemId, QString request
                 const auto r = it.value().toObject();
                 if (r["_order_item"] == itemId && r["charger_id"] == target && r["owner_id"] == m_user["id"] &&
                     (r["status"] == "draft" || r["dirty"].toBool())) return it.key();
+            }
+            // Opening this active visit is the technician's choice to continue
+            // the same locally started job under the new order.
+            if (item["state"] == "pending" && item["kind"] != "preventive") {
+                const auto id = m_localOrderDrafts.value(target).toMap().value("id").toString();
+                auto local = m_reports.value(id).toObject();
+                if (local["charger_id"] == target && canBindInterventionDraft(local)) {
+                    local["_order_item"] = itemId;
+                    local["_edit_seq"] = local["_edit_seq"].toDouble() + 1;
+                    if (!checkpointReport(local, "Não foi possível associar o rascunho à visita. O rascunho foi conservado."))
+                        return "!";
+                    m_syncConflicts.remove(id);
+                    emit changed();
+                    scheduleSync();
+                    return id;
+                }
             }
             return {};
         }

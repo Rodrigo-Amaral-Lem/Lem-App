@@ -346,6 +346,7 @@ class Lem : public QObject {
     void exportPreparedReport(QString kind, QUrl target);
     static QJsonObject stationIdentity(const QJsonObject &details);
     void applyClosedIdentity(const QJsonObject &report);
+    void updateWorkOrderStations(const std::function<void(QJsonObject &)> &update);
     QVariantList groupCopySources(QString scope) const;
     void copyReportGroup(QString sourceId, QString scope);
     bool copyLocksCheckpoint(const QString &reportId, const QString &checkpoint) const;
@@ -413,7 +414,9 @@ class Lem : public QObject {
     QString cacheDir() const;
     void remember();
     void scheduleSync(int delay = 8000);
-    static void recoverOrderStartConflict(QJsonObject &report);
+    static void recoverOrderSyncConflict(QJsonObject &report);
+    static bool independentIntervention(const QJsonObject &report);
+    bool canBindInterventionDraft(const QJsonObject &report) const;
     void startSync(bool manual);
     bool releasePhotoSync(QString reportId);
     void syncFailed(int code, QString message);
