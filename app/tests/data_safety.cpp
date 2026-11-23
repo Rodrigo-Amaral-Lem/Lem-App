@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QImage>
 #include <QBuffer>
+#include <QCryptographicHash>
 #include <QDebug>
 #include <QJsonDocument>
 #include <QFileInfo>
@@ -27,6 +28,42 @@
     } while (false)
 
 namespace {
+void reply(QTcpSocket *socket, const QByteArray &status, const QJsonObject &value) {
+    const auto body = QJsonDocument(value).toJson(QJsonDocument::Compact);
+    socket->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nContent-Length: " +
+                  QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+    socket->disconnectFromHost();
+}
+
+void readRequests(QTcpServer &server, const std::function<void(QTcpSocket *, QByteArray)> &handler) {
+    QObject::connect(&server, &QTcpServer::newConnection, &server, [&server, handler] {
+        auto socket = server.nextPendingConnection();
+        QObject::connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        QObject::connect(socket, &QTcpSocket::readyRead, socket,
+                         [socket, handler, request = QByteArray{}, received = false]() mutable {
+            if (received) return;
+            request += socket->readAll();
+            const auto end = request.indexOf("\r\n\r\n");
+            if (end < 0) return;
+            int length = 0;
+            for (const auto &header : request.left(end).split('\n'))
+                if (header.toLower().startsWith("content-length:"))
+                    length = header.mid(15).trimmed().toInt();
+            if (request.size() < end + 4 + length) return;
+            received = true;
+            handler(socket, request);
+        });
+    });
+}
+
+bool await(const std::function<bool()> &ready) {
+    QElapsedTimer timer;
+    timer.start();
+    while (!ready() && timer.elapsed() < 5000)
+        QCoreApplication::processEvents();
+    return ready();
+}
+
 bool fillRequiredAnswers(Lem &client, const QJsonObject &draft) {
     for (auto section : draft["template"].toObject()["sections"].toArray()) {
         for (auto entry : section.toObject()["items"].toArray()) {
@@ -587,6 +624,167 @@ struct LemReviewTest {
         CHECK(restored.m_current["status"] == "draft" && restored.m_current["payload"] == payload);
         return true;
     }
+    static bool evidenceSync(const QString &root) {
+        QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
+        for (const auto &status : {QByteArray("200 OK"), QByteArray("410 Gone")}) {
+            QTcpServer server;
+            CHECK(server.listen(QHostAddress::LocalHost));
+            const auto path = root + "/" + QString::fromLatin1(status.left(3));
+            Lem client(path);
+            client.demo();
+            const auto url = QString("http://127.0.0.1:%1").arg(server.serverPort());
+            client.m_server = url;
+            client.m_token = "isolated-test-session";
+            const auto observation = QStringLiteral("Ação na Âncora / offline inspection");
+            client.answer("FIN.03", "", observation);
+            QImage image(32, 24, QImage::Format_RGB32);
+            image.fill(Qt::green);
+            CHECK(image.save(path + "/inspection.png"));
+            client.attach("FIN.03", QUrl::fromLocalFile(path + "/inspection.png"));
+            CHECK(await([&] { return !client.attachingFiles(); }));
+            auto report = client.m_current;
+            report["revision"] = 1;
+            CHECK(client.checkpointReport(report, "Fixture checkpoint failed"));
+            const auto id = report["id"].toString();
+            const auto photo = report["photos"].toArray().first().toObject();
+            const auto filename = QUrl(photo["path"].toString()).toLocalFile();
+            const auto original = read(filename);
+            CHECK(!original.isEmpty());
+            QTcpSocket *upload = nullptr;
+            readRequests(server, [&](QTcpSocket *socket, const QByteArray &request) {
+                if (request.startsWith("PUT ") && request.contains(original))
+                    upload = socket;
+            });
+            client.m_syncReport = id;
+            client.m_syncIds = {id};
+            client.m_syncing = true;
+            client.syncPhotos(0, report, 0);
+            CHECK(await([&] { return upload != nullptr; }));
+            CHECK(client.forgetReport(id, true));
+            const auto recoveryId = client.m_current["id"].toString();
+            CHECK(recoveryId != id && read(filename) == original);
+            if (status.startsWith("200"))
+                reply(upload, status, {{"id", photo["id"]}, {"digest", QString(64, 'a')}});
+            else
+                reply(upload, status, {{"detail", "Report apagado"}});
+            CHECK(await([&] { return !client.m_syncing; }));
+            Lem restored(path);
+            restored.m_server = url;
+            restored.m_user = client.m_user;
+            restored.loadUser();
+            const auto recovered = restored.m_reports.value(recoveryId).toObject();
+            CHECK(restored.m_deletedReports.contains(id) && !restored.m_reports.contains(id));
+            CHECK(recovered["payload"] == report["payload"] && recovered["photos"] == report["photos"]);
+            CHECK(read(filename) == original);
+        }
+        return true;
+    }
+    static bool replacementSync(const QString &root) {
+        QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
+        for (const auto &scenario : {QString("acknowledged"), QString("lost"), QString("legacy")}) {
+            const bool lostReply = scenario == "lost";
+            const bool legacy = scenario == "legacy";
+            QTcpServer server;
+            CHECK(server.listen(QHostAddress::LocalHost));
+            const auto url = QString("http://127.0.0.1:%1").arg(server.serverPort());
+            const auto path = root + "/" + scenario;
+            Lem client(path);
+            client.demo();
+            client.m_server = url;
+            client.m_token = "isolated-test-session";
+            QImage image(32, 24, QImage::Format_RGB32);
+            image.fill(Qt::cyan);
+            CHECK(image.save(path + "/rotate.png"));
+            client.attach("FIN.03", QUrl::fromLocalFile(path + "/rotate.png"));
+            CHECK(await([&] { return !client.attachingFiles(); }));
+            auto remote = client.m_current;
+            remote["revision"] = 1;
+            remote["dirty"] = false;
+            auto original = remote["photos"].toArray().first().toObject();
+            original["uploaded"] = true;
+            remote["photos"] = QJsonArray{original};
+            CHECK(client.checkpointReport(remote, "Fixture checkpoint failed"));
+            const auto id = remote["id"].toString();
+            client.rotatePhoto(original["id"].toString());
+            CHECK(wait(client));
+            auto replacement = client.m_current["photos"].toArray().first().toObject();
+            if (legacy) {
+                // A 0.9.1 journal paired neither ID. Failed upload must leave
+                // the acknowledged original untouched, even after upgrading.
+                replacement.remove("_replaces_photo_ids");
+                auto pending = client.m_current;
+                pending["photos"] = QJsonArray{replacement};
+                CHECK(client.checkpointReport(pending, "Fixture checkpoint failed"));
+            }
+            const auto replacementPath = QUrl(replacement["path"].toString()).toLocalFile();
+            CHECK(QImage(replacementPath).size() == QSize(24, 32));
+            const auto bytes = read(replacementPath);
+            const auto digest = QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+            int replacements = 0;
+            int unexpectedWrites = 0;
+            const auto reportPath = "/api/reports/" + id.toUtf8();
+            readRequests(server, [&](QTcpSocket *socket, const QByteArray &request) {
+                if (request.startsWith("GET " + reportPath + " ")) {
+                    reply(socket, "200 OK", remote);
+                } else if (request.startsWith("PUT " + reportPath + "/photos/" +
+                                              replacement["id"].toString().toUtf8() + " ") &&
+                           request.contains(bytes)) {
+                    const bool paired = request.contains("name=\"replaces_id\"") &&
+                                        request.contains(original["id"].toString().toUtf8());
+                    if (paired == legacy) ++unexpectedWrites;
+                    ++replacements;
+                    if (legacy) {
+                        reply(socket, "413 Content Too Large", {});
+                        return;
+                    }
+                    auto metadata = replacement;
+                    metadata["digest"] = digest;
+                    metadata.remove("path");
+                    remote["photos"] = QJsonArray{metadata};
+                    remote["revision"] = 2;
+                    if (lostReply)
+                        reply(socket, "503 Service Unavailable", {});
+                    else
+                        reply(socket, "200 OK", {{"id", metadata["id"]}, {"digest", digest},
+                                                 {"replaced_id", original["id"]}, {"revision", 2}});
+                } else {
+                    ++unexpectedWrites;
+                    reply(socket, "404 Not Found", {});
+                }
+            });
+            CHECK(client.releasePhotoSync(id));
+            client.m_syncIds = {id};
+            client.m_syncing = true;
+            client.syncNext(0);
+            CHECK(await([&] { return !client.m_syncing; }));
+            qInfo() << scenario << replacements << unexpectedWrites << client.m_message;
+            CHECK(client.m_current["dirty"].toBool() == (lostReply || legacy));
+            Lem restored(path);
+            restored.m_server = url;
+            restored.m_user = client.m_user;
+            restored.m_token = client.m_token;
+            restored.loadUser();
+            if (lostReply) {
+                restored.m_syncIds = {id};
+                restored.m_syncing = true;
+                restored.syncNext(0);
+                CHECK(await([&] { return !restored.m_syncing; }));
+            }
+            const auto saved = restored.m_reports.value(id).toObject();
+            CHECK(replacements == 1 && unexpectedWrites == 0);
+            if (legacy) {
+                CHECK(saved["revision"] == QJsonValue(1) && saved["dirty"].toBool());
+                CHECK(remote["photos"].toArray().first().toObject()["id"] == original["id"]);
+                CHECK(read(replacementPath) == bytes);
+                continue;
+            }
+            CHECK(saved["revision"] == QJsonValue(2) && !saved["dirty"].toBool());
+            CHECK(!saved.contains("_inflight_photo_replacement") && saved["deleted_photos"].toArray().isEmpty());
+            const auto savedPhoto = saved["photos"].toArray().first().toObject();
+            CHECK(savedPhoto["uploaded"].toBool() && savedPhoto["digest"] == digest && read(replacementPath) == bytes);
+        }
+        return true;
+    }
     static bool migrationSync(const QString &root) {
         // Equal answers do not imply equal forms: a rejected historical closure
         // may need a draft PUT solely to acknowledge the new template/marker.
@@ -725,6 +923,8 @@ int main(int argc, char **argv) {
                                                    && LemReviewTest::rejectedClosure(root.path() + "/size", 413))
                     : mode == "field-integrity" ? LemReviewTest::fieldIntegrity(root.path())
                     : mode == "migration-sync" ? LemReviewTest::migrationSync(root.path())
+                    : mode == "evidence-sync" ? LemReviewTest::evidenceSync(root.path()) &&
+                                                LemReviewTest::replacementSync(root.path())
                                           : LemReviewTest::cleanup(root.path());
     if (ok)
         qInfo() << "PASS: data safety" << mode;

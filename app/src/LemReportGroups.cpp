@@ -228,6 +228,7 @@ void Lem::stageQvePhoto(int index, const QByteArray &bytes) {
     photo["id"] = id; photo["path"] = QUrl::fromLocalFile(path).toString();
     photo["filename"] = QFileInfo(path).fileName(); photo["size"] = double(bytes.size());
     photo["uploaded"] = false; photo.remove("digest");
+    photo.remove("_replaces_photo_ids");
     m_qveCopyPhotos[index] = photo;
     status(QString("A copiar %1: evidência %2 / %3").arg(m_copyScope == "QVE" ? "QVE" : "medições").arg(index + 1).arg(m_qveCopyPhotos.size()));
     // Keep the event loop responsive even for many already cached files.
@@ -256,18 +257,23 @@ void Lem::commitQveCopy() {
         {"source_station_id", m_qveCopySource["snapshot"].toObject()["charger"].toObject()["external_id"]},
         {"copied_by", m_user["name"]}, {"copied_at", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}};
     auto deleted = report["deleted_photos"].toArray();
+    auto explicitRemovals = report["_explicit_photo_removals"].toArray();
     QJsonArray photos;
     qint64 total = 0;
     for (auto entry : report["photos"].toArray()) {
         const auto p = entry.toObject();
         if (inScope(m_copyScope, p["checkpoint"].toString())) {
             if (!deleted.contains(p["id"])) deleted.append(p["id"]);
+            if (!explicitRemovals.contains(p["id"])) explicitRemovals.append(p["id"]);
+            for (const auto &predecessor : p["_replaces_photo_ids"].toArray())
+                if (!explicitRemovals.contains(predecessor)) explicitRemovals.append(predecessor);
         } else photos.append(p);
     }
     for (auto entry : m_qveCopyPhotos) photos.append(entry);
     for (auto entry : photos) total += qint64(entry.toObject()["size"].toDouble());
     if (total > 400 * 1024 * 1024 || photos.size() > 200) { failQveCopy("A cópia ultrapassa os limites de evidências do report."); return; }
     report["payload"] = payload; report["photos"] = photos; report["deleted_photos"] = deleted;
+    if (!explicitRemovals.isEmpty()) report["_explicit_photo_removals"] = explicitRemovals;
     report["dirty"] = true; report["_defer_photo_sync"] = true;
     report["_edit_seq"] = report["_edit_seq"].toDouble() + 1;
     if (!saveEdits(report)) { failQveCopy("Não foi possível guardar a cópia do grupo. O grupo atual foi conservado."); return; }
@@ -354,10 +360,16 @@ bool Lem::saveSignature(QString checkpoint, QString dataUrl) {
     const auto id = freshId(); const auto path = SafeStorage::photoPath(cacheDir(), id, "image/png");
     const QJsonValue old = payload["signatures"].toObject()[checkpoint].toObject()["photo_id"];
     QJsonArray photos; auto deleted = report["deleted_photos"].toArray(); qint64 total = bytes.size();
+    auto explicitRemovals = report["_explicit_photo_removals"].toArray();
     for (auto entry : report["photos"].toArray()) {
         const auto p = entry.toObject();
-        if (p["id"] == old) { if (!deleted.contains(old)) deleted.append(old); }
-        else { photos.append(p); total += qint64(p["size"].toDouble()); }
+        if (p["id"] == old) {
+            if (!deleted.contains(old)) deleted.append(old);
+            if (!explicitRemovals.contains(old)) explicitRemovals.append(old);
+        } else {
+            photos.append(p);
+            total += qint64(p["size"].toDouble());
+        }
     }
     if (photos.size() >= 200 || total > 400 * 1024 * 1024) { status("Limite de evidências do report atingido."); return false; }
     QDir().mkpath(cacheDir() + "/photos"); QSaveFile file(path);
@@ -371,6 +383,7 @@ bool Lem::saveSignature(QString checkpoint, QString dataUrl) {
         {"signed_at", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}};
     payload["signatures"] = signatures; report["payload"] = payload;
     report["photos"] = photos; report["deleted_photos"] = deleted;
+    if (!explicitRemovals.isEmpty()) report["_explicit_photo_removals"] = explicitRemovals;
     report["dirty"] = true; report["_defer_photo_sync"] = true;
     report["_edit_seq"] = report["_edit_seq"].toDouble() + 1;
     if (!saveEdits(report)) { QFile::remove(path); return false; }

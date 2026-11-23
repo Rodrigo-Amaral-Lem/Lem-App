@@ -535,6 +535,7 @@ bool Lem::mergeSync(QJsonObject sent, bool complete, QJsonValue serverPhotos) {
             auto ack = value.toObject();
             if (p["id"] == ack["id"] && ack["uploaded"].toBool()) {
                 p["uploaded"] = true;
+                p.remove("_replaces_photo_ids");
                 if (ack.contains("digest"))
                     p["digest"] = ack["digest"];
                 break;
@@ -551,11 +552,23 @@ bool Lem::mergeSync(QJsonObject sent, bool complete, QJsonValue serverPhotos) {
         if (ackDeleted.contains(deleted[i]))
             deleted.removeAt(i);
     latest["deleted_photos"] = deleted;
+    if (latest.contains("_explicit_photo_removals")) {
+        QJsonArray outstanding;
+        for (const auto &entry : latest["_explicit_photo_removals"].toArray())
+            if (deleted.contains(entry)) outstanding.append(entry);
+        if (outstanding.isEmpty())
+            latest.remove("_explicit_photo_removals");
+        else
+            latest["_explicit_photo_removals"] = outstanding;
+    }
     if (ackDeleted.contains(latest.value("_inflight_delete_id"))) {
         latest.remove("_inflight_delete_id");
         latest.remove("_inflight_delete_revision");
         latest.remove("_inflight_delete_payload");
     }
+    if (sent["_ack_replacement"].isObject() &&
+        sent["_ack_replacement"] == latest["_inflight_photo_replacement"])
+        latest.remove("_inflight_photo_replacement");
     if (complete) {
         latest.remove("_order_start_retry_at");
         bool uploaded = true;
@@ -568,6 +581,7 @@ bool Lem::mergeSync(QJsonObject sent, bool complete, QJsonValue serverPhotos) {
         if (!latest["dirty"].toBool()) {
             latest.remove("_inflight_payload");
             latest.remove("_inflight_revision");
+            latest.remove("_inflight_photo_replacement");
         }
     }
     const auto correction = sent["correction"].toObject();
@@ -718,6 +732,7 @@ void Lem::syncNext(int index, QString notice) {
                         // Record the server's representation, which can normalize
                         // answers during PUT. Keep the editable payload separate.
                         local["_inflight_delete_payload"] = saved.value("payload");
+                        local["_server_photos"] = saved.value("photos");
                         if (mergeSync(local, false, saved["photos"]))
                             syncPhotos(index, local, 0);
                     });
@@ -796,12 +811,13 @@ void Lem::syncNext(int index, QString notice) {
             }
             return;
         }
+        const auto remotePhotos = remote["photos"].toArray();
         bool confirmedDelete = false;
+        bool confirmedReplacement = false;
         if (remote["revision"] != r["revision"]) {
             const bool lostAck = remote["payload"] == r["_inflight_payload"] &&
                                  remote["revision"] == r["_inflight_revision"];
             auto queuedDeletions = r["deleted_photos"].toArray();
-            const auto remotePhotos = remote["photos"].toArray();
             // An older server can return the new revision even when DELETE did
             // nothing. Verify the actual report before adopting that revision.
             // Older checkpoints may only have a matching local or prior PUT payload.
@@ -824,7 +840,41 @@ void Lem::syncNext(int index, QString notice) {
                     r["_ack_deleted"] = QJsonArray{pending};
                 }
             }
-            if (!lostAck && !confirmedDelete) {
+            const auto pendingReplacement = r["_inflight_photo_replacement"].toObject();
+            if (!pendingReplacement.isEmpty() &&
+                pendingReplacement["revision"] == r["revision"] &&
+                pendingReplacement["payload"] == remote["payload"] &&
+                remote["revision"] == QJsonValue(r["revision"].toDouble() + 1) &&
+                remote["photos"].isArray()) {
+                const auto original = pendingReplacement["original"].toString();
+                const auto replacement = pendingReplacement["replacement"].toString();
+                const bool originalGone = std::none_of(remotePhotos.begin(), remotePhotos.end(),
+                    [&original](const auto &photo) { return photo.toObject()["id"] == original; });
+                const bool replacementPresent = std::any_of(remotePhotos.begin(), remotePhotos.end(),
+                    [&replacement, &pendingReplacement](const auto &photo) {
+                        const auto metadata = photo.toObject();
+                        return metadata["id"] == replacement && metadata["digest"] == pendingReplacement["digest"];
+                    });
+                if (originalGone && replacementPresent) {
+                    confirmedReplacement = true;
+                    for (qsizetype i = queuedDeletions.size(); i-- > 0;)
+                        if (queuedDeletions[i] == original)
+                            queuedDeletions.removeAt(i);
+                    r["deleted_photos"] = queuedDeletions;
+                    r["_ack_deleted"] = QJsonArray{original};
+                    r["_ack_replacement"] = pendingReplacement;
+                    auto photos = r["photos"].toArray();
+                    for (qsizetype i = 0; i < photos.size(); ++i) {
+                        auto photo = photos[i].toObject();
+                        if (photo["id"] != replacement) continue;
+                        photo["uploaded"] = true;
+                        photo["digest"] = pendingReplacement["digest"];
+                        photos[i] = photo;
+                    }
+                    r["photos"] = photos;
+                }
+            }
+            if (!lostAck && !confirmedDelete && !confirmedReplacement) {
                 syncFailed(409, "Report alterado noutro dispositivo. Rascunho local conservado.");
                 return;
             }
@@ -840,8 +890,10 @@ void Lem::syncNext(int index, QString notice) {
             remoteTemplate["version"] == localTemplate["version"] &&
             remoteTemplate["frozen_upload"].toBool() == localTemplate["frozen_upload"].toBool();
         r["_inflight_delete_payload"] = remote.value("payload");
+        r["_server_photos"] = remotePhotos;
         // Checkpoint a recovered deletion before sending any newer local answers.
-        if ((confirmedDelete || (samePayload && sameForm)) && !mergeSync(r, false, remote["photos"]))
+        if ((confirmedDelete || confirmedReplacement || (samePayload && sameForm)) &&
+            !mergeSync(r, false, remote["photos"]))
             return;
         if (samePayload && sameForm)
             syncPhotos(index, r, 0);
@@ -850,12 +902,46 @@ void Lem::syncNext(int index, QString notice) {
     });
 }
 
-// Process deletions, then missing uploads, then final closure. Each stage continues
-// only after acknowledgement; mergeSync preserves edits made during network waits.
+// Replace edited photos before processing their predecessors' deletion intents.
+// Each stage continues only after acknowledgement, and closure runs last.
 void Lem::syncPhotos(int index, QJsonObject r, int photoIndex) {
     auto deleted = r["deleted_photos"].toArray();
     const auto id = r["id"].toString();
-    if (!deleted.isEmpty()) {
+    const auto latestReport = m_reports.value(id).toObject();
+    if (latestReport.isEmpty()) {
+        syncNext(index + 1);
+        return;
+    }
+    auto photos = r["photos"].toArray();
+    QSet<QString> retained;
+    for (const auto &value : latestReport["photos"].toArray())
+        retained.insert(value.toObject()["id"].toString());
+
+    // Earlier clients saved edits as unrelated deletes and uploads. When one
+    // could be a replacement, upload first and leave the old photo intact if
+    // the server cannot accept both. Never infer which photo it replaces.
+    const auto remotePhotos = r["_server_photos"].toArray();
+    const auto explicitRemovals = latestReport["_explicit_photo_removals"].toArray();
+    QSet<QString> legacyReplacementCheckpoints;
+    for (const auto &entry : remotePhotos) {
+        const auto remote = entry.toObject();
+        if (deleted.contains(remote["id"]) && !explicitRemovals.contains(remote["id"]))
+            legacyReplacementCheckpoints.insert(remote["checkpoint"].toString());
+    }
+    // A user may have removed queued evidence during another upload. Select
+    // replacements only for photos still present in the latest local report.
+    qsizetype replacementIndex = -1;
+    for (qsizetype i = photoIndex; i < photos.size(); ++i) {
+        const auto photo = photos[i].toObject();
+        if (photo["uploaded"].toBool() || !retained.contains(photo["id"].toString())) continue;
+        if (!photo["_replaces_photo_ids"].toArray().isEmpty()) {
+            replacementIndex = i;
+            break;
+        }
+        if (replacementIndex < 0 && legacyReplacementCheckpoints.contains(photo["checkpoint"].toString()))
+            replacementIndex = i;
+    }
+    if (replacementIndex < 0 && !deleted.isEmpty()) {
         const auto pid = deleted.first().toString();
         // Persist this exact DELETE intent before sending it. Recovery must not
         // infer that another device's deletion was our lost acknowledgement.
@@ -902,20 +988,15 @@ void Lem::syncPhotos(int index, QJsonObject r, int photoIndex) {
                     });
         return;
     }
-    auto photos = r["photos"].toArray();
-    // The user can remove queued evidence while another upload awaits its reply.
-    // Consult the latest metadata before opening a file from the batch snapshot.
-    QSet<QString> retained;
-    for (const auto &value : m_reports.value(id).toObject()["photos"].toArray())
-        retained.insert(value.toObject()["id"].toString());
     while (photoIndex < photos.size() &&
            (photos[photoIndex].toObject()["uploaded"].toBool() ||
             !retained.contains(photos[photoIndex].toObject()["id"].toString())))
         ++photoIndex;
-    if (photoIndex < photos.size()) {
-        auto p = photos[photoIndex].toObject();
+    const auto uploadIndex = replacementIndex >= 0 ? replacementIndex : photoIndex;
+    if (uploadIndex < photos.size()) {
+        auto p = photos[uploadIndex].toObject();
         m_syncState = "Report " + QString::number(index + 1) + " / " + QString::number(m_syncIds.size()) +
-                      " · enviar fotografia " + QString::number(photoIndex + 1) + " / " +
+                      " · enviar fotografia " + QString::number(uploadIndex + 1) + " / " +
                       QString::number(photos.size()) + " · " + p["checkpoint"].toString();
         emit operationChanged();
         auto file = new QFile(localPath(QUrl(p["path"].toString())));
@@ -923,6 +1004,41 @@ void Lem::syncPhotos(int index, QJsonObject r, int photoIndex) {
             delete file;
             syncFailed(422, "Fotografia local em falta; report conservado.");
             return;
+        }
+        QList<QPair<QString, QString>> fields{{"checkpoint", p["checkpoint"].toString()},
+                                              {"base_revision", QString::number(r["revision"].toInt())}};
+        const auto predecessors = p["_replaces_photo_ids"].toArray();
+        QString original;
+        for (const auto &entry : remotePhotos) {
+            const auto remoteId = entry.toObject().value("id");
+            if (predecessors.contains(remoteId)) {
+                original = remoteId.toString();
+                break;
+            }
+        }
+        QString digest;
+        if (!original.isEmpty()) {
+            QCryptographicHash hash(QCryptographicHash::Sha256);
+            if (!hash.addData(file) || !file->seek(0)) {
+                delete file;
+                syncFailed(0, "Não foi possível ler a fotografia editada. Envio pendente conservado.");
+                return;
+            }
+            digest = QString::fromLatin1(hash.result().toHex());
+            auto latest = latestReport;
+            latest["_inflight_photo_replacement"] = QJsonObject{
+                {"original", original}, {"replacement", p["id"]}, {"digest", digest},
+                {"revision", r["revision"]}, {"payload", r["_inflight_delete_payload"]}};
+            m_reports[id] = latest;
+            if (m_current.value("id").toString() == id)
+                m_current = latest;
+            if (!persist()) {
+                delete file;
+                m_syncing = false;
+                emit changed();
+                return;
+            }
+            fields.append({"replaces_id", original});
         }
         // Windows cannot unlink the streamed QFile while it is open. multipart
         // closes it before either callback, so retry a durably requested removal.
@@ -933,22 +1049,31 @@ void Lem::syncPhotos(int index, QJsonObject r, int photoIndex) {
         };
         multipart(
             "PUT", "/api/reports/" + id + "/photos/" + p["id"].toString(),
-            {{"checkpoint", p["checkpoint"].toString()},
-             {"base_revision", QString::number(r["revision"].toInt())}},
+            fields,
             p["filename"].toString(), {},
-            [this, index, r, photos, p, photoIndex, cleanup](QByteArray data) mutable {
+            [this, index, r, photos, p, photoIndex, uploadIndex, original, digest, cleanup](QByteArray data) mutable {
                 cleanup();
                 const auto ack = QJsonDocument::fromJson(data).object();
                 if (ack["id"] != p["id"] || ack["digest"].toString().isEmpty()) {
                     syncFailed(0, "Confirmação de fotografia inválida; envio pendente conservado.");
                     return;
                 }
+                if (!original.isEmpty()) {
+                    if (ack["replaced_id"] != original || ack["digest"] != digest ||
+                        ack["revision"] != QJsonValue(r["revision"].toDouble() + 1)) {
+                        syncFailed(0, "Confirmação de substituição inválida. Envio pendente conservado.");
+                        return;
+                    }
+                    // The same manifest check handles normal and lost replies.
+                    syncNext(index);
+                    return;
+                }
                 p["uploaded"] = true;
                 p["digest"] = ack["digest"];
-                photos[photoIndex] = p;
+                photos[uploadIndex] = p;
                 r["photos"] = photos;
                 if (mergeSync(r))
-                    syncPhotos(index, r, photoIndex + 1);
+                    syncPhotos(index, r, uploadIndex == photoIndex ? photoIndex + 1 : photoIndex);
             },
             [this, cleanup](int code, QString message) { cleanup(); syncFailed(code, message); }, file);
         return;

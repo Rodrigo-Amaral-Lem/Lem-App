@@ -43,6 +43,9 @@ static bool until(std::function<bool()> condition, int timeout = 20000) {
     }
     return condition();
 }
+static QString integrationServer() {
+    return "http://127.0.0.1:" + qEnvironmentVariable("LEM_TEST_PORT", "18765");
+}
 static bool settled(Lem &c) {
     return until([&] { return !c.busy() && !c.syncing() && !c.refreshing(); });
 }
@@ -269,7 +272,7 @@ static int exerciseDeleteAck(Lem &client, const QString &charger, const QString 
 static int resumeDeleteAck(const QString &state) {
     const auto fixture = read(state + "/resume.json");
     Lem client(state + "/device");
-    client.setServer("http://127.0.0.1:18765");
+    client.setServer(integrationServer());
     client.login("admin@lem.pt", "IntegrationPassword123!");
     CHECK(settled(client) && client.authenticated());
     client.openReport("", fixture["race_id"].toString());
@@ -428,7 +431,7 @@ int main(int argc, char **argv) {
     QDesktopServices::setUrlHandler("file", &exportViewer, "view");
     // These integration fixtures only contact the disposable loopback server.
     QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
-    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.9.1"));
+    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.9.2"));
     app.setOrganizationName("Lem-Offline-Test");
     app.setApplicationName("Lem Offline Test");
     const auto args = app.arguments();
@@ -930,7 +933,7 @@ int main(int argc, char **argv) {
             validProgress &= t["progress"].toDouble() >= 0 && t["progress"].toDouble() <= 1;
         }
     });
-    c.setServer("http://127.0.0.1:18765");
+    c.setServer(integrationServer());
     c.login("admin@lem.pt", "IntegrationPassword123!");
     CHECK(settled(c));
     CHECK(!c.user().isEmpty());
@@ -1007,7 +1010,7 @@ int main(int argc, char **argv) {
     CHECK(!c.current()["dirty"].toBool());
     CHECK(c.current()["deleted_photos"].toList().isEmpty());
     Lem other(temp.path() + "/other");
-    other.setServer("http://127.0.0.1:18765");
+    other.setServer(integrationServer());
     other.login("admin@lem.pt", "IntegrationPassword123!");
     CHECK(settled(other));
     other.selectContract(contract);
@@ -1334,8 +1337,8 @@ int main(int argc, char **argv) {
     qInfo() << "PASS: rejected report preserved; next queued report synchronized";
     // Two distinct users: a clean observer cache must follow the owner's closure.
     Lem owner(temp.path() + "/owner-visibility"), viewer(temp.path() + "/viewer-visibility");
-    owner.setServer("http://127.0.0.1:18765");
-    viewer.setServer("http://127.0.0.1:18765");
+    owner.setServer(integrationServer());
+    viewer.setServer(integrationServer());
     owner.login("ownership@example.test", "OwnershipPassword123!"); CHECK(settled(owner));
     viewer.login("admin@lem.pt", "IntegrationPassword123!"); CHECK(settled(viewer));
     CHECK(owner.user()["id"] != viewer.user()["id"]);
@@ -1419,7 +1422,7 @@ int main(int argc, char **argv) {
     // the live issuer, even when the settings writer's follow-up refresh failed.
     CHECK(owner.current()["presentation"].toMap()["issuer"] != "CSMTEC");
     Lem legacyAdmin(temp.path() + "/legacy-admin-export");
-    legacyAdmin.setServer("http://127.0.0.1:18765");
+    legacyAdmin.setServer(integrationServer());
     legacyAdmin.login("admin@lem.pt", "IntegrationPassword123!"); CHECK(settled(legacyAdmin));
     CHECK(legacyAdmin.user()["role"] == "admin");
     CHECK(owner.current()["owner_id"] != legacyAdmin.user()["id"]);
@@ -1476,7 +1479,7 @@ int main(int argc, char **argv) {
     // A second device trashes a contract while this device has saved and unsent drafts.
     const auto retainedRoot = temp.path() + "/retention-owner";
     Lem retained(retainedRoot), administrator(temp.path() + "/retention-admin");
-    administrator.setServer("http://127.0.0.1:18765");
+    administrator.setServer(integrationServer());
     administrator.login("admin@lem.pt", "IntegrationPassword123!"); CHECK(settled(administrator));
     CHECK(administrator.authenticated());
     administrator.createContract("Retention integration", 2026, 1, "TRE"); CHECK(settled(administrator));
@@ -1490,7 +1493,7 @@ int main(int argc, char **argv) {
     administrator.commitExcel(); CHECK(settled(administrator));
     const auto retainedCharger=administrator.chargers().first().toMap()["id"].toString();
     administrator.assignUser(owner.user()["id"].toString()); CHECK(settled(administrator));
-    retained.setServer("http://127.0.0.1:18765");
+    retained.setServer(integrationServer());
     retained.login("ownership@example.test", "OwnershipPassword123!"); CHECK(settled(retained));
     CHECK(retained.authenticated());
     retained.selectContract(retainedContract); CHECK(settled(retained));

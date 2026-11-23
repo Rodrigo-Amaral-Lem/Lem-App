@@ -17,6 +17,9 @@ from pypdf import PdfReader
 from pathlib import Path
 import openpyxl, httpx
 
+PORT = int(os.environ.get("LEM_TEST_PORT", "18765"))
+URL = f"http://127.0.0.1:{PORT}"
+
 
 @contextmanager
 def temporary_workspace():
@@ -180,7 +183,7 @@ def delete_ack_stats():
             "LEM_BRANDING_TEST_OUTPUT": str(branding_output.resolve()),
         }
         with socket.socket() as probe:
-            probe.bind(("127.0.0.1", 18765))
+            probe.bind(("127.0.0.1", PORT))
         with (folder / "server.log").open("w+") as log:
             server = subprocess.Popen(
                 [
@@ -191,19 +194,19 @@ def delete_ack_stats():
                     "--host",
                     "127.0.0.1",
                     "--port",
-                    "18765",
+                    str(PORT),
                 ],
                 cwd=folder,
                 env=env,
                 stdout=log,
                 stderr=log,
             )
-            print(f"Owned test API process {server.pid} on 127.0.0.1:18765", flush=True)
+            print(f"Owned test API process {server.pid} on 127.0.0.1:{PORT}", flush=True)
             try:
                 with httpx.Client(trust_env=False) as client:
                     for _ in range(100):
                         try:
-                            if client.get("http://127.0.0.1:18765/api/health").status_code == 200:
+                            if client.get(f"{URL}/api/health").status_code == 200:
                                 break
                         except httpx.HTTPError:
                             pass
@@ -236,7 +239,7 @@ def delete_ack_stats():
                             bundled = PdfReader(BytesIO(archive.read(report['identifier'] + '.pdf')))
                             assert 'CSMTEC' in bundled.pages[0].extract_text()
                             assert direct.pages[0].extract_text() == bundled.pages[0].extract_text()
-                    stats = client.get("http://127.0.0.1:18765/__test/stats").json()
+                    stats = client.get(f"{URL}/__test/stats").json()
                     counts = stats["requests"]
                     assert stats["import_replayed_once"], stats
                     assert stats["photo_max"] <= 4, stats
@@ -281,8 +284,8 @@ def delete_ack_stats():
 def check_delete_ack(client, run_native, args, folder):
     state = ("--state", str(folder))
     first = run_native(*args, *state, "--delete-ack")
-    url = "http://127.0.0.1:18765"
-    auth = {"X-Lem-Client-Version": os.environ.get("LEM_TEST_CLIENT_VERSION", "0.9.1")}
+    url = URL
+    auth = {"X-Lem-Client-Version": os.environ.get("LEM_TEST_CLIENT_VERSION", "0.9.2")}
     login = client.post(url + "/api/login", headers=auth,
                         json={"email": "admin@lem.pt", "password": "IntegrationPassword123!"})
     auth["Authorization"] = "Bearer " + login.raise_for_status().json()["token"]

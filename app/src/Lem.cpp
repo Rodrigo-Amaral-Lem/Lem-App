@@ -1602,8 +1602,8 @@ bool Lem::attachToReport(QString reportId, QString key, QUrl url) {
     return true;
 }
 
-// Image edits create a fresh evidence identity: an acknowledged server attachment is
-// immutable. Persist the replacement and deletion tombstone before unlinking it.
+// An edit has a new evidence ID. Keep the predecessors in the journal so sync
+// can replace the server copy atomically, even after several offline edits.
 void Lem::cropPhoto(QString photoId, qreal x, qreal y, qreal width, qreal height) {
     editPhoto(photoId, 0, x, y, width, height);
 }
@@ -1649,7 +1649,7 @@ bool Lem::editPhoto(QString photoId, int quarterTurns, qreal x, qreal y, qreal w
     status(m_localOperationTitle);
     auto watcher = new QFutureWatcher<qint64>(this);
     connect(watcher, &QFutureWatcher<qint64>::finished, this,
-            [this, watcher, reportId, photoId, newId, target, mime, old, source] {
+            [this, watcher, reportId, photoId, newId, target, mime, old] {
         const auto size = watcher->result(); watcher->deleteLater();
         m_busy = false; m_localOperationTitle.clear();
         auto report = m_reports.value(reportId).toObject();
@@ -1671,7 +1671,11 @@ bool Lem::editPhoto(QString photoId, int quarterTurns, qreal x, qreal y, qreal w
         replacement["filename"] = QFileInfo(target).fileName();
         replacement["path"] = QUrl::fromLocalFile(target).toString();
         replacement["size"] = double(size); replacement["uploaded"] = false;
-        replacement.remove("digest"); photos[index] = replacement;
+        replacement.remove("digest");
+        auto predecessors = replacement["_replaces_photo_ids"].toArray();
+        predecessors.append(photoId);
+        replacement["_replaces_photo_ids"] = predecessors;
+        photos[index] = replacement;
         auto deleted = report["deleted_photos"].toArray();
         if (!deleted.contains(photoId)) deleted.append(photoId);
         report["photos"] = photos; report["deleted_photos"] = deleted;
@@ -1681,13 +1685,7 @@ bool Lem::editPhoto(QString photoId, int quarterTurns, qreal x, qreal y, qreal w
         m_reports[reportId] = report;
         if (m_current["id"].toString() == reportId) m_current = report;
         m_photoBytes += size;
-        const QFileInfo original(source);
-        // Never delete an original outside Lem's private evidence directory.
-        if (original.canonicalPath() == QFileInfo(cacheDir() + "/photos").canonicalFilePath() &&
-            (original.fileName() == photoId + ".jpg" || original.fileName() == photoId + ".png")) {
-            const auto oldSize = original.size();
-            if (QFile::remove(source)) m_photoBytes = qMax(qint64(0), m_photoBytes - oldSize);
-        }
+        removeCachedPhoto(old);
         status("Fotografia editada. Envio ao mudar de grupo ou sair do report.");
     });
     watcher->setFuture(QtConcurrent::run(&m_editPool, [source, target, x, y, width, height, mime, quarterTurns]() -> qint64 {
@@ -1775,17 +1773,8 @@ bool Lem::forgetReport(QString id, bool preservePending) {
         emit changed();
         return true;
     }
-    for (auto value : photos) {
-        const auto p = value.toObject();
-        const QFileInfo f(localPath(QUrl(p["path"].toString())));
-        const auto pid = p["id"].toString();
-        if (f.canonicalPath() == QFileInfo(cacheDir() + "/photos").canonicalFilePath() &&
-            (f.fileName() == pid + ".jpg" || f.fileName() == pid + ".png" || f.fileName() == pid + ".mp4" || f.fileName() == pid + ".3gp")) {
-            const auto size = f.size();
-            if (QFile::remove(f.absoluteFilePath()))
-                m_photoBytes = qMax(qint64(0), m_photoBytes - size);
-        }
-    }
+    for (const auto &value : photos)
+        removeCachedPhoto(value.toObject());
     emit changed();
     return true;
 }
@@ -1855,6 +1844,11 @@ void Lem::removePhoto(QString photoId) {
     auto deleted = m_current["deleted_photos"].toArray();
     if (!deleted.contains(photoId))
         deleted.append(photoId);
+    auto explicitRemovals = m_current["_explicit_photo_removals"].toArray();
+    if (!explicitRemovals.contains(photoId))
+        explicitRemovals.append(photoId);
+    for (const auto &predecessor : removed["_replaces_photo_ids"].toArray())
+        if (!explicitRemovals.contains(predecessor)) explicitRemovals.append(predecessor);
     auto payload = m_current["payload"].toObject();
     // A migrated correction can contain a historical signature at a renamed
     // checkpoint. Identify it by the cloned evidence ID, even with no local file.
@@ -1868,6 +1862,7 @@ void Lem::removePhoto(QString photoId) {
     m_current["payload"] = payload;
     m_current["photos"] = photos;
     m_current["deleted_photos"] = deleted;
+    m_current["_explicit_photo_removals"] = explicitRemovals;
     m_current["dirty"] = true;
     m_current["_edit_seq"] = m_current["_edit_seq"].toDouble() + 1;
     m_reports[reportId] = m_current;
@@ -1887,6 +1882,14 @@ void Lem::removePhoto(QString photoId) {
 void Lem::removeCachedPhoto(const QJsonObject &photo) {
     // Only remove our private cache copy, never the original in the user's gallery.
     const auto photoId = photo["id"].toString();
+    // A recovery copy has a different report ID but can still own this file.
+    // An absent original report is therefore not permission to unlink it.
+    for (const auto &report : m_reports) {
+        for (const auto &value : report.toObject()["photos"].toArray()) {
+            if (value.toObject()["id"] == photoId)
+                return;
+        }
+    }
     const QFileInfo cached(localPath(QUrl(photo["path"].toString())));
     if (cached.canonicalPath() == QFileInfo(cacheDir() + "/photos").canonicalFilePath() &&
         (cached.fileName() == photoId + ".jpg" || cached.fileName() == photoId + ".png" || cached.fileName() == photoId + ".mp4" || cached.fileName() == photoId + ".3gp")) {
