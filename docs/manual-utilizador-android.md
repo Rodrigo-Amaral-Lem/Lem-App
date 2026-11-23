@@ -93,6 +93,8 @@ O administrador escolhe **Nova ordem**, indica o início e o prazo, seleciona t�
 
 A partir do dia de início em Lisboa, o técnico pode escolher qualquer ID e **Abrir intervenção**. Para trabalhar sem rede, atualize a ordem após o início enquanto ainda tem ligação. O seu rascunho offline aparece como **Em preenchimento · por sincronizar**. **Consultar rascunho** abre o trabalho do colega identificado na ordem. **Consultar cópia local em conflito** abre o seu trabalho da mesma visita. Se recuperar a atribuição, sincronize. Para entregar o trabalho a outro técnico, escolha **Guardar cópia para entrega**. O ZIP inclui as respostas e os anexos disponíveis no dispositivo. Se a intervenção for impossível, escolha **Assinalar impedimento**, escreva o motivo e confirme em **Marcar inválida**. O administrador pode planear uma nova visita com um rascunho próprio. A última tarefa resolvida regista a hora de fecho. **Recuperar rascunho** abre uma cópia anterior para consulta. **Relatório removido** identifica um documento apagado após o fecho.
 
+Quando perder uma atribuição ou o servidor apagar um report que ainda tem alterações locais, procure **Cópias locais para recuperação** na lista de ordens. Abra a cópia para consulta e escolha **Guardar cópia para entrega** para exportar as respostas e os anexos disponíveis neste dispositivo. Se um PCVE for retirado do contrato, **Consultar rascunho** na ordem continua a abrir o trabalho existente.
+
 O criador segue a ordem. Qualquer administrador pode geri-la ou escolher **Seguir** para receber impedimentos e a conclusão. Autorize as notificações de atribuição e início. O aviso de início é entregue com rede das 07h00 às 20h00 de Lisboa, no próprio dia.
 
 ### Corretivas e comissionamentos

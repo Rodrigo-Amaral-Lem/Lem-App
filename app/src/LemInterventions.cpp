@@ -50,15 +50,33 @@ QString Lem::prepareIntervention(QString id) {
         selectContract(id);
         if (m_contract != id) return "!";
         if (m_chargers.isEmpty()) {
-            m_chargers.append(QJsonObject{{"id", id}, {"contract_id", id}, {"station_id", job["station_id"]},
+            QJsonObject membership{{"id", id}, {"contract_id", id}, {"station_id", job["station_id"]},
                 {"external_id", job["external_id"]}, {"details", job["details"]},
-                {"contract_notes", job["notes"]}, {"notes_revision", job["notes_revision"]}});
+                {"station_updated", job["station_updated"]}, {"contract_notes", job["notes"]},
+                {"notes_revision", job["notes_revision"]}};
+            // The job can be cached before the first opening of its membership.
+            // Use the physical station's latest details and keep the job notes.
+            const auto useStation = [&membership](const QJsonObject &row, const char *idKey, const char *timeKey) {
+                if (membership["station_id"].toString().isEmpty() || row[idKey] != membership["station_id"] ||
+                    !row["details"].isObject() ||
+                    row[timeKey].toString() < membership["station_updated"].toString()) return;
+                membership["external_id"] = row["external_id"];
+                membership["details"] = row["details"];
+                membership["station_updated"] = row[timeKey];
+            };
+            for (const auto &value : m_stations) useStation(value.toObject(), "id", "updated");
+            for (const auto &catalogue : m_catalogues)
+                for (const auto &value : catalogue.toArray()) useStation(value.toObject(), "station_id", "station_updated");
+            for (const auto &order : m_orders)
+                for (const auto &value : order.toObject()["items"].toArray()) useStation(value.toObject(), "station_id", "station_updated");
+            m_chargers.append(membership);
             emit changed();
         }
         for (const auto &entry : m_reports) {
             const auto report = entry.toObject();
             if (report["charger_id"] == id && report["owner_id"] == m_user["id"] && report["dirty"].toBool() &&
-                report["correction"].toObject().isEmpty() && !isOrderRecovery(report)) return report["id"].toString();
+                !report.contains("_deleted_source_id") && report["correction"].toObject().isEmpty() &&
+                !isOrderRecovery(report)) return report["id"].toString();
         }
         // A report may have synced since the last contracts refresh.
         const auto reports = m_chargers.first().toObject()["reports"].toArray();
@@ -74,7 +92,8 @@ QString Lem::prepareIntervention(QString id) {
         for (const auto &entry : m_reports) {
             const auto report = entry.toObject();
             if (report["charger_id"] == id && !m_deletedReports.contains(report["id"].toString()) &&
-                report["correction"].toObject().isEmpty() && !isOrderRecovery(report)) return report["id"].toString();
+                !report.contains("_deleted_source_id") && report["correction"].toObject().isEmpty() &&
+                !isOrderRecovery(report)) return report["id"].toString();
         }
         return {};
     }

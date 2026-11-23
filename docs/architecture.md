@@ -137,8 +137,11 @@ results. Do not assume the page, account, selected report or answer value is unc
 
 401 clears the token while retaining local work. Permission/revision conflicts preserve protected
 work for comparison or an independent copy. Validation failure keeps local data for correction. A
-confirmed **410** is different: permanent server deletion removes the corresponding local report and
-private evidence rather than reviving it.
+confirmed **410** tombstones the original report UUID. If the signed-in owner has pending edits, the
+same atomic checkpoint creates a separate read-only recovery copy and retains its private evidence.
+The recovery copy stays out of the upload queue. Clean deleted copies relinquish their private files
+only after the checkpoint succeeds. A draft deletion also sends a digest of the acknowledged evidence
+list, so a new upload can invalidate a delete even when the answers revision is unchanged.
 
 Explicit refresh refuses to overwrite dirty local work. Opening cached metadata does not download
 every original. Offline download pins a report and fetches missing files with four concurrent requests.
@@ -241,6 +244,11 @@ The temporary `work_order_not_started` reply defers only its report. The cache s
 Intervention catalogues select the current report and identify read-only recovery drafts. The individual handoff uses the selected technician plus the report ID and revision from the catalogue. A server acknowledgement refreshes the intervention.
 
 A cancelled order leaves the account cache 24 elapsed hours after its recorded cancellation. A local timer updates an open list or detail view, including offline. Loading a profile, resuming the app and receiving a fresh list also enforce the cutoff. Reports and evidence have their own retention lifecycle.
+
+Existing drafts remain reachable from a detached visit. Resolved visits open their advertised reports
+even after the pending-work contract disappears from the technician catalogue. The work-order list
+offers owner-scoped local recovery when a grant or visit disappears or sync protects a conflict.
+Recovery exports contain the saved report data and local evidence in a ZIP.
 
 Desktop locks the profile before migration or journal replay. The lock lives beside the profile so copying legacy files preserves the active lock. A second process can write after the first exits.
 

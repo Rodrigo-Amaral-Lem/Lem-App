@@ -83,6 +83,19 @@ bool emptyRefreshPlaceholder(QJsonObject entry) {
 QString uuid() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
+
+QString evidenceDigest(const QJsonArray &photos) {
+    QMap<QString, QString> manifest;
+    for (const auto &value : photos) {
+        const auto photo = value.toObject();
+        if (photo["uploaded"].toBool())
+            manifest.insert(photo["id"].toString(), photo["digest"].toString());
+    }
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (auto it = manifest.cbegin(); it != manifest.cend(); ++it)
+        hash.addData(it.key().toUtf8() + ' ' + it.value().toUtf8() + '\n');
+    return QString::fromLatin1(hash.result().toHex());
+}
 QString sessionDigest(const QString &token) {
     return QString::fromLatin1(QCryptographicHash::hash(token.toUtf8(), QCryptographicHash::Sha256).toHex());
 }
@@ -129,7 +142,8 @@ Lem::Lem(QString root, QObject *parent) : QObject(parent) {
         QVariantMap localDrafts;
         for (auto it = m_reports.constBegin(); it != m_reports.constEnd(); ++it) {
             const auto r = it.value().toObject();
-            if (r["owner_id"] == m_user["id"] && r["dirty"].toBool() && r["correction"].toObject().isEmpty()) {
+            if (r["owner_id"] == m_user["id"] && r["dirty"].toBool() && !r.contains("_deleted_source_id") &&
+                r["correction"].toObject().isEmpty()) {
                 const auto item = r["_order_item"].toString();
                 if (!item.isEmpty() || canBindInterventionDraft(r))
                     localDrafts.insert(item.isEmpty() ? r["charger_id"].toString() : item, QVariantMap{{"id", it.key()},
@@ -1099,6 +1113,7 @@ QVariantList Lem::buildChargerRows() const {
     QHash<QString, QJsonArray> localReports;
     for (auto value : m_reports) {
         const auto r = value.toObject();
+        if (r.contains("_deleted_source_id")) continue;
         const auto payload = r["payload"].toObject();
         localReports[r["charger_id"].toString()].append(QJsonObject{{"id", r["id"]},
                                                                     {"status", r["status"]},
@@ -1708,19 +1723,29 @@ void Lem::openVideo(QString photoId) {
     }
 }
 
-// Persist removal and its local tombstone before deleting private image files.
-// This is also used when the server confirms a report was permanently deleted.
-bool Lem::forgetReport(QString id) {
+// Checkpoint the tombstone and any recovery copy together before dropping the journal.
+bool Lem::forgetReport(QString id, bool preservePending) {
     if (!flushEdits())
         return false;
     const auto oldReports = m_reports, oldCurrent = m_current, oldCatalogues = m_catalogues;
     const auto oldChargers = m_chargers;
     const auto oldDeleted = m_deletedReports;
-    const auto photos = m_reports.value(id).toObject()["photos"].toArray();
+    auto report = m_reports.value(id).toObject();
+    const auto photos = report["photos"].toArray();
+    const bool recover = preservePending && report["owner_id"] == m_user["id"] && report["dirty"].toBool();
     m_reports.remove(id);
     m_deletedReports.insert(id);
+    if (recover) {
+        const auto recoveryId = uuid();
+        report["id"] = recoveryId;
+        report["_conflict"] = true;
+        report["_conflict_kind"] = "server_deleted";
+        report["_deleted_source_id"] = id;
+        report["_conflict_reason"] = "O report foi apagado no servidor.";
+        m_reports[recoveryId] = report;
+    }
     if (m_current.value("id").toString() == id)
-        m_current = {};
+        m_current = recover ? report : QJsonObject{};
     auto filter = [id](QJsonArray rows) {
         for (int i = 0; i < rows.size(); ++i) {
             auto c = rows[i].toObject();
@@ -1746,6 +1771,10 @@ bool Lem::forgetReport(QString id) {
     }
     QFile::remove(editPath(id));
     m_syncConflicts.remove(id);
+    if (recover) {
+        emit changed();
+        return true;
+    }
     for (auto value : photos) {
         const auto p = value.toObject();
         const QFileInfo f(localPath(QUrl(p["path"].toString())));
@@ -1771,6 +1800,7 @@ void Lem::deleteReport(QString id) {
     const auto r = m_current;
     const bool admin = m_user["role"].toString() == "admin";
     if (r.isEmpty() ||
+        r.contains("_deleted_source_id") ||
         (!admin && (r["status"].toString() != "draft" || r["owner_id"] != m_user["id"] || isOrderRecovery(r)))) {
         status("Não tem permissão para apagar este report.");
         return;
@@ -1786,6 +1816,7 @@ void Lem::deleteReport(QString id) {
     emit changed();
     request("DELETE",
             "/api/reports/" + id + "?base_revision=" + QString::number(r["revision"].toInt()) +
+                (r["status"] == "draft" ? "&evidence_digest=" + evidenceDigest(r["photos"].toArray()) : "") +
                 (r["correction"].toObject()["state"] == "editing" ? "&correction_only=true" : ""), {},
             [this, id](QByteArray bytes) {
                 const auto ack = QJsonDocument::fromJson(bytes).object();
@@ -2079,6 +2110,7 @@ void Lem::loadStationReports(QString stationId) {
     QJsonArray cached, pending;
     for (const auto &value : std::as_const(m_reports)) {
         const auto report = value.toObject();
+        if (report.contains("_deleted_source_id")) continue;
         const auto snapshot = report["snapshot"].toObject();
         const auto contract = snapshot["contract"].toObject();
         const auto cid = report["contract_id"].toString(contract["id"].toString());
@@ -2550,7 +2582,7 @@ bool Lem::prepareExport(QString kind) {
         return false;
     }
     if (kind == "recovery")
-        return m_current["_conflict"].toBool() && m_current["owner_id"] == m_user["id"] && !m_current["_order_item"].toString().isEmpty();
+        return isLocalRecovery(m_current) && m_current["_conflict"].toBool();
     if (m_current["status"].toString() != "closed") {
         status("Conclua o report antes de exportar PDF ou ZIP.");
         return false;
@@ -2645,7 +2677,7 @@ void Lem::exportReport(QString kind, QUrl target) {
                     openReport(charger, successor);
                 status("Relatório substituído. Consulte a correção antes de exportar.");
             } else {
-                if (!m_current["dirty"].toBool()) forgetReport(rid);
+                forgetReport(rid, true);
                 status("O relatório foi apagado no servidor. A exportação foi cancelada.");
             }
         } else if (!cid.isEmpty() && (code == 0 || code >= 500)) {

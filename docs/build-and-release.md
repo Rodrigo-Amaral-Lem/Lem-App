@@ -1,14 +1,13 @@
 # Build and release the client
 
-This guide describes the current `0.8.0` source. Run all commands from the **App repository
+This guide describes the current `0.9.1` source. Run all commands from the **App repository
 root**, which contains `app/`, `shared/` and `docs/`. Build and staging examples use ignored
 subdirectories of `build/`; no sibling working directory is required.
 
-The current version is **0.8.0**, Android code **191**, checklist **7**. The minimum is **0.6.1**.
-Client 0.6.1 receives an update notice and can still sign in and sync. Clients through 0.6.0
-label commissioning work-order items as preventive and receive the upgrade explanation.
-Update the API and its version settings before distributing the app. Install over the existing
-profile to retain local reports.
+The current version and minimum client are **0.9.1**, with Android code **193** and checklist **7**.
+The draft deletion request confirms the evidence list alongside the report revision. Clients through
+0.9.0 receive the upgrade explanation at login and on authenticated requests. Coordinate the API
+and app updates. Install over the existing profile to retain local reports.
 Prepare detailed messages and user-executed `git commit -S` commands under the
 [version policy](../../Common/docs/maintenance.md#version-policy).
 

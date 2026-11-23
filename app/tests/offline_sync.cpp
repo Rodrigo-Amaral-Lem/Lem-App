@@ -62,6 +62,44 @@ public slots:
     void view(const QUrl &) {} // Test PDFs must never launch an external viewer.
 };
 struct LemReviewTest {
+    static bool preservesDeletedReport(const QString &root) {
+        Lem client(root);
+        client.demo();
+        const auto id = client.m_current["id"].toString();
+        const auto observation = QStringLiteral("Medição revista na Âncora / unsent evidence");
+        client.answer("FIN.03", "", observation);
+        const auto source = root + "/local.png";
+        QImage image(64, 32, QImage::Format_RGB32);
+        image.fill(Qt::green);
+        if (!image.save(source)) return false;
+        client.attach("FIN.03", QUrl::fromLocalFile(source));
+        if (!until([&] { return !client.attachingFiles() && !client.saving(); })) return false;
+        auto original = client.m_current;
+        original["revision"] = 1;
+        original["_order_item"] = "missing-visit";
+        if (!client.checkpointReport(original, "Could not save fixture") ||
+            original["photos"].toArray().size() != 1) return false;
+        const auto photo = original["photos"].toArray().first().toObject();
+        const auto path = QUrl(photo["path"].toString()).toLocalFile();
+        client.m_syncReport = id;
+        client.syncFailed(410, R"({"detail":"Report apagado"})");
+        const auto recoveryId = client.m_current["id"].toString();
+        if (recoveryId == id || client.openReport({}, id) ||
+            !client.m_deletedReports.contains(id) || !QFileInfo::exists(path)) return false;
+
+        Lem restored(root);
+        restored.m_server = client.m_server;
+        restored.m_user = client.m_user;
+        restored.loadUser();
+        if (restored.localRecoveryReports().size() != 1 ||
+            !restored.prepareLocalRecovery(recoveryId) || !restored.openReport({}, recoveryId)) return false;
+        const auto recovered = restored.m_current;
+        restored.answer("FIN.03", "", "This recovery copy is read-only");
+        return restored.m_current["payload"] == original["payload"] &&
+               recovered["photos"] == original["photos"] && recovered["_deleted_source_id"] == id &&
+               restored.prepareExport("recovery") && !restored.openReport({}, id);
+    }
+
     static QJsonObject persistedReport(const Lem &client, const QString &id) {
         return read(client.cacheDir() + "/cache.json")["reports"].toObject()[id].toObject();
     }
@@ -390,7 +428,7 @@ int main(int argc, char **argv) {
     QDesktopServices::setUrlHandler("file", &exportViewer, "view");
     // These integration fixtures only contact the disposable loopback server.
     QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
-    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.9.0"));
+    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.9.1"));
     app.setOrganizationName("Lem-Offline-Test");
     app.setApplicationName("Lem Offline Test");
     const auto args = app.arguments();
@@ -412,6 +450,8 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (args.size() == 1) {
+        CHECK(LemReviewTest::preservesDeletedReport(temp.filePath("server-deleted")));
+        qInfo() << "PASS: deleted report tombstone and read-only local evidence survive restart";
         const auto profile = temp.filePath("shared-profile");
         const QStringList second{"--second-profile-writer", profile};
         QString firstId;

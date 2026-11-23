@@ -118,6 +118,29 @@ ScrollView {
             }
         }
         ColumnLayout {
+            id: recoveryList
+            Layout.fillWidth: true
+            visible: page.mode === "list" && reports.length > 0
+            readonly property var reports: controller.localRecoveryReports || []
+            Label {
+                text: "Cópias locais para recuperação"
+                font.bold: true
+            }
+            Repeater {
+                model: recoveryList.reports
+                delegate: OrderButton {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    text: modelData.identifier
+                    enabled: !controller.busy
+                    onClicked: {
+                        if (controller.prepareLocalRecovery(modelData.id))
+                            page.openReport(modelData.charger_id, modelData.id)
+                    }
+                }
+            }
+        }
+        ColumnLayout {
             Layout.fillWidth: true
             visible: page.mode === "detail" && !!page.selected
             readonly property var order: page.selected || {items: [], technicians: []}
@@ -185,8 +208,10 @@ ScrollView {
                     }
                     OrderButton {
                         visible: taskRow.modelData.state === "closed" || (!page.admin && taskRow.modelData.state === "pending")
-                        enabled: (detail.order.started || taskRow.modelData.state === "closed") && taskRow.modelData.available && !controller.busy
-                        text: taskRow.modelData.state === "closed" ? "Consultar relatório" : taskRow.peerOnly ? "Consultar rascunho" : "Abrir intervenção"
+                        enabled: (detail.order.started || taskRow.modelData.state === "closed") &&
+                            (taskRow.modelData.available || taskRow.modelData.drafts.length > 0) && !controller.busy
+                        text: taskRow.modelData.state === "closed" ? "Consultar relatório" :
+                            taskRow.peerOnly || !taskRow.modelData.available ? "Consultar rascunho" : "Abrir intervenção"
                         onClicked: {
                             const rid = controller.prepareOrderReport(detail.order.id, taskRow.modelData.id)
                             if (rid !== "!") page.openReport(taskRow.modelData.target, rid)

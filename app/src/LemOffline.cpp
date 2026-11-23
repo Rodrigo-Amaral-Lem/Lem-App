@@ -38,7 +38,8 @@ bool orderHasNotStarted(const QString &message) {
 }
 
 bool workGrantDenied(const QString &message) {
-    return message == QStringLiteral("Contrato ou tarefa não atribuídos para esta operação.");
+    return message == QStringLiteral("Contrato ou tarefa não atribuídos para esta operação.") ||
+           message == QStringLiteral("Indique a tarefa de origem para enviar este rascunho.");
 }
 
 void deferUntilOrderStarts(QJsonObject &report, qint64 retryAfter) {
@@ -358,8 +359,7 @@ void Lem::startSync(bool manual) {
     syncNext(0);
 }
 
-// Classify failure before choosing recovery: 410 removes a deleted report; 403/409
-// protect conflicting work; 422 needs attention; 401 needs login; other failures retry.
+// Confirmed deletion tombstones the server ID. Conflicts and unsent work stay local.
 void Lem::syncFailed(int code, QString message) {
     // Own the JSON value: operator[] on a temporary object leaves a dangling ref.
     const auto response = QJsonDocument::fromJson(message.toUtf8()).object();
@@ -383,9 +383,9 @@ void Lem::syncFailed(int code, QString message) {
     if (code == 410) {
         const auto id = m_syncReport;
         const auto replacement = detail.toObject()["replacement_id"].toString();
-        if (!replacement.isEmpty() ? receiveReplacement(id, replacement) : forgetReport(id)) {
+        if (!replacement.isEmpty() ? receiveReplacement(id, replacement) : forgetReport(id, true)) {
             continueAfterRejection(replacement.isEmpty()
-                ? "Este report foi apagado no servidor; cópia local removida."
+                ? "Este report foi apagado no servidor. Alterações locais pendentes conservadas."
                 : "Report substituído; alterações locais pendentes conservadas.");
         } else {
             m_syncing = false;
@@ -459,6 +459,8 @@ void Lem::syncFailed(int code, QString message) {
             persist();
         }
         m_syncConflicts.insert(m_syncReport);
+        if (authenticated() && (code == 403 || code == 409))
+            refreshOrders();
         m_syncState = "Envio precisa de atenção · dados locais conservados";
         continueAfterRejection(m_syncState + ": " + message);
     } else if (code == 401) {
@@ -583,10 +585,10 @@ bool Lem::mergeSync(QJsonObject sent, bool complete, QJsonValue serverPhotos) {
     // A correction must never change the catalogue while it is only staged.
     // Apply the server's live identity after commit (including lost-ACK recovery),
     // not the historical answers, which may precede another intervention.
-    if (sent["status"] == "closed" && (correction.isEmpty() ||
-        (committedCorrection && sent.contains("station_update"))))
-        applyClosedIdentity(sent);
     m_reports[id] = latest;
+    if (sent["status"] == "closed" && sent.contains("station_update") &&
+        (correction.isEmpty() || committedCorrection))
+        applyClosedIdentity(sent);
     if (m_current.value("id").toString() == id)
         m_current = latest;
     if (!persist()) {
@@ -1036,10 +1038,13 @@ void Lem::applyStationRecords(const QJsonArray &incoming, bool complete, QJsonAr
             latest.insert(id, row);
     }
     if (!latest.isEmpty()) {
-        const auto keepNewer = [&latest](const QJsonObject &row) {
-            auto current = latest.find(row["id"].toString());
-            if (current != latest.end() && row["details"].isObject() &&
-                row["updated"].toString() >= current->value("updated").toString())
+        const auto keepNewer = [this, &latest](const QJsonObject &row) {
+            const auto id = row["id"].toString();
+            auto current = latest.find(id);
+            if (current == latest.end() || !row["details"].isObject()) return;
+            const auto revision = row["updated"].toString();
+            const auto received = current->value("updated").toString();
+            if (revision > received || (revision == received && hasPendingStationClosure(id)))
                 current.value() = row;
         };
         for (const auto &value : m_stations) keepNewer(value.toObject());
@@ -1183,7 +1188,7 @@ void Lem::refreshCatalogue(QString id, bool force) {
                     if (m_reports.contains(removed.toString()))
                         if (!(row.toObject()["report_replacements"].toObject().contains(removed.toString()) ?
                               receiveReplacement(removed.toString(), row.toObject()["report_replacements"].toObject()[removed.toString()].toString()) :
-                              forgetReport(removed.toString()))) {
+                              forgetReport(removed.toString(), true))) {
                             m_catalogueLoading = false;
                             m_refreshing = false;
                             emit changed();
@@ -1250,7 +1255,7 @@ void Lem::refreshReport() {
             m_busy = false;
             if (code == 410) {
                 const auto replacement = QJsonDocument::fromJson(message.toUtf8()).object()["detail"].toObject()["replacement_id"].toString();
-                if (!replacement.isEmpty() ? receiveReplacement(id, replacement) : forgetReport(id))
+                if (!replacement.isEmpty() ? receiveReplacement(id, replacement) : forgetReport(id, true))
                     status(replacement.isEmpty() ? "Report apagado no servidor; cópia local removida." : "Report substituído por uma correção do administrador.");
             } else
                 status("Não foi possível atualizar: " + message);

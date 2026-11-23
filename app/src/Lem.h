@@ -57,6 +57,7 @@ class Lem : public QObject {
     Q_PROPERTY(QVariantMap user READ user NOTIFY changed)
     Q_PROPERTY(QVariantList users READ users NOTIFY changed)
     Q_PROPERTY(QVariantMap localOrderDrafts READ localOrderDrafts NOTIFY localOrderDraftsChanged)
+    Q_PROPERTY(QVariantList localRecoveryReports READ localRecoveryReports NOTIFY changed)
     Q_PROPERTY(bool currentOrderReadOnly READ currentOrderReadOnly NOTIFY changed)
     Q_PROPERTY(QVariantList workOrders READ workOrders NOTIFY workOrderListChanged)
     Q_PROPERTY(QVariantList workCandidates READ workCandidates NOTIFY workCandidatesChanged)
@@ -196,6 +197,7 @@ class Lem : public QObject {
         return m_root;
     }
     QVariantMap localOrderDrafts() const { return m_localOrderDrafts; }
+    QVariantList localRecoveryReports() const;
     bool currentOrderReadOnly() const { return isOrderRecovery(m_current); }
     QVariantList workOrders() const { return m_orders.toVariantList(); }
     QVariantList workCandidates() const { return m_orderCandidates.toVariantList(); }
@@ -209,6 +211,7 @@ class Lem : public QObject {
     Q_INVOKABLE void followOrder(QString id, bool follow);
     Q_INVOKABLE void invalidateOrderItem(QString id, QString item, int revision, QString note);
     Q_INVOKABLE QString prepareOrderReport(QString orderId, QString itemId, QString requestedReport = {});
+    Q_INVOKABLE bool prepareLocalRecovery(QString reportId);
     // Session/catalogue actions exposed to QML.
     Q_INVOKABLE QString connectorText(QString text) const { return Checklist::connectorText(text); }
     Q_INVOKABLE void demo();
@@ -385,7 +388,7 @@ class Lem : public QObject {
     quint64 m_transferSerial = 0;
     QTimer m_operationNotify;
     int m_syncCompleted = 0, m_syncTotal = 0;
-    bool forgetReport(QString reportId);
+    bool forgetReport(QString reportId, bool preservePending = false);
     // Local tombstones prevent stale journal replay after permanent deletion.
     QSet<QString> m_deletedReports;
     bool attachToReport(QString reportId, QString checkpoint, QUrl file);
@@ -454,6 +457,7 @@ class Lem : public QObject {
     QHash<QString, FollowedReport> m_followedReports;
     QVariantMap m_localOrderDrafts;
     bool isOrderRecovery(const QJsonObject &report) const;
+    bool isLocalRecovery(const QJsonObject &report) const;
     QSet<QString> m_attemptedDownloads;
     bool m_orderDownload = false;
     void resetOrders();
@@ -468,6 +472,7 @@ class Lem : public QObject {
     void refreshCatalogue(QString id, bool force = false);
     void resetStationCatalogue();
     static QJsonArray currentPcveRows(QJsonArray rows);
+    bool hasPendingStationClosure(const QString &stationId) const;
     void exchangeContractNotes(const QString &contractId, const QString &chargerId, const QJsonObject &edit);
     void applyStationRecords(const QJsonArray &records, bool complete = false, QJsonArray *memberships = nullptr);
     bool canManageStations() const;

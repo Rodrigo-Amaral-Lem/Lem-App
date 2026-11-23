@@ -36,6 +36,18 @@ QJsonObject Lem::stationIdentity(const QJsonObject &details) {
             {"serial", details["serial"].toString()}};
 }
 
+bool Lem::hasPendingStationClosure(const QString &stationId) const {
+    if (stationId.isEmpty()) return false;
+    for (const auto &value : m_reports) {
+        const auto report = value.toObject();
+        if (report["dirty"].toBool() && report["status"] == "closed" &&
+            !report["_conflict"].toBool() && report["correction"].toObject().isEmpty() &&
+            report["snapshot"].toObject()["charger"].toObject()["station_id"] == stationId)
+            return true;
+    }
+    return false;
+}
+
 // Update cached catalogue projections, never the frozen snapshots of other reports.
 void Lem::applyClosedIdentity(const QJsonObject &report) {
     if (report["status"] != "closed") return;

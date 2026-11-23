@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "Lem.h"
+#include "ReportNaming.h"
 #include "SafeStorage.h"
 #include <QDateTime>
 #include <QFileInfo>
@@ -27,29 +28,6 @@ QJsonArray mapOrderStations(QJsonArray orders, const std::function<void(QJsonObj
     return orders;
 }
 
-QJsonArray retainStationDetails(QJsonArray orders, const QJsonArray &cachedOrders) {
-    QHash<QString, QJsonObject> cachedStations;
-    for (const auto &order : cachedOrders) {
-        for (const auto &entry : order.toObject()["items"].toArray()) {
-            const auto item = entry.toObject();
-            const auto id = item["station_id"].toString();
-            const auto revision = item["station_updated"].toString();
-            if (!id.isEmpty() && !revision.isEmpty() && item["details"].isObject() &&
-                revision > cachedStations.value(id).value("station_updated").toString())
-                cachedStations.insert(id, item);
-        }
-    }
-    return mapOrderStations(orders, [&cachedStations](QJsonObject &item) {
-        const auto revision = item.value("station_updated").toString();
-        const auto cached = cachedStations.value(item.value("station_id").toString());
-        // The same server revision can still carry an identity corrected
-        // locally while its closing report waits for synchronization.
-        if (!revision.isEmpty() && cached.value("station_updated").toString() >= revision) {
-            item["details"] = cached["details"];
-            item["station_updated"] = cached["station_updated"];
-        }
-    });
-}
 } // namespace
 
 void Lem::updateWorkOrderStations(const std::function<void(QJsonObject &)> &update) {
@@ -115,10 +93,37 @@ void Lem::refreshOrders(bool planner) {
         const auto data = QJsonDocument::fromJson(bytes).object();
         if (!data["orders"].isArray() || !data["today"].isString()) return;
         m_orderReadError.clear();
-        const auto orders = retainStationDetails(retainedOrders(data["orders"].toArray()), m_orders);
+        const auto orders = retainedOrders(data["orders"].toArray());
+        QJsonArray stations;
+        for (const auto &order : orders)
+            for (const auto &value : order.toObject()["items"].toArray()) {
+                const auto item = value.toObject();
+                if (!item["station_updated"].toString().isEmpty())
+                    stations.append(QJsonObject{{"id", item["station_id"]}, {"external_id", item["external_id"]},
+                        {"details", item["details"]}, {"updated", item["station_updated"]}});
+            }
+        const auto before = m_orders;
+        applyStationRecords(stations);
+        // The canonical merge has brought older cached order rows up to date.
+        // Keep those details when the new order listing itself was already stale.
+        QHash<QString, QJsonObject> cachedStations;
+        for (const auto &order : m_orders)
+            for (const auto &value : order.toObject()["items"].toArray()) {
+                const auto item = value.toObject();
+                if (!item["station_updated"].toString().isEmpty())
+                    cachedStations.insert(item["station_id"].toString(), item);
+            }
+        const auto reconciled = mapOrderStations(orders, [&cachedStations](QJsonObject &item) {
+            const auto cached = cachedStations.value(item["station_id"].toString());
+            if (!item["station_updated"].toString().isEmpty() &&
+                cached["station_updated"].toString() >= item["station_updated"].toString()) {
+                item["details"] = cached["details"];
+                item["station_updated"] = cached["station_updated"];
+            }
+        });
         const auto day = data["today"].toString();
-        if (m_orders != orders || day != m_planningDay) {
-            m_orders = orders;
+        if (before != reconciled || day != m_planningDay) {
+            m_orders = reconciled;
             for (auto it = m_reports.constBegin(); it != m_reports.constEnd(); ++it)
                 if (it.value().toObject()["_conflict_kind"] == "order_scope") m_syncConflicts.remove(it.key());
             scheduleSync(1500);
@@ -251,6 +256,53 @@ bool Lem::canBindInterventionDraft(const QJsonObject &report) const {
            (!report["_conflict"].toBool() || report["_conflict_kind"] == "order_scope");
 }
 
+bool Lem::isLocalRecovery(const QJsonObject &report) const {
+    if (m_user.isEmpty() || report["owner_id"] != m_user["id"] || !report["dirty"].toBool())
+        return false;
+    if (report["_conflict"].toBool() || report.contains("_contract_unavailable"))
+        return true;
+    const auto itemId = report["_order_item"].toString();
+    if (!itemId.isEmpty()) {
+        for (const auto &order : m_orders)
+            for (const auto &entry : order.toObject()["items"].toArray()) {
+                const auto item = entry.toObject();
+                if (item["id"] == itemId && item["state"] != "cancelled")
+                    return false;
+            }
+        return true;
+    }
+    for (const auto &entry : m_contracts) {
+        const auto contract = entry.toObject();
+        if (contract["id"] == report["contract_id"] && !contract["order_only"].toBool())
+            return false;
+    }
+    return !report["contract_id"].toString().isEmpty();
+}
+
+QVariantList Lem::localRecoveryReports() const {
+    QVariantList rows;
+    for (const auto &entry : m_reports) {
+        const auto report = entry.toObject();
+        if (isLocalRecovery(report))
+            rows.append(QVariantMap{{"id", report["id"].toVariant()},
+                                    {"charger_id", report["charger_id"].toVariant()},
+                                    {"identifier", ReportNaming::identifier(report)}});
+    }
+    return rows;
+}
+
+bool Lem::prepareLocalRecovery(QString reportId) {
+    auto report = m_reports.value(reportId).toObject();
+    if (m_busy || attachingFiles() || !m_qveCopyTarget.isEmpty() || !isLocalRecovery(report))
+        return false;
+    if (report["_conflict"].toBool()) return true;
+    report["_conflict"] = true;
+    report["_conflict_kind"] = "order_scope";
+    report["_conflict_reason"] = "A tarefa ou o contrato deixou de estar disponível neste dispositivo.";
+    report["_edit_seq"] = report["_edit_seq"].toDouble() + 1;
+    return checkpointReport(report, "Não foi possível preparar a consulta. O rascunho foi conservado.");
+}
+
 // Prepare the same report editor as the contract catalogue, including local unsent drafts.
 // An empty return starts a draft; "!" means that navigation must stay in the order.
 QString Lem::prepareOrderReport(QString orderId, QString itemId, QString requestedReport) {
@@ -261,11 +313,10 @@ QString Lem::prepareOrderReport(QString orderId, QString itemId, QString request
         for (const auto &entry : order["items"].toArray()) {
             const auto item = entry.toObject();
             if (item["id"] != itemId || item["state"] == "cancelled") continue;
-            if (requestedReport.isEmpty() && (!item["available"].toBool() || item["state"] == "invalid")) continue;
+            if (requestedReport.isEmpty() && item["state"] == "invalid") continue;
             const auto cid = item["contract_id"].toString(), target = item["target"].toString();
             bool known = false;
             for (const auto &c : m_contracts) if (c.toObject()["id"] == cid) known = true;
-            if (!known) { refresh(); return "!"; }
             const auto drafts = item["drafts"].toArray();
             if (!requestedReport.isEmpty()) {
                 bool offered = false;
@@ -273,10 +324,23 @@ QString Lem::prepareOrderReport(QString orderId, QString itemId, QString request
                     if (draft.toObject()["id"] == requestedReport) offered = true;
                 const auto local = m_reports.value(requestedReport).toObject();
                 const bool ownLocal = local["owner_id"] == m_user["id"] && local["dirty"].toBool() &&
+                    !local.contains("_deleted_source_id") &&
                     local["charger_id"] == target && local["_order_item"] == itemId;
                 if (!offered && !ownLocal) return "!";
             } else if (item["state"] == "pending" && !order["started"].toBool()) return "!";
-            selectContract(cid);
+            const auto closed = item["available"].toBool() ? item["report_id"].toString() : QString{};
+            const bool existing = !requestedReport.isEmpty() || !closed.isEmpty() || !drafts.isEmpty();
+            if (!existing && (!known || !item["available"].toBool())) return "!";
+            if (known) {
+                selectContract(cid);
+            } else if (m_contract != cid) {
+                // Resolved visits grant access to the advertised report even
+                // after the contract drops out of the crew's catalogue.
+                m_contract = cid;
+                m_chargers = {};
+                m_current = {};
+                m_template = {};
+            }
             if (m_contract != cid) return "!";
             bool listed = false;
             for (const auto &row : m_chargers) if (row.toObject()["id"] == target) listed = true;
@@ -285,7 +349,7 @@ QString Lem::prepareOrderReport(QString orderId, QString itemId, QString request
                 {"external_id",item["external_id"]},{"details",item["details"]},
                 {"contract_notes",item["contract_notes"]}, {"notes_revision",item["notes_revision"]}});
             if (!requestedReport.isEmpty()) return requestedReport;
-            if (!item["report_id"].toString().isEmpty()) return item["report_id"].toString();
+            if (!closed.isEmpty()) return closed;
             if (!drafts.isEmpty()) {
                 for (const auto &draft : drafts)
                     if (draft.toObject()["owner_id"] == m_user["id"]) return draft.toObject()["id"].toString();
@@ -294,6 +358,7 @@ QString Lem::prepareOrderReport(QString orderId, QString itemId, QString request
             for (auto it = m_reports.begin(); it != m_reports.end(); ++it) {
                 const auto r = it.value().toObject();
                 if (r["_order_item"] == itemId && r["charger_id"] == target && r["owner_id"] == m_user["id"] &&
+                    !r.contains("_deleted_source_id") &&
                     (r["status"] == "draft" || r["dirty"].toBool())) return it.key();
             }
             // Opening this active visit is the technician's choice to continue

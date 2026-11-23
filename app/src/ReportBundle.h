@@ -110,6 +110,8 @@ inline bool archive(const QJsonObject &report, QIODevice &output, QString *error
     if (recovery) {
         manifest["purpose"] = "work_order_recovery";
         manifest["work_item_id"] = report["_order_item"];
+        if (report.contains("_deleted_source_id"))
+            manifest["source_report_id"] = report["_deleted_source_id"];
         manifest["pending_removals"] = report["deleted_photos"].toArray();
         QJsonArray serverOnly;
         for (const auto &entry : report["photos"].toArray()) {

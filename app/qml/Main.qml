@@ -1394,7 +1394,8 @@ ApplicationWindow {
     readonly property var importPreviewList: contractExcelPanel.previewList
     property string photoItem: ""
     property string exportKind: "pdf"
-    property bool canDeleteReport: !!win.reportData.id && (lem.user.role === "admin" || (!lem.currentOrderReadOnly && win.reportData.status === "draft" && win.reportData.owner_id === lem.user.id))
+    property bool canDeleteReport: !!win.reportData.id && !win.reportData._deleted_source_id &&
+        (lem.user.role === "admin" || (!lem.currentOrderReadOnly && win.reportData.status === "draft" && win.reportData.owner_id === lem.user.id))
     // Presentation guard for protected/closed/other-owned reports. Server checks are authoritative.
     readonly property bool correctingReport: !!win.reportData.correction && win.reportData.correction.state === "editing"
     readonly property bool correctionPermitted: !correctingReport || (!!lem.desktopCorrections && lem.user.role === "admin" && win.reportData.correction.editor_id === lem.user.id)
@@ -5428,7 +5429,7 @@ ApplicationWindow {
                             UiButton {
                                 objectName: "exportOrderRecovery"
                                 Layout.fillWidth: true
-                                visible: !!win.reportData._order_item
+                                visible: !!win.reportData.dirty && win.reportData.owner_id === lem.user.id
                                 text: "Guardar cópia para entrega"
                                 onClicked: {
                                     if (!lem.prepareExport("recovery")) return
@@ -5440,6 +5441,7 @@ ApplicationWindow {
                             UiButton {
                                 objectName: "viewConflictServer"
                                 Layout.fillWidth: true
+                                visible: !win.reportData._deleted_source_id
                                 text: "Consultar versão do servidor"
                                 enabled: !win.reportNetworkActivity
                                 onClicked: {
