@@ -14,14 +14,14 @@
 #define CHECK(x) do { if (!(x)) {qCritical()<<"FAIL"<<__LINE__<<#x; return false;} } while(false)
 struct LemReviewTest {
     static bool cachedPcveFields() {
-        const QJsonObject legacy{{"address", "CALIÝOS, EstaÝão"}, {"serial", "Ý001"},
+        const QJsonObject legacy{{"address", "MÝA Charging / Ação na Âncora"}, {"serial", "Ý001"},
                                  {"location", "Local antigo"}, {"site_id", "Outro"},
                                  {"extra.Nome do local", "Legado"}, {"source", QJsonObject{{"Morada", "Antiga"}}}};
         const QJsonObject row{{"external_id", "ID-Ý01"}, {"details", legacy}};
         const auto cleaned = Lem::currentPcveRows(QJsonArray{row}).at(0).toObject();
         const auto details = cleaned["details"].toObject();
         CHECK(cleaned["external_id"] == "ID-Ý01" && details["serial"] == "Ý001");
-        CHECK(details["address"] == "CALIÇOS, Estação" && details.size() == 2);
+        CHECK(details["address"] == legacy["address"] && details.size() == 2);
         return true;
     }
 

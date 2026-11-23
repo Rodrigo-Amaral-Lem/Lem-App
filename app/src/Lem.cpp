@@ -1346,8 +1346,10 @@ bool Lem::getPhotos(QJsonObject report, const QString &expectedId) {
         report["_order_item"] = local["_order_item"];
     m_syncConflicts.remove(report["id"].toString());
     // Metadata first; remote originals are downloaded only on explicit demand.
-    report["offline_photos"] =
-        m_reports.value(report["id"].toString()).toObject()["offline_photos"].toBool();
+    const auto local = m_reports.value(expectedId).toObject();
+    report["offline_photos"] = local["offline_photos"].toBool();
+    if (local["_follow_photos_released"].toBool())
+        report["_follow_photos_released"] = true;
     report = receivedPhotoPaths(report);
     m_current = withContractPresentation(Checklist::correctedDraft(report));
     m_template = m_current["template"].toObject();

@@ -457,6 +457,7 @@ class Lem : public QObject {
     QHash<QString, FollowedReport> m_followedReports;
     QVariantMap m_localOrderDrafts;
     bool isOrderRecovery(const QJsonObject &report) const;
+    bool hasOtherClosedInterventionReport(const QJsonObject &report) const;
     bool isLocalRecovery(const QJsonObject &report) const;
     QSet<QString> m_attemptedDownloads;
     bool m_orderDownload = false;

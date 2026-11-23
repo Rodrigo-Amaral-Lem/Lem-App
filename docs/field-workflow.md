@@ -20,7 +20,7 @@ Importing a contract workbook creates or updates the central station and links t
 contract. Every linked contract uses the same station details. On desktop, administrators can use
 **Importar Excel** from **PCVEs** to create or update station records independently. Open a
 station and choose **Editar ficha** to change its current fields. The PCVE ID is permanent.
-**Relatórios associados** lists reports in contracts you can access and opens the selected report. Back returns to the same PCVE and scroll position. Offline, it shows reports saved on this device.
+**Relatórios associados** lists the reports you can read through direct contract assignments or work-order visits. Back returns to the same PCVE and scroll position. Offline, it shows reports saved on this device.
 Select a contract and open **Gestão → Contratos → Gerir IDs do contrato**. Use **Adicionar ou atualizar por Excel** to add memberships and update the central PCVE records shared by every linked contract. On desktop, **Editar** opens the same central record. **Retirar** removes the association and preserves existing reports. Importing the ID again restores the association.
 A closed report on the contract equipment card shows its local closing day, month and hour. For example, `30_03_16` means 30 March at 16:00–16:59.
 Use the postal address and coordinates for navigation. The site-name field is omitted.
@@ -131,6 +131,14 @@ Use manual synchronization when ready to send deferred evidence. A lost network 
 retried using the report's durable revision/fingerprint data; do not recreate or delete the report
 just because a request failed.
 
+If a PCVE is temporarily withdrawn from its contract, **Recuperar rascunho local** in the order
+opens the draft kept on the device. Once the administrator restores the membership, synchronize
+to retry the original visit. A different or completed visit still requires separate recovery.
+
+When another dispatcher saves an order during editing, choose **Rever alterações**. Fields changed
+on one side are combined. For conflicting fields, choose the displayed server value or keep your
+own value before saving against the current revision.
+
 If ownership, access or revisions conflict, inspect the local/server comparison. Keep protected work
 or create an independent draft before choosing a resolution. Ownership transfer belongs to
 administrators and retains history. A permanently deleted server report is not restored by an old
@@ -145,6 +153,10 @@ every original image/video is present.
 evidence files only from fully acknowledged reports that are eligible for cleanup, releases the
 offline pin, and does not delete server data. Pending, conflicted or unconfirmed work keeps its
 files. Gallery originals remain untouched.
+
+On desktop, cleanup and **Permitir limpeza destas fotografias** suppress automatic evidence
+downloads for that report from followed orders. **Descarregar todas as evidências** restores offline
+retention. Administrators can choose **Deixar de seguir** after an order is completed.
 
 PDF and ZIP exports use the device when the report is closed and all original evidence is local,
 including before synchronization. Otherwise the app uses the server, requiring a session, network

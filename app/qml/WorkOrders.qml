@@ -34,6 +34,12 @@ ScrollView {
     property string selectedId: ""
     property string mode: "list"
     property var plan: ({})
+    property var editBase: null
+    property var planConflicts: []
+    readonly property bool needsPlanReview: mode === "edit" && !!editBase &&
+        !!selected && selected.revision !== editBase.revision
+    readonly property bool planUnavailable: mode === "edit" && !!editBase &&
+        (!selected || !!selected.cancelled_at || !!selected.completed)
     property var technicians: []
     property var targets: []
     property string cancelId: ""
@@ -45,7 +51,7 @@ ScrollView {
     property string searchTerm: ""
     readonly property var candidates: controller.workCandidates || []
     readonly property string owner: controller.user.id || ""
-    onOwnerChanged: { mode = "list"; selectedId = ""; plan = {}; targets = []; technicians = []; invalidId = ""; expanded = ""; }
+    onOwnerChanged: { mode = "list"; selectedId = ""; plan = {}; editBase = null; planConflicts = []; targets = []; technicians = []; invalidId = ""; expanded = ""; }
     onOrdersChanged: if (mode === "detail" && selectedId && !orders.some(o => o.id === selectedId)) {
         selectedId = "";
         mode = "list";
@@ -61,12 +67,59 @@ ScrollView {
     function edit(order) {
         controller.refreshOrders(true)
         plan = order ? {id: order.id, revision: order.revision} : {id: controller.newOrderId(), revision: 0}
-        technicians = order ? order.technicians.filter(t => !t.role || t.role === "tech").map(t => t.id) : []
+        editBase = order
+        planConflicts = []
+        technicians = order ? technicianIds(order) : []
         targets = order ? order.items.slice() : []
         start.text = order ? order.start : controller.planningDay
         due.text = order ? order.due : controller.planningDay
         search.text = ""
         mode = "edit"
+    }
+    function technicianIds(order) {
+        return order.technicians.filter(t => !t.role || t.role === "tech").map(t => t.id).sort()
+    }
+    function reviewPlan() {
+        const current = selected
+        if (!needsPlanReview || planUnavailable || planConflicts.length) return
+
+        // Compare each editable field with the revision the dispatcher opened.
+        // Disjoint edits combine automatically. Overlapping edits need a choice.
+        const ids = rows => rows.map(row => row.target)
+        const fields = [
+            {key: "start", label: "Data de início", base: editBase.start, local: start.text, remote: current.start, value: current.start, display: current.start},
+            {key: "due", label: "Prazo", base: editBase.due, local: due.text, remote: current.due, value: current.due, display: current.due},
+            {key: "technicians", label: "Técnicos", base: technicianIds(editBase), local: technicians.slice().sort(),
+                remote: technicianIds(current), value: technicianIds(current), display: current.technicians.map(t => t.name).join(", ")},
+            {key: "targets", label: "Sequência de trabalho", base: ids(editBase.items), local: ids(targets),
+                remote: ids(current.items), value: current.items, display: current.items.map(taskLabel).join("\n")}
+        ]
+        const conflicts = []
+        for (const field of fields) {
+            const before = JSON.stringify(field.base)
+            const local = JSON.stringify(field.local)
+            const remote = JSON.stringify(field.remote)
+            if (local === before)
+                usePlanValue(field)
+            else if (remote !== before && local !== remote)
+                conflicts.push(field)
+        }
+        targets = targets.map(row => current.items.find(item => item.target === row.target) || row)
+        planConflicts = conflicts
+        editBase = current
+        plan = {id: current.id, revision: current.revision}
+    }
+    function usePlanValue(field) {
+        switch (field.key) {
+        case "start": start.text = field.value; break
+        case "due": due.text = field.value; break
+        case "technicians": technicians = field.value; break
+        case "targets": targets = field.value.slice(); break
+        }
+    }
+    function resolvePlanConflict(field, useCurrent) {
+        if (useCurrent) usePlanValue(field)
+        planConflicts = planConflicts.filter(conflict => conflict.key !== field.key)
     }
     function move(index, step) {
         let rows = targets.slice()
@@ -149,8 +202,8 @@ ScrollView {
             Label { Layout.fillWidth: true; visible: !!detail.order.completed; text: "Fecho · " + page.localTime(detail.order.completed); wrapMode: Text.Wrap }
             Label { Layout.fillWidth: true; visible: !!detail.order.cancelled_at; text: "Cancelamento · " + page.localTime(detail.order.cancelled_at); wrapMode: Text.Wrap }
             RowLayout {
-                visible: page.admin && !detail.order.completed && !detail.order.cancelled_at
-                OrderButton { text: "Editar ordem"; enabled: controller.authenticated; onClicked: page.edit(detail.order) }
+                visible: page.admin && !detail.order.cancelled_at && (!detail.order.completed || detail.order.following)
+                OrderButton { text: "Editar ordem"; visible: !detail.order.completed; enabled: controller.authenticated; onClicked: page.edit(detail.order) }
                 OrderButton { text: detail.order.following ? "Deixar de seguir" : "Seguir"; enabled: controller.authenticated && !controller.savingOrder; onClicked: controller.followOrder(detail.order.id, !detail.order.following) }
             }
             OrderButton {
@@ -179,7 +232,9 @@ ScrollView {
                         return drafts[modelData.id] || unbound || null
                     }
                     readonly property bool localRecovery: !!localDraft && localDraft.item === modelData.id &&
-                        (modelData.state === "closed" || modelData.state === "invalid" || !!peerDraft) && localDraft.id !== modelData.report_id &&
+                        (modelData.state === "closed" || modelData.state === "invalid" ||
+                            (modelData.state === "pending" && !modelData.available) || !!peerDraft) &&
+                        localDraft.id !== modelData.report_id &&
                         !modelData.drafts.some(d => d.id === localDraft.id)
                     readonly property var peerDraft: modelData.drafts.find(d => d.owner_id !== page.owner)
                     readonly property bool peerOnly: !!peerDraft && !modelData.drafts.some(d => d.owner_id === page.owner)
@@ -238,7 +293,7 @@ ScrollView {
                             }
                         }
                     }
-                    OrderButton { visible: !page.admin && taskRow.modelData.state === "pending" && detail.order.started; enabled: controller.authenticated && !controller.savingOrder; text: "Assinalar impedimento"; onClicked: { page.invalidNote = ""; page.invalidId = taskRow.modelData.id; reason.forceActiveFocus(); } }
+                    OrderButton { visible: !page.admin && taskRow.modelData.state === "pending" && detail.order.started; enabled: taskRow.modelData.available && controller.authenticated && !controller.savingOrder; text: "Assinalar impedimento"; onClicked: { page.invalidNote = ""; page.invalidId = taskRow.modelData.id; reason.forceActiveFocus(); } }
                     TextArea {
                         id: reason
                         Layout.fillWidth: true
@@ -252,7 +307,7 @@ ScrollView {
                     RowLayout {
                         visible: reason.visible
                         OrderButton { text: "Cancelar"; onClicked: page.invalidId = "" }
-                        OrderButton { text: "Marcar inválida"; enabled: !controller.savingOrder && reason.text.trim().length > 0 && reason.text.length <= 4000; onClicked: controller.invalidateOrderItem(detail.order.id, taskRow.modelData.id, detail.order.revision, reason.text) }
+                        OrderButton { text: "Marcar inválida"; enabled: taskRow.modelData.available && controller.authenticated && !controller.savingOrder && reason.text.trim().length > 0 && reason.text.length <= 4000; onClicked: controller.invalidateOrderItem(detail.order.id, taskRow.modelData.id, detail.order.revision, reason.text) }
                     }
                 }
             }
@@ -260,6 +315,34 @@ ScrollView {
         ColumnLayout {
             visible: page.mode === "edit" && page.admin
             Layout.fillWidth: true
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                visible: page.planUnavailable || page.needsPlanReview
+                text: page.planUnavailable ? "A ordem foi concluída, cancelada ou deixou de estar disponível." :
+                    "A ordem mudou no servidor. Reveja as alterações antes de guardar."
+            }
+            OrderButton {
+                text: "Rever alterações"
+                visible: page.needsPlanReview && !page.planUnavailable && !page.planConflicts.length
+                enabled: !controller.savingOrder
+                onClicked: page.reviewPlan()
+            }
+            Repeater {
+                model: page.planConflicts
+                delegate: ColumnLayout {
+                    id: conflict
+                    required property var modelData
+                    Layout.fillWidth: true
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: conflict.modelData.label + " · valor atual no servidor\n" + conflict.modelData.display
+                    }
+                    OrderButton { text: "Usar valor do servidor"; onClicked: page.resolvePlanConflict(conflict.modelData, true) }
+                    OrderButton { text: "Manter o meu valor"; onClicked: page.resolvePlanConflict(conflict.modelData, false) }
+                }
+            }
             Label { text: "Início e prazo (AAAA-MM-DD)"; font.bold: true }
             RowLayout {
                 Layout.fillWidth: true
@@ -323,7 +406,9 @@ ScrollView {
             Label { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: editor.matches.length > 40; text: "Refine a pesquisa para ver os restantes IDs." }
             OrderButton {
                 text: "Guardar ordem"; Layout.fillWidth: true
-                enabled: !controller.savingOrder && controller.authenticated && page.technicians.length && page.targets.length && /^\d{4}-\d{2}-\d{2}$/.test(start.text) && /^\d{4}-\d{2}-\d{2}$/.test(due.text) && due.text >= start.text
+                enabled: !page.planUnavailable && !page.needsPlanReview && !page.planConflicts.length &&
+                    !controller.savingOrder && controller.authenticated && page.technicians.length && page.targets.length &&
+                    /^\d{4}-\d{2}-\d{2}$/.test(start.text) && /^\d{4}-\d{2}-\d{2}$/.test(due.text) && due.text >= start.text
                 onClicked: controller.saveOrder({id: page.plan.id, revision: page.plan.revision, start: start.text, due: due.text, technicians: page.technicians, targets: page.targets.map(t => t.target)})
             }
         }

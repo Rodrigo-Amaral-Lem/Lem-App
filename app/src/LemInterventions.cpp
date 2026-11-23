@@ -72,6 +72,8 @@ QString Lem::prepareIntervention(QString id) {
             m_chargers.append(membership);
             emit changed();
         }
+        const auto known = job["report_id"].toString();
+        if (job["status"] == "closed" && !known.isEmpty() && !m_deletedReports.contains(known)) return known;
         for (const auto &entry : m_reports) {
             const auto report = entry.toObject();
             if (report["charger_id"] == id && report["owner_id"] == m_user["id"] && report["dirty"].toBool() &&
@@ -80,7 +82,6 @@ QString Lem::prepareIntervention(QString id) {
         }
         // A report may have synced since the last contracts refresh.
         const auto reports = m_chargers.first().toObject()["reports"].toArray();
-        const auto known = job["report_id"].toString();
         if (!known.isEmpty() && !m_deletedReports.contains(known) &&
             !isOrderRecovery(m_reports.value(known).toObject())) return known;
         for (const auto &entry : reports) {

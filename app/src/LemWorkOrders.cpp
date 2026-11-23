@@ -124,8 +124,11 @@ void Lem::refreshOrders(bool planner) {
         const auto day = data["today"].toString();
         if (before != reconciled || day != m_planningDay) {
             m_orders = reconciled;
-            for (auto it = m_reports.constBegin(); it != m_reports.constEnd(); ++it)
-                if (it.value().toObject()["_conflict_kind"] == "order_scope") m_syncConflicts.remove(it.key());
+            for (auto it = m_reports.constBegin(); it != m_reports.constEnd(); ++it) {
+                const auto kind = it.value().toObject().value("_conflict_kind").toString();
+                if (kind == "order_scope" || kind == "pcve_membership_detached")
+                    m_syncConflicts.remove(it.key());
+            }
             scheduleSync(1500);
             m_planningDay = day;
             emit workOrderListChanged();
@@ -256,10 +259,22 @@ bool Lem::canBindInterventionDraft(const QJsonObject &report) const {
            (!report["_conflict"].toBool() || report["_conflict_kind"] == "order_scope");
 }
 
+bool Lem::hasOtherClosedInterventionReport(const QJsonObject &report) const {
+    for (const auto &entry : m_contracts) {
+        const auto job = entry.toObject()["intervention"].toObject();
+        if (job["id"] == report["contract_id"] && job["status"] == "closed" &&
+            job["report_id"].isString() && job["report_id"] != report["id"])
+            return true;
+    }
+    return false;
+}
+
 bool Lem::isLocalRecovery(const QJsonObject &report) const {
     if (m_user.isEmpty() || report["owner_id"] != m_user["id"] || !report["dirty"].toBool())
         return false;
     if (report["_conflict"].toBool() || report.contains("_contract_unavailable"))
+        return true;
+    if (independentIntervention(report) && hasOtherClosedInterventionReport(report))
         return true;
     const auto itemId = report["_order_item"].toString();
     if (!itemId.isEmpty()) {
@@ -297,8 +312,12 @@ bool Lem::prepareLocalRecovery(QString reportId) {
         return false;
     if (report["_conflict"].toBool()) return true;
     report["_conflict"] = true;
-    report["_conflict_kind"] = "order_scope";
-    report["_conflict_reason"] = "A tarefa ou o contrato deixou de estar disponível neste dispositivo.";
+    if (independentIntervention(report) && hasOtherClosedInterventionReport(report)) {
+        report["_conflict_reason"] = "A intervenção tem um relatório fechado. A cópia local foi conservada.";
+    } else {
+        report["_conflict_kind"] = "order_scope";
+        report["_conflict_reason"] = "A tarefa ou o contrato deixou de estar disponível neste dispositivo.";
+    }
     report["_edit_seq"] = report["_edit_seq"].toDouble() + 1;
     return checkpointReport(report, "Não foi possível preparar a consulta. O rascunho foi conservado.");
 }
@@ -390,7 +409,8 @@ void Lem::receiveFollowedReports() {
         const auto rid = it.key();
         if (!SafeStorage::component(rid)) continue;
         auto cached = m_reports.value(rid).toObject();
-        if (cached["dirty"].toBool() || cached["_conflict"].toBool() || m_pendingEdits.contains(rid)) continue;
+        if (cached["dirty"].toBool() || cached["_conflict"].toBool() ||
+            cached["_follow_photos_released"].toBool() || m_pendingEdits.contains(rid)) continue;
         const auto expected = it.value();
         const bool latest = !cached.isEmpty() && (expected.revision < 0 ? cached["status"] == "closed" :
             cached["revision"].toInt() >= expected.revision &&
@@ -406,7 +426,8 @@ void Lem::receiveFollowedReports() {
                 auto r = QJsonDocument::fromJson(bytes).object();
                 const auto existing = m_reports.value(rid).toObject();
                 if (m_followedReports.contains(rid) && validRemoteReport(r, rid) &&
-                    !existing["dirty"].toBool() && !existing["_conflict"].toBool() && !m_pendingEdits.contains(rid) &&
+                    !existing["dirty"].toBool() && !existing["_conflict"].toBool() &&
+                    !existing["_follow_photos_released"].toBool() && !m_pendingEdits.contains(rid) &&
                     r["revision"].toInt() >= existing["revision"].toInt()) {
                     r["offline_photos"] = true;
                     r["dirty"] = false;

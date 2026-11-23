@@ -431,7 +431,7 @@ int main(int argc, char **argv) {
     QDesktopServices::setUrlHandler("file", &exportViewer, "view");
     // These integration fixtures only contact the disposable loopback server.
     QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
-    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.9.2"));
+    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.10.0"));
     app.setOrganizationName("Lem-Offline-Test");
     app.setApplicationName("Lem Offline Test");
     const auto args = app.arguments();
@@ -1179,9 +1179,12 @@ int main(int argc, char **argv) {
     CHECK(c.current().isEmpty());
     other.sync();
     CHECK(settled(other));
-    CHECK(other.current().isEmpty());
-    other.openReport("", batchId);
-    CHECK(other.current().isEmpty());
+    const auto retainedAfterDeletion = other.current();
+    CHECK(!retainedAfterDeletion["id"].toString().isEmpty() && retainedAfterDeletion["id"].toString() != batchId);
+    CHECK(retainedAfterDeletion["_conflict_kind"].toString() == "server_deleted");
+    CHECK(retainedAfterDeletion["_deleted_source_id"].toString() == batchId && notes(other, "SITE.02") == "cópia antiga");
+    CHECK(!other.openReport("", batchId));
+    CHECK(other.current()["id"] == retainedAfterDeletion["id"]);
     other.openReport("", retryId);
     CHECK(settled(other));
     c.openReport("", retryId);

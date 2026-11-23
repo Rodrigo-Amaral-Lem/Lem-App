@@ -8,7 +8,6 @@
 // See docs/architecture.md for ordering and failure cases.
 
 #include "Lem.h"
-#include <QRegularExpression>
 #include "Checklist.h"
 #include "SafeStorage.h"
 #include "NetworkSecurity.h"
@@ -42,6 +41,8 @@ bool workGrantDenied(const QString &message) {
            message == QStringLiteral("Indique a tarefa de origem para enviar este rascunho.");
 }
 
+const QString detachedMembershipMessage = QStringLiteral("Este PCVE foi retirado do contrato. O rascunho local foi conservado.");
+
 void deferUntilOrderStarts(QJsonObject &report, qint64 retryAfter) {
     report.remove("_conflict");
     report.remove("_conflict_reason");
@@ -66,6 +67,8 @@ void Lem::recoverOrderSyncConflict(QJsonObject &report) {
     const auto message = report.value("_conflict_reason").toString();
     if (orderHasNotStarted(message))
         deferUntilOrderStarts(report, QDateTime::currentMSecsSinceEpoch());
+    else if (message == detachedMembershipMessage)
+        report["_conflict_kind"] = "pcve_membership_detached";
     else if (workGrantDenied(message) && (independentIntervention(report) || !report["_order_item"].toString().isEmpty()))
         report["_conflict_kind"] = "order_scope";
     else
@@ -315,7 +318,8 @@ void Lem::startSync(bool manual) {
         const bool owned = report["owner_id"] == m_user["id"];
         const bool recheckIdentity = (manual || m_manualRestoredCorrections.contains(i.key())) &&
                                      retryableCorrectionIdentity(report);
-        const bool recheckOrder = report["_conflict_kind"] == "order_scope" &&
+        const auto conflictKind = report["_conflict_kind"].toString();
+        const bool recheckOrder = (conflictKind == "order_scope" || conflictKind == "pcve_membership_detached") &&
             (manual || !m_syncConflicts.contains(i.key()));
         if ((report["_conflict"].toBool() && !recheckIdentity && !recheckOrder) ||
             report.contains("_contract_unavailable") || (dirty && !owned))
@@ -446,6 +450,9 @@ void Lem::syncFailed(int code, QString message) {
             r["_conflict_reason"] = message;
             if (code == 409 && detail.toObject()["reason"] == "station_identity_conflict")
                 r["_conflict_kind"] = "station_identity_conflict";
+            else if (code == 409 && (response["reason"] == "pcve_membership_detached" ||
+                     message == detachedMembershipMessage))
+                r["_conflict_kind"] = "pcve_membership_detached";
             else if (code == 403 && (!r["_order_item"].toString().isEmpty() ||
                      (independentIntervention(r) && workGrantDenied(message))))
                 r["_conflict_kind"] = "order_scope";
@@ -588,9 +595,10 @@ bool Lem::mergeSync(QJsonObject sent, bool complete, QJsonValue serverPhotos) {
     const bool committedCorrection = complete && correction["state"] == "committed";
     const auto conflictKeys = {"_conflict", "_conflict_reason", "_conflict_kind"};
     // Keep the saved conflict until a clean replacement can reach the checkpoint.
-    const bool resolvedIdentity = complete && !latest["dirty"].toBool() &&
-        ((committedCorrection && retryableCorrectionIdentity(previous)) || previous["_conflict_kind"] == "order_scope");
-    if (resolvedIdentity)
+    const bool resolvedConflict = complete && !latest["dirty"].toBool() &&
+        ((committedCorrection && retryableCorrectionIdentity(previous)) ||
+         previous["_conflict_kind"] == "order_scope" || previous["_conflict_kind"] == "pcve_membership_detached");
+    if (resolvedConflict)
         for (const auto key : conflictKeys) latest.remove(key);
     if (committedCorrection) {
         for (const auto &key : {"owner_id", "technician", "correction", "finished", "updated"})
@@ -614,7 +622,7 @@ bool Lem::mergeSync(QJsonObject sent, bool complete, QJsonValue serverPhotos) {
             latest["owner_id"] = previous.value("owner_id");
             latest["correction"] = previous.value("correction");
         }
-        if (resolvedIdentity)
+        if (resolvedConflict)
             for (const auto key : conflictKeys) latest[key] = previous.value(key);
         m_reports[id] = latest;
         if (m_current.value("id").toString() == id)
@@ -1121,9 +1129,6 @@ QJsonArray Lem::currentPcveRows(QJsonArray rows) {
     static const QSet<QString> obsolete = {"location", "localização", "localizacao", "local",
         "nome do local", "site name", "localização / nome do local", "localizacao / nome do local",
         "site id", "id do site", "notas", "contract notes"};
-    static const QRegularExpression lowerCedilla("(?<=[a-zà-öø-ÿ])Ý(?=[aouãõáàâóôú])");
-    static const QRegularExpression upperCedilla("Ý(?=[aouãõáàâóôúAOUÃÕÁÀÂÓÔÚ])");
-    static const QRegularExpression smallCedilla("ý(?=[aouãõáàâóôúAOUÃÕÁÀÂÓÔÚ])");
     for (qsizetype i = 0; i < rows.size(); ++i) {
         auto row = rows.at(i).toObject();
         auto details = row["details"].toObject();
@@ -1132,13 +1137,6 @@ QJsonArray Lem::currentPcveRows(QJsonArray rows) {
         for (const auto &key : details.keys()) {
             QString name = key.startsWith("extra.") ? key.mid(6) : key;
             if (obsolete.contains(name.replace('_', ' ').simplified().toLower())) details.remove(key);
-        }
-        for (const auto *field : {"address", "region", "manufacturer", "energy_supply"}) {
-            const auto value = details.value(field).toString();
-            if (value.contains(u'Ý') || value.contains(u'ý')) {
-                QString fixed = value;
-                details[field] = fixed.replace(lowerCedilla, "ç").replace(upperCedilla, "Ç").replace(smallCedilla, "ç");
-            }
         }
         if (details != previous) {
             row["details"] = details;
@@ -1434,6 +1432,7 @@ void Lem::downloadReportPhotos() {
     auto report = m_current;
     const auto previousReports = m_reports;
     report["offline_photos"] = true;
+    report.remove("_follow_photos_released");
     report["last_access"] = double(QDateTime::currentSecsSinceEpoch());
     m_reports[reportId] = report;
     m_current = report;
@@ -1491,6 +1490,7 @@ void Lem::releaseReportPhotos() {
         return;
     const auto previous = m_current;
     m_current["offline_photos"] = false;
+    m_current["_follow_photos_released"] = true;
     m_reports[id] = m_current;
     if (!persist()) {
         m_current = previous;
@@ -1693,6 +1693,7 @@ void Lem::clearLocalCopies() {
             }
             retained["photos"] = photos;
             retained["offline_photos"] = false;
+            retained["_follow_photos_released"] = true;
             m_reports[id] = retained;
             if (m_current["id"].toString() == id) m_current = retained;
             ++cleared;
