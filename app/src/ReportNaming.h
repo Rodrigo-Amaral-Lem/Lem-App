@@ -5,34 +5,47 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 
-// Public names are derived from frozen context; UUIDs still address stored reports.
+// Public names come from the saved report snapshot. UUIDs address the stored records.
 namespace ReportNaming {
-inline QString component(QString text, const QString &fallback, int maximum) {
+
+inline constexpr int maxChargerIdBytes = 72;
+inline constexpr int maxContextBytes = 112;
+inline constexpr int maxFilenameBytes = 250;
+
+inline QString component(QString text, const QString &fallback, int maxBytes) {
     text = text.normalized(QString::NormalizationForm_C);
-    static const QRegularExpression unsafe(QStringLiteral("[\\s<>:\"/\\\\|?*\\x{0000}-\\x{001f}\\x{007f}]+"),
-                                           QRegularExpression::UseUnicodePropertiesOption);
-    static const QRegularExpression edges(QStringLiteral("^[ ._-]+|[ ._-]+$"));
-    text.replace(unsafe, "-");
-    text.remove(edges);
-    while (text.toUtf8().size() > maximum) text.chop(1);
+    static const QRegularExpression unsafeCharacters(
+        QStringLiteral("[\\s<>:\"/\\\\|?*\\x{0000}-\\x{001f}\\x{007f}]+"),
+        QRegularExpression::UseUnicodePropertiesOption);
+    static const QRegularExpression edgeSeparators(QStringLiteral("^[ ._-]+|[ ._-]+$"));
+    text.replace(unsafeCharacters, "-");
+    text.remove(edgeSeparators);
+
+    // QString chops one UTF-16 code unit at a time. The byte limit can split a surrogate pair.
+    while (text.toUtf8().size() > maxBytes) text.chop(1);
     if (!text.isEmpty() && text.at(text.size() - 1).isHighSurrogate()) text.chop(1);
-    text.remove(edges);
+    text.remove(edgeSeparators);
     return text.isEmpty() ? fallback : text;
 }
 
 inline QString identifier(const QJsonObject &report) {
     const auto snapshot = report["snapshot"].toObject();
-    const auto charger = component(snapshot["charger"].toObject()["external_id"].toString(), "Carregador", 72);
+    const auto chargerId = snapshot["charger"].toObject()["external_id"].toString();
+    const auto charger = component(chargerId, "Carregador", maxChargerIdBytes);
     const auto reference = snapshot["intervention"].toObject()["reference"].toString();
-    if (!reference.isEmpty()) return charger + "_" + component(reference, "Intervenção", 112);
-    const auto contract = component(snapshot["contract"].toObject()["name"].toString(), "Contrato", 112);
-    return charger + "_" + contract;
+    if (!reference.isEmpty()) {
+        return charger + "_" + component(reference, "Intervenção", maxContextBytes);
+    }
+    const auto contractName = snapshot["contract"].toObject()["name"].toString();
+    return charger + "_" + component(contractName, "Contrato", maxContextBytes);
 }
 
 inline QString evidenceFilename(const QString &identifier, const QString &id, const QString &extension) {
     // UUIDs distinguish originals from the same checkpoint. Keep legacy longer
     // evidence IDs intact and bound the name for filesystem extraction.
     const auto suffix = "_" + id + "." + extension;
-    return component(identifier, "Report", qMax(qsizetype(1), 250 - suffix.toUtf8().size())) + suffix;
+    const auto prefixBudget = qMax(qsizetype(1), maxFilenameBytes - suffix.toUtf8().size());
+    return component(identifier, "Report", prefixBudget) + suffix;
 }
-}
+
+} // namespace ReportNaming
