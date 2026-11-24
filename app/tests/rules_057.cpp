@@ -28,27 +28,32 @@ struct LemReviewTest {
         c.answer(key,next,"Motivo diferente"); CHECK(notes()=="Motivo diferente");
     }
     if(item["reading_required"].toBool()) for(const auto &assessment : QStringList{"OK","NOK"}) {
-        c.answer(key,"",""); c.answer(key,"NA",""); c.setAssessment(key,assessment); CHECK(notes().isEmpty());
+        c.answer(key,"",""); c.answer(key,"NA",""); c.setAssessment(key,assessment);
+        CHECK(notes() == (assessment == "NOK" ? item["nok_notes_default"].toString() : QString()));
         c.answer(key,"NA","Motivo diferente"); c.setAssessment(key,assessment); CHECK(notes()=="Motivo diferente");
     }
 
     c.answer(key,"OK","Motivo do tecnico"); c.answer(key,"NA","Motivo do tecnico"); CHECK(notes()=="Motivo do tecnico");
    }
-  auto old=c.m_current;auto schema=old["template"].toObject();auto sections=schema["sections"].toArray();
+  QFile historical(":/shared/checklist-v7.json"); CHECK(historical.open(QIODevice::ReadOnly));
+  auto old=c.m_current;
+  old["payload"]=QJsonObject{{"answers", QJsonObject{}}};
+  auto schema=QJsonDocument::fromJson(historical.readAll()).object();
+  auto sections=schema["sections"].toArray();
   for(int i=0;i<sections.size();++i){auto section=sections[i].toObject();auto items=section["items"].toArray();
    for(int j=0;j<items.size();++j){auto item=items[j].toObject();if(item["id"]=="MAN.12"||item["id"]=="MAN.18"){item.remove("reading_required");item["photo_required"]=false;item.remove("photo_always");}if(item["id"]=="MAN.19")item["kind"]="text";items[j]=item;}
    section["items"]=items;sections[i]=section;}
   schema["sections"]=sections;old["template"]=schema;c.m_reports[old["id"].toString()]=old;
   c.openReport("demo-charger",old["id"].toString());
-  c.setAssessment("MAN.18","OK");
-  CHECK(c.m_current["payload"].toObject()["answers"].toObject()["MAN.18"].toObject()["assessment"]=="OK");
+  c.setAssessment("MAN.20","OK");
+  CHECK(c.m_current["payload"].toObject()["answers"].toObject()["MAN.20"].toObject()["assessment"]=="OK");
   for(auto s:c.sections())for(auto v:s.toMap()["items"].toList())c.answer(v.toMap()["id"].toString(),"NA","Sem equipamento");
   c.answer("EST.04","charger-001 / dispenser-002","");
-  c.answer("MAN.12","OK","");c.finish();CHECK(c.m_current["status"]=="draft");
-  c.answer("MAN.12","30 mA","");c.finish();CHECK(c.m_current["status"]=="draft");
+  c.answer("MAN.13","OK","");c.finish();CHECK(c.m_current["status"]=="draft");
+  c.answer("MAN.13","30 mA","");c.finish();CHECK(c.m_current["status"]=="draft");
   QImage evidence(20,20,QImage::Format_RGB32);evidence.fill(Qt::cyan);
   const auto evidencePath=root+"/trip.png";CHECK(evidence.save(evidencePath));
-  c.attach("MAN.12",QUrl::fromLocalFile(evidencePath));
+  c.attach("MAN.13",QUrl::fromLocalFile(evidencePath));
   // Photos selected while a draft PUT is in flight must survive its acknowledgement.
   const auto beforeAttachment=c.m_current;
   const auto beforeCount=beforeAttachment["photos"].toArray().size();
@@ -78,12 +83,12 @@ struct LemReviewTest {
   c.m_syncing=false;
   c.m_refreshing=false;
   c.m_downloads.clear();
-  c.answer("MAN.18","120 Ω","");c.setAssessment("MAN.18","OK");
-  c.setAssessment("MAN.18","NOK");
-  CHECK(c.m_current["payload"].toObject()["answers"].toObject()["MAN.18"].toObject()["value"]=="120 Ω");
-  c.answer("MAN.18","121 Ω","Terra verificada");
-  CHECK(c.m_current["payload"].toObject()["answers"].toObject()["MAN.18"].toObject()["assessment"]=="NOK");
-  for(int n=14;n<=17;++n){
+  c.answer("MAN.20","120 Ω","");c.setAssessment("MAN.20","OK");
+  c.setAssessment("MAN.20","NOK");
+  CHECK(c.m_current["payload"].toObject()["answers"].toObject()["MAN.20"].toObject()["value"]=="120 Ω");
+  c.answer("MAN.20","121 Ω","Terra verificada");
+  CHECK(c.m_current["payload"].toObject()["answers"].toObject()["MAN.20"].toObject()["assessment"]=="NOK");
+  for(int n=16;n<=19;++n){
    auto key=QString("MAN.%1").arg(n);
    c.answer(key,"","");c.setAssessment(key,"OK");
    CHECK(c.m_current["payload"].toObject()["answers"].toObject()[key].toObject()["value"].toString().isEmpty());
@@ -108,15 +113,15 @@ struct LemReviewTest {
   c.finish();CHECK(c.m_current["status"]=="draft");
   CHECK(c.importSignature("FIN.02",QUrl::fromLocalFile(evidencePath)));
   // Leaving optional notes untouched must not serialize null answers on closure.
-  // MAN.14–18 require photographs for both outcomes; a video cannot satisfy it.
-  for(int n=14;n<=18;++n){
+  // MAN.16–18 require photographs for both outcomes; a video cannot satisfy it.
+  for(int n=16;n<=20;++n){
    const auto key=QString("MAN.%1").arg(n);
    c.finish();CHECK(c.m_current["status"]=="draft");
    c.attach(key,QUrl::fromLocalFile(evidencePath));
   }
   auto optionalPayload=c.m_current["payload"].toObject();
   auto optionalAnswers=optionalPayload["answers"].toObject();
-  for (const auto &key : {"SEG.07","SITE.06","QVE.14","EST.18","MAN.22","CARG.07","FIN.03"}) optionalAnswers.remove(key);
+  for (const auto &key : {"SEG.07","SITE.06","QVE.14","EST.18","MAN.24","CARG.07","FIN.03"}) optionalAnswers.remove(key);
   optionalPayload["answers"]=optionalAnswers;c.m_current["payload"]=optionalPayload;
   c.finish();CHECK(c.m_current["status"]=="closed");
   for (auto answer:c.m_current["payload"].toObject()["answers"].toObject()) CHECK(answer.isObject());

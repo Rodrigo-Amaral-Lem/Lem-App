@@ -12,7 +12,7 @@ for status in ['OK','NOK','NA']:
  trigger('answer_MAN.02_'+status);QTest.qWait(20)
  assert not find_visual(w.contentItem(),'value_MAN.02').isVisible()
  assert find_visual(w.contentItem(),'notes_MAN.02').isVisible() == (status == 'NOK')
-for n in range(14,18):
+for n in range(16,20):
  key=f'MAN.{n}'
  trigger('answer_'+key+'_OK');QTest.qWait(20)
  a=values['current']['payload']['answers'][key]
@@ -35,7 +35,7 @@ for n in range(14,18):
  trigger('answer_'+key+'_NA');QTest.qWait(20)
  assert a['value']=='NA' and not a.get('assessment')
  assert js(f'itemIssues(lem.sections[4].items.find(i=>i.id==="{key}")).length')==0
-for key,reading in [('MAN.12','30 mA'),('MAN.18','120')]:
+for key,reading in [('MAN.13','30 mA'),('MAN.20','120')]:
  trigger('answer_'+key+'_OK')
  a=values['current']['payload']['answers'][key]
  assert a['value']=='' and a['assessment']=='OK',a
@@ -46,13 +46,13 @@ for key,reading in [('MAN.12','30 mA'),('MAN.18','120')]:
  assert a['assessment']=='NOK',a
  trigger('answer_'+key+'_NA')
  assert a['value']=='NA' and not a.get('assessment'),a
-assert find_visual(w.contentItem(),'value_MAN.18').property('text') == 'NA'
+assert find_visual(w.contentItem(),'value_MAN.20').property('text') == 'NA'
 for status in ['OK','NOK','NA']:
- trigger('answer_MAN.19_'+status)
- assert values['current']['payload']['answers']['MAN.19']['value']==status
-assert 'fotografia' not in js('itemIssues(lem.sections[4].items.find(i=>i.id==="MAN.12")).join()')
+ trigger('answer_MAN.21_'+status)
+ assert values['current']['payload']['answers']['MAN.21']['value']==status
+assert 'fotografia' not in js('itemIssues(lem.sections[4].items.find(i=>i.id==="MAN.13")).join()')
 # Required notes can be cancelled or cleared without changing their requirement.
-for key, value, assessment in [('MAN.02','NOK',None), ('MAN.12','NA',None), ('MAN.14','600','NOK')]:
+for key, value, assessment in [('MAN.02','NOK',None), ('MAN.13','NA',None), ('MAN.16','600','NOK')]:
  lem.answer(key,value,'Observação registada')
  if assessment: lem.setAssessment(key,assessment)
  QTest.qWait(30)
@@ -69,6 +69,6 @@ for key, value, assessment in [('MAN.02','NOK',None), ('MAN.12','NA',None), ('MA
  assert find_visual(w.contentItem(),'notes_'+key).isVisible()
  assert 'observação' in js(f'itemIssues(lem.sections[4].items.find(i=>i.id==="{key}")).join()')
 assert not errors,errors
-print('PASS: real typed readings survive OK/NOK, incomplete values stay pending, NOK notes, NA exemption and MAN.12 choices')
+print('PASS: real typed readings survive OK/NOK, incomplete values stay pending, NOK notes, NA exemption and MAN.13 choices')
 from shiboken6 import delete
 delete(engine)

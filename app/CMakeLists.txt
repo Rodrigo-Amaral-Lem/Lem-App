@@ -2,7 +2,7 @@
 # Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
 
 cmake_minimum_required(VERSION 3.25)
-project(Lem VERSION 0.11.0 LANGUAGES CXX)
+project(Lem VERSION 0.11.1 LANGUAGES CXX)
 set(report_limits_file "${CMAKE_CURRENT_SOURCE_DIR}/../shared/report-limits.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${report_limits_file}")
 file(READ "${report_limits_file}" report_limits)
@@ -106,8 +106,8 @@ set_target_properties(Lem PROPERTIES MACOSX_BUNDLE TRUE WIN32_EXECUTABLE TRUE MA
 if(ANDROID)
  set_property(TARGET Lem PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
  # Preserve the R1 scroll fix; Android version codes increase for every release.
- set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_NAME "0.11.0")
- set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_CODE 196)
+ set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_NAME "0.11.1")
+ set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_CODE 197)
 endif()
 include(GNUInstallDirs)
 install(TARGETS Lem
@@ -240,7 +240,7 @@ endif()
 
 if(LEM_BUILD_TESTS)
  qt_add_executable(Lem-review-test tests/review_regressions.cpp src/Lem.cpp src/LemOffline.cpp src/LemWorkOrders.cpp src/LemInterventions.cpp src/LemReportGroups.cpp src/Lem.h src/ReportPdf.cpp src/ReportPdf.h src/Checklist.h)
- qt_add_resources(Lem-review-test review_schema PREFIX / BASE "${CMAKE_CURRENT_SOURCE_DIR}/.." FILES ../shared/checklist-v1.json)
+ qt_add_resources(Lem-review-test review_schema PREFIX / BASE "${CMAKE_CURRENT_SOURCE_DIR}/.." FILES ../shared/checklist-v1.json ../shared/checklist-v6.json)
  qt_add_resources(Lem-review-test review_logo PREFIX /branding BASE "${CMAKE_CURRENT_SOURCE_DIR}/../shared/branding" FILES ../shared/branding/lem-logo.png ../shared/branding/report-logos.json)
  target_include_directories(Lem-review-test PRIVATE src)
  target_link_libraries(Lem-review-test PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Concurrent)
@@ -330,7 +330,7 @@ endif()
 
 if(LEM_BUILD_TESTS)
  qt_add_executable(Lem-rules-057-test tests/rules_057.cpp src/Lem.cpp src/LemOffline.cpp src/LemWorkOrders.cpp src/LemInterventions.cpp src/LemReportGroups.cpp src/Lem.h src/ReportPdf.cpp)
- qt_add_resources(Lem-rules-057-test rules057_schema PREFIX / BASE "${CMAKE_CURRENT_SOURCE_DIR}/.." FILES ../shared/checklist-v1.json)
+ qt_add_resources(Lem-rules-057-test rules057_schema PREFIX / BASE "${CMAKE_CURRENT_SOURCE_DIR}/.." FILES ../shared/checklist-v1.json ../shared/checklist-v7.json)
  target_include_directories(Lem-rules-057-test PRIVATE src)
  target_link_libraries(Lem-rules-057-test PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Concurrent)
  if(MSVC)
@@ -363,6 +363,7 @@ endif()
 if(LEM_BUILD_TESTS)
  # No GUI/network needed: this executable compares migration JSON with Python.
  qt_add_executable(Lem-migration-projection tests/migration_projection.cpp)
+ qt_add_resources(Lem-migration-projection migration_schema PREFIX / BASE "${CMAKE_CURRENT_SOURCE_DIR}/.." FILES ../shared/checklist-v1.json)
  target_include_directories(Lem-migration-projection PRIVATE src)
  target_link_libraries(Lem-migration-projection PRIVATE Qt6::Core)
  if(MSVC)

@@ -1395,14 +1395,18 @@ ApplicationWindow {
             issues.push("Escolha OK, NOK ou N/A");
         if (!value && !item.optional)
             issues.push("Falta resposta");
-        if (value && Measurements.digits(item.id) && Measurements.format(item.id, value) === null)
-            issues.push(Measurements.milliamp(item.id) ? "Indique um número inteiro de até 6 algarismos, sem separador decimal." :
-                "Valor inválido: até " + Measurements.digits(item.id) + " algarismos inteiros e 2 decimais, ou Não Aplicável");
+        const measurementId = item.measurement_key || item.id;
+        if (item.assessment_required && !Measurements.notApplicable(value) && !a.assessment)
+            issues.push("Escolha OK, NOK ou N/A.");
+        if (value && Measurements.digits(measurementId) && Measurements.format(measurementId, value) === null)
+            issues.push(Measurements.integerReading(measurementId) ? "Indique um número inteiro de até 6 algarismos, sem separador decimal." :
+                "Valor inválido: até " + Measurements.digits(measurementId) + " algarismos inteiros e 2 decimais, ou Não Aplicável");
         if (item.reading_required && /^(OK|NOK)$/i.test(value))
             issues.push("Falta valor medido");
         if (!item.notes_disabled && (value === "NOK" || a.assessment === "NOK") && !String(a.notes || "").trim())
             issues.push("Falta observação NOK");
-        if (item.na_notes_required && Measurements.notApplicable(value) && !String(a.notes || "").trim())
+        const testNA = Measurements.notApplicable(value) && !(item.assessment_required && a.assessment);
+        if (item.na_notes_required && testNA && !String(a.notes || "").trim())
             issues.push("Falta observação N/A");
         if (item.signature_required) {
             const signature = (((lem.current.payload || {}).signatures || {})[item.id]);
@@ -1411,7 +1415,7 @@ ApplicationWindow {
             else if (signature.signed_by !== value || !(lem.current.photos || []).some(p => p.id === signature.photo_id && p.checkpoint === item.id && p.mime === "image/png"))
                 issues.push("Assinatura inválida; assine novamente");
         }
-        if (item.photo_required && (item.photo_always || !Measurements.notApplicable(value)) && !photographsFor(item.id).length)
+        if (item.photo_required && (item.photo_always || !testNA) && !photographsFor(item.id).length)
             issues.push("Falta fotografia");
         return issues;
     }
@@ -2022,7 +2026,7 @@ ApplicationWindow {
                 onClicked: {
                     if (lem.current.id === removeNotesDialog.reportId && win.editing) {
                         Qt.inputMethod.hide();
-                        lem.answer(removeNotesDialog.checkpoint, win.answerFor(removeNotesDialog.checkpoint).value || "", "");
+                        lem.answer(removeNotesDialog.checkpoint, win.answerFor(removeNotesDialog.checkpoint).value || "", "", true);
                     }
                     removeNotesDialog.close();
                 }
@@ -3211,7 +3215,100 @@ ApplicationWindow {
                     text: lem.refreshing ? "A carregar IDs…" : contractIdSearch.text.trim() ? "Nenhum ID corresponde à pesquisa." : "Sem IDs associados ao contrato."
                 }
             }
+            UiButton {
+                text: "Recuperar IDs retirados"
+                Layout.fillWidth: true
+                enabled: contractIdsDialog.valid && !lem.busy
+                onClicked: membershipDialog.begin(contractIdsDialog.contractId, contractBox.selectedName, false)
+            }
             UiButton { text: "Fechar"; Accessible.name: "Fechar gestão de IDs"; Layout.fillWidth: true; onClicked: contractIdsDialog.close() }
+        }
+    }
+    Dialog {
+        id: membershipDialog
+        property string contractId
+        property string contractName
+        property bool corrective
+        property bool loading
+        property var rows: []
+        property string errorText
+        property var removal
+        title: corrective ? "IDs do contrato de corretivas" : "Recuperar IDs retirados"
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        width: Math.min(win.width - 24, 560)
+        height: Math.min(win.height - 32, 540)
+        function begin(cid, name, isCorrective) {
+            contractId = cid; contractName = name; corrective = isCorrective;
+            rows = []; errorText = ""; loading = true; removal = null;
+            searchMembers.clear(); open(); lem.loadMemberships(cid, isCorrective);
+        }
+        Connections {
+            target: lem
+            ignoreUnknownSignals: true
+            function onMembershipsReceived(cid, data, message) {
+                if (membershipDialog.visible && membershipDialog.contractId === cid) {
+                    membershipDialog.rows = data;
+                    membershipDialog.errorText = message;
+                    membershipDialog.loading = false;
+                }
+            }
+        }
+        contentItem: ColumnLayout {
+            UiLabel { text: membershipDialog.contractName; font.bold: true; wrapMode: Text.Wrap; Layout.fillWidth: true }
+            UiTextField { id: searchMembers; placeholderText: "Pesquisar ID"; Layout.fillWidth: true }
+            UiLabel {
+                Layout.fillWidth: true
+                visible: !!text
+                wrapMode: Text.Wrap
+                text: membershipDialog.errorText || (membershipDialog.loading ? "A carregar…" : !membershipDialog.rows.length ? "Sem IDs para mostrar." : "")
+            }
+            ListView {
+                id: memberList
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                model: membershipDialog.rows.filter(row => row.external_id.toLowerCase().includes(searchMembers.text.trim().toLowerCase()))
+                delegate: RowLayout {
+                    required property var modelData
+                    width: memberList.width
+                    UiLabel {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WrapAnywhere
+                        text: modelData.external_id + (modelData.purge_after ? "\nRecuperar até " + Qt.formatDateTime(new Date(modelData.purge_after), "dd/MM/yyyy HH:mm") : "")
+                    }
+                    UiButton {
+                        text: modelData.purge_after ? "Recuperar" : "Retirar"
+                        enabled: !membershipDialog.loading && !membershipDialog.removal
+                        onClicked: {
+                            if (modelData.purge_after) {
+                                membershipDialog.loading = true;
+                                lem.changeMembership(membershipDialog.contractId, modelData.id, membershipDialog.corrective, true);
+                            } else membershipDialog.removal = modelData;
+                        }
+                    }
+                }
+            }
+            UiLabel {
+                visible: !!membershipDialog.removal
+                text: visible ? "Retirar " + membershipDialog.removal.external_id + "? Pode recuperar o ID e os relatórios deste contrato durante 14 dias." : ""
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+            RowLayout {
+                visible: !!membershipDialog.removal
+                UiButton { text: "Cancelar"; onClicked: membershipDialog.removal = null }
+                UiButton {
+                    text: "Confirmar remoção"
+                    onClicked: {
+                        membershipDialog.loading = true;
+                        lem.changeMembership(membershipDialog.contractId, membershipDialog.removal.id, true, false);
+                        membershipDialog.removal = null;
+                    }
+                }
+            }
+            UiButton { text: "Fechar"; Layout.fillWidth: true; onClicked: membershipDialog.close() }
         }
     }
     Dialog {
@@ -3228,7 +3325,7 @@ ApplicationWindow {
         width: Math.min(win.width - 24, 440)
         contentItem: ColumnLayout {
             UiLabel {
-                text: "O PCVE " + detachPcveDialog.pcveId + " continuará na base de dados. Os relatórios existentes serão conservados."
+                text: "O PCVE " + detachPcveDialog.pcveId + " continuará na base de dados. Pode recuperar este ID e os seus relatórios durante 14 dias."
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
@@ -3672,7 +3769,8 @@ ApplicationWindow {
         width: Math.min(win.width - 24, 480)
         height: Math.min(win.height - 32, 430)
         modal: true
-        title: "Apagar contrato"
+        property bool job: false
+        title: job ? "Apagar pedido" : "Apagar contrato"
         property string contractId: ""
         property string contractName: ""
         onOpened: deleteContractConfirmation.text = ""
@@ -3685,7 +3783,7 @@ ApplicationWindow {
                 UiLabel {
                     width: parent.width
                     wrapMode: Text.Wrap
-                    text: "Apagar o contrato «" + deleteContractDialog.contractName + "»?\n\nOs carregadores, reports e fotografias deixam de estar disponíveis no servidor. Um administrador pode recuperar tudo durante 30 dias. Depois, a eliminação é definitiva.\n\nEscreva APAGAR para confirmar."
+                    text: deleteContractDialog.job ? "Apagar o pedido " + deleteContractDialog.contractName + "? Pode recuperar o pedido, o rascunho e as fotografias durante 48 horas. Escreva APAGAR para confirmar." : "Apagar o contrato «" + deleteContractDialog.contractName + "»?\n\nOs carregadores, reports e fotografias deixam de estar disponíveis no servidor. Um administrador pode recuperar tudo durante 30 dias. Depois, a eliminação é definitiva.\n\nEscreva APAGAR para confirmar."
                 }
             }
             UiTextField {
@@ -3693,7 +3791,8 @@ ApplicationWindow {
                 objectName: "deleteContractConfirmation"
                 Layout.fillWidth: true
                 placeholderText: "APAGAR"
-                Accessible.name: "Escreva APAGAR para confirmar a eliminação do contrato"
+                Accessible.name: deleteContractDialog.job ? "Escreva APAGAR para confirmar a eliminação do pedido" : "Escreva APAGAR para confirmar a eliminação do contrato"
+                onAccepted: Qt.inputMethod.hide()
                 inputMethodHints: Qt.ImhNoPredictiveText
                 enabled: !win.networkActivity
             }
@@ -3706,7 +3805,7 @@ ApplicationWindow {
                 }
                 UiButton {
                     objectName: "confirmDeleteContract"
-                    text: "Apagar contrato"
+                    text: deleteContractDialog.title
                     primary: true
                     selectedColor: win.danger
                     Layout.fillWidth: true
@@ -3727,10 +3826,12 @@ ApplicationWindow {
         width: Math.min(win.width - 24, 540)
         height: Math.min(win.height - 32, 560)
         modal: true
-        title: "Contratos apagados"
+        property string kind: ""
+        readonly property var entries: lem.deletedContracts || []
+        title: kind ? "Pedidos apagados" : "Contratos apagados"
         contentItem: ColumnLayout {
             UiLabel {
-                text: "Recuperação disponível durante 30 dias. Os reports, fotografias e atribuições aos técnicos são recuperados com o contrato."
+                text: deletedContractsDialog.kind ? "Pode recuperar o pedido e o relatório durante 48 horas." : "Recuperação disponível durante 30 dias. Os reports, fotografias e atribuições aos técnicos são recuperados com o contrato."
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
             }
@@ -3744,13 +3845,13 @@ ApplicationWindow {
                     width: deletedContractsScroll.availableWidth
                     spacing: 12
                     UiLabel {
-                        text: lem.busy ? "A carregar contratos apagados…" : "Sem contratos para recuperar."
-                        visible: !(lem.deletedContracts || []).length
+                        text: lem.busy ? "A carregar…" : "Sem registos para recuperar."
+                        visible: !deletedContractsDialog.entries.length
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                     }
                     Repeater {
-                        model: lem.deletedContracts || []
+                        model: deletedContractsDialog.entries
                         ColumnLayout {
                             required property var modelData
                             Layout.fillWidth: true
@@ -3767,7 +3868,7 @@ ApplicationWindow {
                             }
                             UiButton {
                                 objectName: "restoreContract_" + parent.modelData.id
-                                text: "Recuperar contrato"
+                                text: deletedContractsDialog.kind ? "Recuperar pedido" : "Recuperar contrato"
                                 enabled: lem.authenticated && lem.user.role === "admin" && !win.networkActivity
                                 onClicked: lem.restoreContract(parent.modelData.id)
                             }
@@ -5145,6 +5246,18 @@ ApplicationWindow {
         }
         Interventions {
             id: jobsPage
+            onManageIds: (cid, name) => membershipDialog.begin(cid, name, true)
+            onDeleteJob: (id, ref) => {
+                deleteContractDialog.job = true;
+                deleteContractDialog.contractId = id;
+                deleteContractDialog.contractName = ref;
+                deleteContractDialog.open();
+            }
+            onRecoverJobs: kind => {
+                deletedContractsDialog.kind = kind;
+                deletedContractsDialog.open();
+                lem.loadDeletedContracts(kind);
+            }
             visible: win.page === "interventions"
             anchors.fill: parent
             anchors.margins: win.pageGap
@@ -5768,8 +5881,9 @@ ApplicationWindow {
                                             property bool notesRequired: !modelData.notes_disabled && (win.answerFor(modelData.id).assessment === "NOK" || answerValue === "NOK" || (!!modelData.na_notes_required && Measurements.notApplicable(answerValue)))
                                             enabled: !(lem.copyingGroup === "QVE" && modelData.id.indexOf("QVE.") === 0) && !(lem.copyingGroup === "MAN" && /^MAN\.(0[4-9]|10)$/.test(modelData.id))
                                             property string answerValue: win.answerFor(modelData.id).value || ""
-                                            readonly property string measurementId: Number((lem.current.template || {}).version || 7) < 7 && Measurements.milliamp(modelData.id) ? Measurements.canonical(modelData.id) : modelData.id
-                                            property bool needsPhoto: modelData.photo_required && (modelData.photo_always || !Measurements.notApplicable(answerValue)) && win.photographsFor(modelData.id).length === 0
+                                            readonly property string measurementId: Number((lem.current.template || {}).version || 7) < 7 && Measurements.milliamp(modelData.id) ? Measurements.canonical(modelData.id) : modelData.measurement_key || modelData.id
+                                            readonly property bool testNA: Measurements.notApplicable(answerValue) && !(modelData.assessment_required && win.answerFor(modelData.id).assessment)
+                                            property bool needsPhoto: modelData.photo_required && (modelData.photo_always || !testNA) && win.photographsFor(modelData.id).length === 0
                                             objectName: "checkpoint_" + modelData.id
                                             Layout.fillWidth: true
                                             implicitHeight: itemContent.implicitHeight + 24
@@ -5800,7 +5914,7 @@ ApplicationWindow {
                                                     objectName: "measurementHelp_" + itemCard.modelData.id
                                                     // Frozen/offline templates can retain the retired MAN.18 hint.
                                                     visible: text.length > 0
-                                                    text: itemCard.modelData.id === "MAN.18" ? "" : itemCard.modelData.help || ""
+                                                    text: itemCard.measurementId === "MAN.18" ? "" : itemCard.modelData.help || ""
                                                     wrapMode: Text.Wrap
                                                     Layout.fillWidth: true
                                                     color: win.mutedInk
@@ -5827,7 +5941,7 @@ ApplicationWindow {
                                                             implicitWidth: 0
                                                             padding: 8
                                                             text: modelData === "NA" ? "N/A" : modelData
-                                                            checked: itemCard.modelData.reading_required && modelData !== "NA" ? win.answerFor(itemCard.modelData.id).assessment === modelData : modelData === "NA" ? Measurements.notApplicable(itemCard.answerValue) : itemCard.answerValue === modelData
+                                                            checked: itemCard.modelData.reading_required && modelData !== "NA" ? win.answerFor(itemCard.modelData.id).assessment === modelData : modelData === "NA" ? itemCard.testNA : itemCard.answerValue === modelData
                                                             selectedColor: modelData === "NOK" ? win.danger : modelData === "OK" ? win.success : win.neutralAnswer
                                                             font.bold: checked
                                                             enabled: !lem.busy
@@ -5858,7 +5972,7 @@ ApplicationWindow {
                                                     visible: win.editing && itemCard.modelData.kind === "text"
                                                     Layout.fillWidth: true
                                                     // NA is a selected state, never partially editable text.
-                                                    placeholderText: Measurements.milliamp(itemCard.measurementId) ? "Valor em mA (até 6 algarismos)" : itemCard.modelData.id === "FIN.02" ? "Nome" : /^MAN\.(14|15|16|17)$/.test(itemCard.modelData.id) ? "Valor medido (ou NA)" : itemCard.modelData.reading_required ? (Measurements.unit(itemCard.measurementId) === "Ω" ? "Valor medido em Ω (ou NA)" : itemCard.modelData.id === "MAN.12" ? "Intensidade de disparo medida (ou NA)" : "Valor medido em MΩ (ou NA)") : itemCard.modelData.allow_status && (itemCard.answerValue === "OK" || (itemCard.answerValue === "NOK" || win.answerFor(itemCard.modelData.id).assessment === "NOK")) ? itemCard.answerValue + " selecionado" : Measurements.notApplicable(itemCard.answerValue) && Measurements.digits(itemCard.measurementId) ? "NA" : Measurements.digits(itemCard.measurementId) ? (Measurements.unit(itemCard.measurementId) === "V" ? "Ex.: 238,3" : "Ex.: 4564,4") : "Valor / resultado (ou NA)"
+                                                    placeholderText: Measurements.integerReading(itemCard.measurementId) ? "Valor em " + Measurements.unit(itemCard.measurementId) + " (até 6 algarismos)" : itemCard.modelData.id === "FIN.02" ? "Nome" : /^MAN\.(14|15|16|17)$/.test(itemCard.measurementId) ? "Valor medido (ou NA)" : itemCard.modelData.reading_required ? (Measurements.unit(itemCard.measurementId) === "Ω" ? "Valor medido em Ω (ou NA)" : itemCard.modelData.id === "MAN.12" ? "Intensidade de disparo medida (ou NA)" : "Valor medido em MΩ (ou NA)") : itemCard.modelData.allow_status && (itemCard.answerValue === "OK" || (itemCard.answerValue === "NOK" || win.answerFor(itemCard.modelData.id).assessment === "NOK")) ? itemCard.answerValue + " selecionado" : Measurements.notApplicable(itemCard.answerValue) && Measurements.digits(itemCard.measurementId) ? "NA" : Measurements.digits(itemCard.measurementId) ? (Measurements.unit(itemCard.measurementId) === "V" ? "Ex.: 238,3" : "Ex.: 4564,4") : "Valor / resultado (ou NA)"
                                                     rightPadding: Measurements.digits(itemCard.measurementId) ? 38 : 12
                                                     UiLabel {
                                                         anchors.right: parent.right
@@ -5872,22 +5986,28 @@ ApplicationWindow {
                                                         regularExpression: Measurements.editorPattern(itemCard.measurementId)
                                                     }
                                                     inputMethodHints: Measurements.digits(itemCard.measurementId) ? Qt.ImhFormattedNumbersOnly : Qt.ImhNone
-                                                    text: itemCard.modelData.id === "MAN.18" && Measurements.notApplicable(itemCard.answerValue) ? "NA" : Measurements.editorText(itemCard.measurementId, win.answerFor(itemCard.modelData.id).value)
+                                                    text: itemCard.measurementId === "MAN.18" && Measurements.notApplicable(itemCard.answerValue) ? "NA" : Measurements.editorText(itemCard.measurementId, win.answerFor(itemCard.modelData.id).value)
                                                     enabled: !lem.busy
                                                     selectByMouse: true
                                                     Accessible.name: itemCard.modelData.label
-                                                    onTextEdited: lem.answer(itemCard.modelData.id, text, notes.text)
+                                                    onTextEdited: lem.answer(itemCard.modelData.id, text, notes.text, !!itemCard.modelData.assessment_required)
                                                     onEditingFinished: {
                                                         if (Measurements.digits(itemCard.measurementId)) {
                                                             const formatted = Measurements.format(itemCard.measurementId, text);
                                                             if (formatted !== null && formatted !== text)
-                                                                lem.answer(itemCard.modelData.id, formatted, notes.text);
+                                                                lem.answer(itemCard.modelData.id, formatted, notes.text, !!itemCard.modelData.assessment_required);
                                                         }
                                                     }
                                                 }
+                                                UiButton {
+                                                    visible: win.editing && !!itemCard.modelData.assessment_required && !!win.answerFor(itemCard.modelData.id).assessment
+                                                    text: "Leitura indisponível (NA)"
+                                                    checked: Measurements.notApplicable(itemCard.answerValue)
+                                                    onClicked: lem.answer(itemCard.modelData.id, "Não Aplicável", notes.text, true)
+                                                }
                                                 UiLabel {
                                                     objectName: "integerError_" + itemCard.modelData.id
-                                                    visible: valueField.visible && Measurements.milliamp(itemCard.measurementId)
+                                                    visible: valueField.visible && Measurements.integerReading(itemCard.measurementId)
                                                              && !!valueField.text && Measurements.format(itemCard.measurementId, valueField.text) === null
                                                     Layout.fillWidth: true
                                                     wrapMode: Text.Wrap
@@ -5955,7 +6075,7 @@ ApplicationWindow {
                                                 }
                                                 UiLabel {
                                                     objectName: "measurementNok_" + itemCard.modelData.id
-                                                    visible: Measurements.outside(itemCard.modelData.id, itemCard.answerValue)
+                                                    visible: Measurements.outside(itemCard.measurementId, itemCard.answerValue)
                                                     text: "NOK — fora dos limites"
                                                     color: win.danger
                                                     font.bold: true
@@ -5988,7 +6108,7 @@ ApplicationWindow {
                                                     selectByMouse: true
                                                     Accessible.name: itemCard.modelData.id + ", observações"
                                                     onTextChanged: if (activeFocus)
-                                                        lem.answer(itemCard.modelData.id, win.answerFor(itemCard.modelData.id).value || "", text)
+                                                        lem.answer(itemCard.modelData.id, win.answerFor(itemCard.modelData.id).value || "", text, true)
                                                     onActiveFocusChanged: if (activeFocus) {
                                                         // Keep the editor open before clearing generated text. Optional
                                                         // observations (e.g. MAN.18 OK) would otherwise hide and lose focus.
@@ -6013,7 +6133,7 @@ ApplicationWindow {
                                                     visible: win.editing && !itemCard.modelData.media_disabled
                                                     UiLabel {
                                                         objectName: "photoRequirement_" + itemCard.modelData.id
-                                                        text: itemCard.needsPhoto ? "Fotografia obrigatória em falta" : win.photosFor(itemCard.modelData.id).length ? win.photosFor(itemCard.modelData.id).length + " evidência(s) associada(s)" : itemCard.modelData.photo_required && !itemCard.modelData.photo_always && Measurements.notApplicable(itemCard.answerValue) ? "Fotografia dispensada (N/A)" : "Fotografia opcional"
+                                                        text: itemCard.needsPhoto ? "Fotografia obrigatória em falta" : win.photosFor(itemCard.modelData.id).length ? win.photosFor(itemCard.modelData.id).length + " evidência(s) associada(s)" : itemCard.modelData.photo_required && !itemCard.modelData.photo_always && itemCard.testNA ? "Fotografia dispensada (N/A)" : "Fotografia opcional"
                                                         wrapMode: Text.Wrap
                                                         Layout.fillWidth: true
                                                         color: itemCard.needsPhoto ? "#8a5200" : win.mutedInk
@@ -6278,6 +6398,7 @@ ApplicationWindow {
                                 onClicked: {
                                     const contract = contractBox.model[contractBox.currentIndex];
                                     deleteContractDialog.contractId = contract.id;
+                                    deleteContractDialog.job = false;
                                     deleteContractDialog.contractName = contract.name;
                                     deleteContractDialog.open();
                                 }
@@ -6288,6 +6409,7 @@ ApplicationWindow {
                                 enabled: !win.networkActivity
                                 onClicked: {
                                     lem.loadDeletedContracts();
+                                    deletedContractsDialog.kind = "";
                                     deletedContractsDialog.open();
                                 }
                             }

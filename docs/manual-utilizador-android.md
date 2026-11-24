@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para Android
 
-Android · Aplicação 0.11.0 · Edição 2.19 · 24 de novembro de 2026
+Android · Aplicação 0.11.1 · Edição 2.20 · 24 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-android.pdf](manual-utilizador-android.pdf).
 
@@ -20,7 +20,7 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. Utilize o toque para selecionar opções e deslize o dedo para percorrer as perguntas. O botão de retrocesso do sistema permite regressar ao ecrã anterior quando aplicável.
 
-Este manual descreve a versão 0.11.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. As capturas mostram a app num emulador Android, em orientação vertical.
+Este manual descreve a versão 0.11.1 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. As capturas mostram a app num emulador Android, em orientação vertical.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
 
@@ -75,7 +75,7 @@ Em **Gestão → Contas e acessos**, selecione a conta de um técnico e escolha 
 
 ### Consultar PCVEs
 
-O histórico do PCVE inclui os relatórios que pode consultar através das suas ordens de trabalho. Em **PCVEs**, abra a ficha e escolha um dos **Relatórios associados**. **Voltar** regressa ao mesmo ponto da ficha. **Atualizar** guarda a ficha para consulta sem rede. Em **Gestão → Contratos → Gerir IDs do contrato**, o administrador pode **Adicionar ou atualizar por Excel**. Os contratos partilham a ficha técnica do PCVE. **Retirar** conserva a ficha e os relatórios. No cartão, **Fechado 30_03_16** indica 30 de março entre as 16h00 e as 16h59, seguido do nome do relatório.
+O histórico do PCVE inclui os relatórios que pode consultar através das suas ordens de trabalho. Em **PCVEs**, abra a ficha e escolha um dos **Relatórios associados**. **Voltar** regressa ao mesmo ponto da ficha. **Atualizar** guarda a ficha para consulta sem rede. Em **Gestão → Contratos → Gerir IDs do contrato**, o administrador pode **Adicionar ou atualizar por Excel**. Os contratos partilham a ficha técnica do PCVE. **Retirar** mantém a ficha central do PCVE. O ID e os relatórios desse contrato podem ser recuperados durante 14 dias. No cartão, **Fechado 30_03_16** indica 30 de março entre as 16h00 e as 16h59, seguido do nome do relatório.
 
 ### Evitar registos duplicados
 
@@ -93,7 +93,7 @@ O administrador escolhe **Nova ordem**, indica o início e o prazo, seleciona t�
 
 A partir do dia de início em Lisboa, o técnico pode escolher qualquer ID e **Abrir intervenção**. Para trabalhar sem rede, atualize a ordem após o início enquanto ainda tem ligação. O seu rascunho offline aparece como **Em preenchimento · por sincronizar**. **Consultar rascunho** abre o trabalho do colega identificado na ordem. **Consultar cópia local em conflito** abre o seu trabalho da mesma visita. Se o ID ficar temporariamente indisponível, **Recuperar rascunho local** abre a cópia guardada no dispositivo. Em ecrãs baixos, percorra a visita até esse botão. Após a reposição do ID ou da atribuição, sincronize para retomar a mesma visita. Para entregar o trabalho a outro técnico, escolha **Guardar cópia para entrega**. O ZIP inclui as respostas e os anexos disponíveis no dispositivo. Se a intervenção for impossível, escolha **Assinalar impedimento**, escreva o motivo e confirme em **Marcar inválida**. A ação fica indisponível enquanto o ID estiver retirado ou o contrato estiver no lixo. O administrador pode planear uma nova visita com um rascunho próprio. A última tarefa resolvida regista a hora de fecho. **Recuperar rascunho** abre uma cópia anterior para consulta. **Relatório removido** identifica um documento apagado após o fecho.
 
-Quando perder uma atribuição ou o servidor apagar um report que ainda tem alterações locais, procure **Cópias locais para recuperação** na lista de ordens. Abra a cópia para consulta e escolha **Guardar cópia para entrega** para exportar as respostas e os anexos disponíveis neste dispositivo. Se um PCVE for retirado do contrato, **Consultar rascunho** na ordem continua a abrir o trabalho existente.
+Quando perder uma atribuição ou o servidor apagar um report que ainda tem alterações locais, procure **Cópias locais para recuperação** na lista de ordens. Abra a cópia para consulta e escolha **Guardar cópia para entrega** para exportar as respostas e os anexos disponíveis neste dispositivo. Se o administrador retirar um ID do contrato, peça-lhe que recupere o ID para retomar o relatório no servidor.
 
 O criador segue a ordem. Qualquer administrador pode geri-la ou escolher **Seguir** para receber impedimentos e a conclusão. Autorize as notificações de atribuição e início. O aviso de início é entregue com rede das 07h00 às 20h00 de Lisboa, no próprio dia.
 
@@ -108,6 +108,16 @@ O nome segue o formato **Ano_Cliente_NomeContrato**, com o ano do início. As da
 3. O técnico abre a visita atribuída pela ordem, quando existe. Para entregar um rascunho sincronizado, o administrador escolhe o novo técnico e **Transferir atribuição e rascunho**. A referência, as notas, o rascunho e os anexos enviados seguem juntos.
 
 Para comissionar um PCVE, abra a ficha ou o menu **Comissionamentos** e escolha **Novo comissionamento**. O técnico pode criar o seu próprio comissionamento para um PCVE a que tenha acesso. O administrador pode incluir o comissionamento numa **Nova ordem** ou **Editar ordem**. Pesquise pelo ID do PCVE ou pela referência **COM-…**. Uma ordem pode juntar preventivas, corretivas e comissionamentos do mesmo PCVE. O técnico abre o comissionamento pela ordem quando esta começa. O comissionamento continua sem contrato e usa o mesmo formulário preventivo que a corretiva. O tipo de intervenção aparece no PDF.
+
+### Apagar e recuperar pedidos ou IDs (administrador)
+
+| O que foi retirado | Como recuperar com ligação ao servidor |
+| --- | --- |
+| Pedido de corretiva ou comissionamento · **48 horas** | Na ficha de um pedido por fazer ou com rascunho, escolha **Apagar pedido** e escreva **APAGAR**. Na lista do mesmo tipo, escolha **Recuperar pedidos apagados** e **Recuperar pedido**. O rascunho e os anexos sincronizados voltam com o pedido. Um pedido com report fechado fica protegido. |
+| ID de preventiva · **14 dias** | Em **Gestão → Contratos → Gerir IDs do contrato**, escolha **Recuperar IDs retirados** e **Recuperar**. Reimportar o mesmo ID por Excel dentro do prazo também repõe os relatórios. Depois do prazo, a reimportação permite novos trabalhos nesse ID. |
+| ID de corretiva · **14 dias** | Em **Contratos de corretivas**, abra **Gerir IDs** do contrato. Junto do ID retirado, escolha **Recuperar**. Voltam a cobertura, os pedidos que foram retirados com ela e os respetivos relatórios e anexos. |
+
+Consulte a data e hora limite na lista. Um pedido apagado separadamente mantém o seu prazo de 48 horas. Se também retirou o ID da corretiva, recupere primeiro o ID e depois o pedido dentro desse prazo.
 
 ## 04 Preencher e navegar no relatório
 
@@ -140,22 +150,26 @@ Nos campos de medição, introduza o resultado do instrumento. Quando existirem 
 | MAN.02 | Selecione OK, NOK ou N/A. NOK exige uma observação. N/A não exige observação. |
 | MAN.04 a MAN.10 | Introduza a tensão em V. Aceita vírgula ou ponto decimal, até 3 algarismos antes do separador e 2 casas decimais. |
 | MAN.11 | Indique o calibre configurado em **mA**, até 6 algarismos, sem casas decimais; deve ser superior a zero. |
-| MAN.12 | Introduza a intensidade medida em **mA**, até 6 algarismos, sem casas decimais, ou selecione N/A. **Anexe uma fotografia quando aplicável. Em N/A, a fotografia é opcional e a observação é obrigatória.** A avaliação é calculada quando MAN.11 contém um calibre válido. |
-| MAN.14 a MAN.17 | No campo **Valor medido (ou NA)**, introduza o resultado do isolamento. São possíveis leituras do instrumento como **>500 MΩ** ou **OL**, além de N/A. |
-| MAN.18 | Introduza a resistência de terra em Ω, até 5 algarismos inteiros e 2 casas decimais, ou selecione N/A. Ao selecionar N/A, o campo do valor mostra **NA**. A avaliação é calculada a partir de MAN.11, sem substituir a leitura. |
-| MAN.19 | Selecione OK, NOK ou N/A. |
+| MAN.12 | Registe o tempo de disparo configurado em **ms** ou indique **NA**. Aceita até seis algarismos inteiros. A fotografia é opcional. |
+| MAN.13 | Introduza a intensidade medida em **mA**, até 6 algarismos, sem casas decimais, ou selecione N/A. **Anexe uma fotografia quando aplicável. Em N/A, a fotografia é opcional e a observação é obrigatória.** A avaliação é calculada quando MAN.11 contém um calibre válido. |
+| MAN.14 | Registe o tempo medido com o testador em **ms** ou indique **NA**. Escolha OK, NOK ou N/A. OK e NOK exigem fotografia. NOK e N/A exigem observação. |
+| MAN.16 a MAN.19 | No campo **Valor medido (ou NA)**, introduza o resultado do isolamento. São possíveis leituras do instrumento como **>500 MΩ** ou **OL**, além de N/A. |
+| MAN.20 | Introduza a resistência de terra em Ω, até 5 algarismos inteiros e 2 casas decimais, ou selecione N/A. Ao selecionar N/A, o campo do valor mostra **NA**. A avaliação é calculada a partir de MAN.11, sem substituir a leitura. |
+| MAN.21 | Selecione OK, NOK ou N/A. |
 
 ### Intensidade diferencial e resistência de terra
 
-**1 A = 1000 mA; 0,03 A = 30 mA.** Em MAN.11 e MAN.12, a vírgula ou o ponto ficam visíveis com um aviso. Escreva um valor inteiro em mA para validar a leitura. Em rascunhos antigos, valores com unidade explícita são convertidos quando possível; um valor sem unidade ou ambíguo é mostrado como **Valor anterior** e deve ser confirmado em mA.
+**1 A = 1000 mA; 0,03 A = 30 mA.** Em MAN.11 e MAN.13, a vírgula ou o ponto ficam visíveis com um aviso. Escreva um valor inteiro em mA para validar a leitura. Em rascunhos antigos, valores com unidade explícita são convertidos quando possível; um valor sem unidade ou ambíguo é mostrado como **Valor anterior** e deve ser confirmado em mA.
 
-Com MAN.11 válido, MAN.12 fica **NOK** se a leitura for menor ou igual a 50% ou maior ou igual a 105% do calibre configurado. Entre esses limites, fica OK. Exemplo: para 300 mA, 150 mA e 315 mA são NOK. A app sugere «Valor de intensidade de disparo diferencial fora do calibre configurado».
+Com MAN.11 válido, MAN.13 fica **NOK** se a leitura for menor ou igual a 50% ou maior ou igual a 105% do calibre configurado. Entre esses limites, fica OK. Exemplo: para 300 mA, 150 mA e 315 mA são NOK. A app sugere «Proteção diferencial não dispara».
 
-Para MAN.18, a app usa por agora **R máximo = 50 / (MAN.11 / 1000)**, em Ω. Acima desse limite, marca NOK e sugere «Valor de terra de proteção elevado e acima do limite para o calibre da proteção diferencial configurada». Até ao limite, marca OK; se a leitura também for superior a 50 Ω, sugere «Valor de terra de proteção elevado mas dentro de limites para o calibre da proteção diferencial configurada». Para 300 mA, 166,66 Ω fica OK e 166,67 Ω fica NOK. A igualdade ao limite é aceite.
+Em MAN.12 e MAN.14, **1s = 1000ms**. Por exemplo, introduza **500** para meio segundo. Em MAN.14, se a proteção não disparar, pode indicar **NA** no valor, escolher **NOK** e anexar a fotografia. A app sugere «Proteção diferencial não dispara». Se o teste não foi realizado, escolha **N/A**. A fotografia é dispensada e a app sugere «Não testado devido a veículo em carga». Toque ou clique na observação para escrever o motivo que se aplica.
+
+Para MAN.20, a app usa por agora **R máximo = 50 / (MAN.11 / 1000)**, em Ω. Acima desse limite, marca NOK e sugere «Valor de terra de proteção elevado e acima do limite para o calibre da proteção diferencial configurada». Até ao limite, marca OK; se a leitura também for superior a 50 Ω, sugere «Valor de terra de proteção elevado mas dentro de limites para o calibre da proteção diferencial configurada». Para 300 mA, 166,66 Ω fica OK e 166,67 Ω fica NOK. A igualdade ao limite é aceite.
 
 **O critério temporário de 50 V não cobre todas as instalações.** As RTIEBT, 413.1.4.2, estabelecem RA × Ia ≤ 50 V no esquema TT. O Guia Técnico CTE64, edição 3, 5.3.2 (página 28), prevê **25 V** para postos acessíveis ao público no exterior. Consulte as referências na secção 16; confirme o caso aplicável antes de interpretar o resultado.
 
-Mudar MAN.11 recalcula MAN.12 e MAN.18. O servidor verifica o mesmo cálculo ao guardar e fechar. N/A retira a avaliação calculada; voltar a uma medição exige uma leitura válida. Uma avaliação NOK exige observação e, quando aplicável, fotografia.
+Mudar MAN.11 recalcula MAN.13 e MAN.20. O servidor verifica o mesmo cálculo ao guardar e fechar. N/A retira a avaliação calculada; voltar a uma medição exige uma leitura válida. Uma avaliação NOK exige observação e, quando aplicável, fotografia.
 
 ### Indicações de tensão fora do intervalo
 
@@ -189,15 +203,15 @@ Os vídeos têm controlos de reprodução ou descarga. Confirme o enquadramento 
 | Vídeos | MP4 ou 3GP, até 120 segundos e 60 MiB por ficheiro. |
 | Total por relatório | Até 200 evidências e 400 MiB no conjunto dos ficheiros. |
 
-**Evidência obrigatória significa sempre fotografia:** um vídeo não cumpre este requisito. Em MAN.14 a MAN.18, anexe uma fotografia para OK e NOK; em N/A, escreva uma observação. Associe uma fotografia à própria pergunta que a exige. N/A dispensa a fotografia, incluindo em **MAN.12**.
+**Evidência obrigatória significa sempre fotografia:** um vídeo não cumpre este requisito. Em MAN.16 a MAN.20, anexe uma fotografia para OK e NOK; em N/A, escreva uma observação. Associe uma fotografia à própria pergunta que a exige. N/A dispensa a fotografia, incluindo em **MAN.13 e MAN.14**.
 
 ### Fotografias antes e depois da manutenção
 
-Em **EST.01**, registe o interior, exterior e estado de limpeza antes da tarefa, mostrando todos os componentes. Em **MAN.21**, registe as mesmas vistas e a limpeza depois da manutenção. **EST.10 foi retirado**. EST.13 verifica apenas o tarifário e EST.16 apenas os autocolantes da DGEG.
+Em **EST.01**, registe o interior, exterior e estado de limpeza antes da tarefa, mostrando todos os componentes. Em **MAN.23**, registe as mesmas vistas e a limpeza depois da manutenção. **EST.10 foi retirado**. EST.13 verifica apenas o tarifário e EST.16 apenas os autocolantes da DGEG.
 
 ### Observações gerais opcionais
 
-**SEG.07**, **SITE.06**, **QVE.14**, **EST.18**, **MAN.22**, **CARG.07** e **FIN.03** permitem observações, fotografias e vídeos sem botões OK/NOK/N/A. Podem ficar vazios. Em **SEG.02 a SEG.06** não existem novos anexos nem botão de observação. A observação é obrigatória para NOK e, em **SEG.02 e SEG.04**, também para N/A.
+**SEG.07**, **SITE.06**, **QVE.14**, **EST.18**, **MAN.24**, **CARG.07** e **FIN.03** permitem observações, fotografias e vídeos sem botões OK/NOK/N/A. Podem ficar vazios. Em **SEG.02 a SEG.06** não existem novos anexos nem botão de observação. A observação é obrigatória para NOK e, em **SEG.02 e SEG.04**, também para N/A.
 
 ## 07 Registar o nome e a assinatura
 
@@ -228,7 +242,7 @@ A app permite reutilizar dados de **outro carregador do mesmo contrato**. Confir
 | Opção | O que é copiado |
 | --- | --- |
 | Copiar QVE de outro carregador… | Todo o grupo QVE, incluindo QVE.14, com respostas, observações e fotografias/vídeos associados. |
-| Copiar Medições de outro carregador… | Apenas MAN.04 a MAN.10, com observações e evidências associadas. Os outros itens MAN e MAN.22 mantêm-se. |
+| Copiar Medições de outro carregador… | Apenas MAN.04 a MAN.10, com observações e evidências associadas. Os outros itens MAN e MAN.24 mantêm-se. |
 
 1. No relatório de destino, abra o grupo **QVE** ou **MAN** e utilize a opção de cópia correspondente.
 
@@ -260,7 +274,7 @@ Pode ser necessária Internet para descarregar evidências da origem. Se ocorrer
 
 ### Pendências que merecem atenção
 
-**NOK:** exige uma observação. **N/A:** exige motivo em SEG.01, SEG.02, SEG.04; SITE.02 a SITE.04; QVE.02, QVE.04, QVE.09 a QVE.12; EST.01, EST.15, EST.16, EST.17; MAN.12 a MAN.18, MAN.20, MAN.21; cada ensaio CARG.01 e CARG.05. **MAN.02:** N/A não exige observação. **MAN.12:** N/A exige motivo, mas dispensa fotografia. Em SEG.02 a SEG.06, o campo obrigatório aparece automaticamente, sem botão de observação.
+**NOK:** exige uma observação. **N/A:** exige motivo em SEG.01, SEG.02, SEG.04; SITE.02 a SITE.04; QVE.02, QVE.04, QVE.09 a QVE.12; EST.01, EST.15, EST.16, EST.17; MAN.13 a MAN.20, MAN.22, MAN.23; cada ensaio CARG.01 e CARG.05. **MAN.02:** N/A não exige observação. **MAN.13 e MAN.14:** N/A exige motivo, mas dispensa fotografia. Em SEG.02 a SEG.06, o campo obrigatório aparece automaticamente, sem botão de observação.
 
 Uma medição com apenas OK/NOK pode continuar incompleta. Um vídeo, ou uma fotografia colocada noutra pergunta, não resolve uma fotografia obrigatória em falta.
 
@@ -351,7 +365,7 @@ O nome dos ficheiros junta o ID do carregador e o nome do contrato no formato **
 
 ### Consultar intervenções anteriores
 
-Na lista de carregadores, abra o relatório fechado que pretende consultar. Os relatórios anteriores conservam o formulário e a informação histórica guardados na intervenção. Por isso, podem apresentar uma ordem ou perguntas diferentes das de um rascunho atual.
+Na lista de carregadores, abra o relatório fechado que pretende consultar. Os relatórios anteriores conservam o formulário e a informação histórica guardados na intervenção. Ao corrigir um destes relatórios no desktop, o administrador preenche os novos tempos em MAN.12 e MAN.14. Depois de a correção ser aceite e sincronizada, pode exportar no Android o PDF e o ZIP atualizados.
 
 Em **EST.04**, pode indicar vários números de série do carregador e dos dispensers no mesmo campo; a fotografia desse item é opcional.
 
@@ -389,11 +403,11 @@ A eliminação permanente de um relatório no servidor não é revertida por uma
 | SITE | SITE.02 a SITE.04 |
 | QVE | QVE.01 e QVE.04 |
 | EST | EST.01, EST.05, EST.06, EST.13 e EST.16 |
-| MAN | MAN.04 a MAN.10, MAN.12, MAN.14 a MAN.18 e MAN.21 |
+| MAN | MAN.04 a MAN.10, MAN.13, MAN.14, MAN.16 a MAN.20 e MAN.23 |
 | CARG | Cada ensaio CARG.01 de conector e CARG.05 |
 | FIN | FIN.01 |
 
-N/A dispensa a fotografia, incluindo em **MAN.12**, mas pode exigir uma observação. Consulte os itens e motivos da secção 9. A revisão aplica as regras do relatório aberto.
+N/A dispensa a fotografia, incluindo em **MAN.13 e MAN.14**, mas pode exigir uma observação. Consulte os itens e motivos da secção 9. A revisão aplica as regras do relatório aberto.
 
 ### Observações sugeridas ao selecionar N/A
 
@@ -404,11 +418,11 @@ Ao selecionar N/A com a observação vazia, a app sugere os motivos abaixo. Conf
 | SITE.02 | Sem sinalização horizontal |
 | SITE.03 | Sem sinalética vertical |
 | SITE.04 | Sem proteção mecânica |
-| QVE.02, QVE.11, QVE.12, MAN.12 e MAN.13 | Não testado devido a veículo em carga |
+| QVE.02, QVE.11, QVE.12, MAN.13, MAN.14 e MAN.15 | Não testado devido a veículo em carga |
 | QVE.03 | Botoneira sem dupla sinalização |
 | QVE.09 | Apertos não verificados devido a veículo em carga |
 | QVE.10 | QVE sem sinalética |
-| MAN.20 | Apertos não verificados devido a veículo em carga |
+| MAN.22 | Apertos não verificados devido a veículo em carga |
 | Cada ensaio CARG.01 de conector | Veículo usado não compatível |
 | EST.15 | Sem TPM |
 
@@ -527,22 +541,31 @@ Esta referência abrange todos os campos do formulário atual. A secção 5 deta
 | **MAN.10** — Medir valor de tensão N - T (<50 V) e registar foto | Introduza a tensão em V ou N/A. Consulte o formato na secção 5. | N/A: observação opcional. Fotografia obrigatória quando aplicável. |
 
 
-### MAN - Manutenção — MAN.11 a MAN.22
+### MAN - Manutenção — MAN.11 a MAN.15
 
 | Campo e verificação | Como preencher | Requisitos |
 | --- | --- | --- |
 | **MAN.11** — Proteção diferencial QVE e Carregador - Indicar a intensidade de disparo configurada | Introduza o calibre em mA, de 1 a 999999, sem decimais, ou N/A. | Texto obrigatório. Fotografias e vídeos opcionais. |
-| **MAN.12** — Proteção diferencial QVE e Carregador - Indique o valor da intensidade de disparo com testador | Registe a intensidade em mA, até 6 algarismos e sem decimais, ou N/A. Avaliação calculada com MAN.11. | N/A: observação obrigatória. Fotografia obrigatória quando aplicável. |
-| **MAN.13** — Proteção diferencial QVE e Carregador - Teste manual do dispositivo | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia opcional. |
-| **MAN.14** — Teste de isolamento: Terra - L1 (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
-| **MAN.15** — Teste de isolamento: Terra - L2 (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
-| **MAN.16** — Teste de isolamento: Terra - L3 (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
-| **MAN.17** — Teste de isolamento: Terra - N (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
-| **MAN.18** — Valor da resistência da terra | Registe a resistência em Ω ou N/A. O valor mostra NA em N/A. Avaliação calculada com MAN.11 e o critério de 50 V. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
-| **MAN.19** — Verifique o estado dos filtros | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia opcional. |
-| **MAN.20** — Verifique todos os apertos do carregador (fontes de alimentação, disjuntores diferenciais, disjuntores, contadores, placas de hardware, etc.) | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia opcional. |
-| **MAN.21** — Fotografias do interior e exterior do carregador e sua limpeza depois da tarefa executada (visualizar todos os componentes internos e externos) | Selecione OK, NOK ou N/A. | Fotografia obrigatória quando aplicável; N/A exige observação. |
-| **MAN.22** — Observações gerais da manutenção | Observações, fotografias e vídeos opcionais. Pode ficar vazio. | Sem OK/NOK/N/A. |
+| **MAN.12** — Proteção diferencial QVE e Carregador - Indicar o tempo de disparo configurado | Registe até 6 algarismos inteiros em ms ou indique NA. 1s = 1000ms. | Fotografia opcional. |
+| **MAN.13** — Proteção diferencial QVE e Carregador - Indique o valor da intensidade de disparo com testador | Registe a intensidade em mA, até 6 algarismos e sem decimais, ou N/A. Avaliação calculada com MAN.11. | N/A: observação obrigatória. Fotografia obrigatória quando aplicável. |
+| **MAN.14** — Proteção diferencial QVE e Carregador - Indicar o tempo de disparo com testador | Registe até 6 algarismos inteiros em ms ou indique NA. Escolha OK, NOK ou N/A. | OK e NOK exigem fotografia. NOK e N/A exigem observação. A fotografia é opcional em N/A. |
+| **MAN.15** — Proteção diferencial QVE e Carregador - Teste manual do dispositivo | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia opcional. |
+
+![MAN.14 em NOK com observação sugerida e fotografia em falta, no Android.](manuals/images/tempo-disparo-android.png)
+
+### MAN - Manutenção — MAN.16 a MAN.24
+
+| Campo e verificação | Como preencher | Requisitos |
+| --- | --- | --- |
+| **MAN.16** — Teste de isolamento: Terra - L1 (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
+| **MAN.17** — Teste de isolamento: Terra - L2 (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
+| **MAN.18** — Teste de isolamento: Terra - L3 (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
+| **MAN.19** — Teste de isolamento: Terra - N (>500 MΩ) | Registe o isolamento (por exemplo, >500 MΩ ou OL) ou N/A. Avaliação OK/NOK separada. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
+| **MAN.20** — Valor da resistência da terra | Registe a resistência em Ω ou N/A. O valor mostra NA em N/A. Avaliação calculada com MAN.11 e o critério de 50 V. | N/A: observação obrigatória. Fotografia obrigatória para OK e NOK; dispensada em N/A. |
+| **MAN.21** — Verifique o estado dos filtros | Selecione OK, NOK ou N/A. | N/A: observação opcional. Fotografia opcional. |
+| **MAN.22** — Verifique todos os apertos do carregador (fontes de alimentação, disjuntores diferenciais, disjuntores, contadores, placas de hardware, etc.) | Selecione OK, NOK ou N/A. | N/A: observação obrigatória. Fotografia opcional. |
+| **MAN.23** — Fotografias do interior e exterior do carregador e sua limpeza depois da tarefa executada (visualizar todos os componentes internos e externos) | Selecione OK, NOK ou N/A. | Fotografia obrigatória quando aplicável; N/A exige observação. |
+| **MAN.24** — Observações gerais da manutenção | Observações, fotografias e vídeos opcionais. Pode ficar vazio. | Sem OK/NOK/N/A. |
 
 
 ### CARG - Testes de Carga

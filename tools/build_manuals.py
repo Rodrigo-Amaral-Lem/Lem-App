@@ -70,12 +70,16 @@ def convert(platform):
         elif line.startswith('### '):
             # Keep the desktop correction procedure together after the expanded
             # batch-export instructions instead of splitting its first paragraph.
-            if ((section == 15 and not line.startswith('### SEG '))
+            if ((section == 3 and line.startswith('### Apagar e recuperar pedidos'))
+                    or (section == 15 and not line.startswith('### SEG '))
                     or (section == 5 and line.startswith('### Intensidade diferencial'))
                     or (section == 14 and line.startswith('### Verificação antes de'))
                     or (platform == 'desktop' and section == 12 and line.startswith('### Corrigir um relatório fechado'))):
                 body.append('#pagebreak(weak: true)')
             body.append('#heading(level: 2)[' + inline(line[4:]) + ']')
+        elif picture := re.fullmatch(r'!\[([^\]]+)\]\(manuals/(images/[a-z0-9-]+\.png)\)', line):
+            caption, path = picture.groups()
+            body.append('#screenshot(' + quoted(path) + ', ' + quoted(caption) + ', height: 120mm)')
         elif line.startswith('|'):
             rows = []
             while i < len(lines) and lines[i].strip().startswith('|'):

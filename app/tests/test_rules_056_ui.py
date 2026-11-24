@@ -10,7 +10,7 @@ def checks():
  try:
     w.setProperty('splashActive',False);w.setWidth(390);w.setHeight(844)
     js('selectSection(4)');QTest.qWait(50)
-    for number in range(14,19):
+    for number in range(16,21):
         key=f'MAN.{number:02d}'
         trigger('answer_'+key+'_OK');assert values['current']['payload']['answers'][key].get('assessment')=='OK'
         trigger('answer_'+key+'_NOK');assert values['current']['payload']['answers'][key].get('assessment')=='NOK'
@@ -23,7 +23,7 @@ def checks():
     js('qveCopyDialog.accept()');assert measurement_copy_calls==['other-report']
     values['copyingGroup']='MAN';lem.changed.emit();QTest.qWait(20)
     assert not find_visual(w.contentItem(),'checkpoint_MAN.04').property('enabled')
-    assert find_visual(w.contentItem(),'checkpoint_MAN.18').property('enabled')
+    assert find_visual(w.contentItem(),'checkpoint_MAN.20').property('enabled')
     js('selectSection(3)');QTest.qWait(20)
     assert find_visual(w.contentItem(),'checkpoint_EST.01').property('enabled')
     js('selectSection(2)');QTest.qWait(20)
@@ -47,7 +47,7 @@ def checks():
     assert js('photoDialog.fileMode === FileDialog.OpenFiles')
     assert js('videoDialog.fileMode === FileDialog.OpenFiles')
     assert not errors,errors
-    print('PASS: MAN.14-18 manual OK/NOK, N/A observation/photo rules, measurement copy action, scoped editing and multi-file picker modes')
+    print('PASS: MAN.16-20 manual OK/NOK, N/A observation/photo rules, measurement copy action, scoped editing and multi-file picker modes')
     from shiboken6 import delete
     delete(engine);app.exit(0)
  except Exception:

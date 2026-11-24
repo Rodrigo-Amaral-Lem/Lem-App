@@ -17,7 +17,7 @@ w.setWidth(390)
 w.setHeight(844)
 QTest.qWait(100)
 
-key = "MAN.18"
+key = "MAN.20"
 suggestion = "Valor de terra de proteção elevado mas dentro de limites para o calibre da proteção diferencial configurada"
 
 
@@ -75,11 +75,12 @@ try:
         for item in section["items"] if item.get("na_notes_default")
     ]
     cases.extend([
-        (4, "MAN.12", "400 mA", "NOK",
-         "Valor de intensidade de disparo diferencial fora do calibre configurado"),
-        (4, "MAN.18", "200 Ω", "NOK",
+        (4, "MAN.13", "400 mA", "NOK",
+         "Proteção diferencial não dispara"),
+        (4, "MAN.14", "120 ms", "NOK", "Proteção diferencial não dispara"),
+        (4, "MAN.20", "200 Ω", "NOK",
          "Valor de terra de proteção elevado e acima do limite para o calibre da proteção diferencial configurada"),
-        (4, "MAN.18", "150 Ω", "OK", suggestion),
+        (4, "MAN.20", "150 Ω", "OK", suggestion),
     ])
     for section_index, question, value, assessment, generated in cases:
         js(f"selectSection({section_index})")

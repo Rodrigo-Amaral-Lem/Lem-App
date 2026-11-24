@@ -1375,7 +1375,7 @@ QJsonObject Lem::receivedPhotoPaths(QJsonObject report) const {
 
 // Hot input path: update memory and queue a small journal instead of rewriting the cache.
 // _edit_seq distinguishes newer local typing from an older in-flight server snapshot.
-void Lem::answer(QString key, QString value, QString notes) {
+void Lem::answer(QString key, QString value, QString notes, bool readingOnly) {
     if (!storageWritable()) return;
     if (copyLocksCheckpoint(m_current["id"].toString(), key) || m_busy || m_current.isEmpty() || m_current["_conflict"].toBool() ||
         m_current["status"].toString() == "closed" || (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]))
@@ -1400,14 +1400,16 @@ void Lem::answer(QString key, QString value, QString notes) {
     // Provenance, not wording alone, identifies a removable automatic note.
     if (notes != previousNotes) nextAnswer.remove("suggested_notes");
     nextAnswer["notes"] = notes;
-    if (valueChanged && (wasNA || isNA || value.isEmpty() || previous["value"] == "OK" || previous["value"] == "NOK"))
+    // A missing tester reading and a not-applicable test are separate choices.
+    const bool keepAssessment = readingOnly && (previous["assessment"] == "OK" || previous["assessment"] == "NOK");
+    if (!keepAssessment && (valueChanged || (isNA && previous.contains("assessment"))) && (wasNA || isNA || value.isEmpty() || previous["value"] == "OK" || previous["value"] == "NOK"))
         MaintenanceRules::clearSuggestion(nextAnswer);
     nextAnswer["value"] = value;
     if (!value.trimmed().isEmpty()) nextAnswer.remove("previous_value");
-    if (isNA || value.isEmpty()) {
+    if (!keepAssessment && (isNA || value.isEmpty())) {
         nextAnswer.remove("assessment"); nextAnswer.remove("auto_assessment");
     }
-    if (isNA && !wasNA)
+    if (isNA && !keepAssessment && (!wasNA || previous.contains("assessment")))
         MaintenanceRules::suggest(nextAnswer, Checklist::naNotesDefault(m_current["template"].toObject(), key));
     if (answers[key].toObject() == nextAnswer)
         return;
@@ -1417,9 +1419,11 @@ void Lem::answer(QString key, QString value, QString notes) {
         payload["signatures"] = signatures;
     }
     answers[key] = nextAnswer;
-    if (m_template["version"].toInt() >= 7 && valueChanged &&
-        (key == "MAN.11" || key == "MAN.12" || key == "MAN.18"))
-        answers = MaintenanceRules::apply(answers, true);
+    const int version = m_template["version"].toInt();
+    if (version >= 7 && valueChanged &&
+        (key == "MAN.11" || key == (version >= 8 ? "MAN.13" : "MAN.12") ||
+         key == (version >= 8 ? "MAN.20" : "MAN.18")))
+        answers = MaintenanceRules::apply(answers, true, version);
     payload["answers"] = answers;
     m_current["payload"] = payload;
     m_current["dirty"] = true;
@@ -1436,7 +1440,7 @@ void Lem::answer(QString key, QString value, QString notes) {
 // observation, even one with identical wording, has no marker and is preserved.
 void Lem::beginNotesEdit(QString key) {
     const auto currentAnswer = m_current["payload"].toObject()["answers"].toObject()[key].toObject();
-    if (MaintenanceRules::untouched(currentAnswer)) answer(key, currentAnswer["value"].toString(), "");
+    if (MaintenanceRules::untouched(currentAnswer)) answer(key, currentAnswer["value"].toString(), "", true);
 }
 // Manual assessment is independent of the technician's mandatory reading.
 void Lem::setAssessment(QString key, QString assessment) {
@@ -1444,25 +1448,35 @@ void Lem::setAssessment(QString key, QString assessment) {
     if (copyLocksCheckpoint(m_current["id"].toString(), key) || m_busy || m_current.isEmpty() ||
         m_current["_conflict"].toBool() || m_current["status"] != "draft" ||
         (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]) || (assessment != "OK" && assessment != "NOK")) return;
+    QString nokNote;
+    bool explicitAssessment = false;
     bool allowed = false;
     for (auto section : m_template["sections"].toArray())
         for (auto item : section.toObject()["items"].toArray())
-            if (item.toObject()["id"] == key && item.toObject()["reading_required"].toBool()) allowed = true;
+            if (item.toObject()["id"] == key && item.toObject()["reading_required"].toBool()) {
+                allowed = true;
+                nokNote = item.toObject()["nok_notes_default"].toString();
+                explicitAssessment = item.toObject()["assessment_required"].toBool();
+            }
     if (!allowed) return;
     auto payload = m_current["payload"].toObject();
     auto answers = payload["answers"].toObject();
     auto answer = answers[key].toObject();
-    if (answer["assessment"] == assessment && !Measurements::notApplicable(answer["value"].toString())) return;
-    if (answer["assessment"] != assessment || Measurements::notApplicable(answer["value"].toString()))
-        MaintenanceRules::clearSuggestion(answer);
-    if (Measurements::notApplicable(answer["value"].toString())) answer["value"] = "";
+    // An explicit OK/NOK may have an unavailable measurement. Keep that
+    // reading when changing the outcome. Switching from N/A starts a new test.
+    const bool wasNotTested = Measurements::notApplicable(answer["value"].toString())
+        && (!explicitAssessment || answer.value("assessment").toString().isEmpty());
+    if (answer["assessment"] == assessment && !wasNotTested) return;
+    MaintenanceRules::clearSuggestion(answer);
+    if (wasNotTested) answer["value"] = "";
     answer["value"] = answer["value"].toString();
     answer["notes"] = answer["notes"].toString();
+    if (assessment == "NOK") MaintenanceRules::suggest(answer, nokNote);
     answer["assessment"] = assessment;
     answer.remove("auto_assessment");
     answers[key] = answer;
     // A manual OK cannot override a measured failure; custom notes still survive.
-    if (m_template["version"].toInt() >= 7) answers = MaintenanceRules::apply(answers, false);
+    if (m_template["version"].toInt() >= 7) answers = MaintenanceRules::apply(answers, false, m_template["version"].toInt());
     payload["answers"] = answers;
     m_current["payload"] = payload;
     m_current["dirty"] = true;
@@ -2437,7 +2451,7 @@ void Lem::finish() {
         (!correctionAllowed(m_current) || m_current["owner_id"] != m_user["id"]) || m_current["status"].toString() == "closed")
         return;
     auto answers = m_current["payload"].toObject()["answers"].toObject();
-    if (m_template["version"].toInt() >= 7) answers = MaintenanceRules::apply(answers, false);
+    if (m_template["version"].toInt() >= 7) answers = MaintenanceRules::apply(answers, false, m_template["version"].toInt());
     auto photos = m_current["photos"].toArray();
     QStringList errors;
     for (const auto &entry : photos) {
@@ -2456,7 +2470,7 @@ void Lem::finish() {
             auto id = item["id"].toString();
             auto a = answers.value(id).toObject();
             auto value = a["value"].toString().trimmed();
-            const auto measurementKey = m_template["version"].toInt() < 7 && Measurements::milliamp(id) ? Measurements::canonical(id) : id;
+            const auto measurementKey = m_template["version"].toInt() < 7 && Measurements::milliamp(id) ? Measurements::canonical(id) : item.value("measurement_key").toString(id);
             if (Measurements::digits(measurementKey) && !value.isEmpty()) {
                 bool valid = false;
                 const auto formatted = Measurements::format(measurementKey, value, &valid);
@@ -2491,17 +2505,22 @@ void Lem::finish() {
                 errors << id + ": escolha OK, NOK ou N/A";
             if (value.isEmpty() && !item["optional"].toBool())
                 errors << id + ": falta resposta";
+            if (item["assessment_required"].toBool() && !Measurements::notApplicable(value) &&
+                a["assessment"] != "OK" && a["assessment"] != "NOK")
+                errors << id + ": escolha OK, NOK ou N/A";
             if (item["reading_required"].toBool() && (value.compare("OK", Qt::CaseInsensitive) == 0 || value.compare("NOK", Qt::CaseInsensitive) == 0))
                 errors << id + ": falta valor medido";
             if (!item["notes_disabled"].toBool() && (value == "NOK" || a["assessment"] == "NOK") && a["notes"].toString().trimmed().isEmpty())
                 errors << id + ": falta observação";
-            if (item["na_notes_required"].toBool() && Measurements::notApplicable(value) && a["notes"].toString().trimmed().isEmpty())
+            const bool testNotApplicable = Measurements::notApplicable(value) &&
+                !(item["assessment_required"].toBool() && (a["assessment"] == "OK" || a["assessment"] == "NOK"));
+            if (item["na_notes_required"].toBool() && testNotApplicable && a["notes"].toString().trimmed().isEmpty())
                 errors << id + ": N/A precisa de observação";
             bool found = false;
             for (auto p : photos)
                 if (p.toObject()["checkpoint"].toString() == id && !p.toObject()["mime"].toString().startsWith("video/"))
                     found = true;
-            if (item["photo_required"].toBool() && (item["photo_always"].toBool() || !Measurements::notApplicable(value)) && !found)
+            if (item["photo_required"].toBool() && (item["photo_always"].toBool() || !testNotApplicable) && !found)
                 errors << id + ": falta fotografia";
         }
     if (!errors.isEmpty()) {
@@ -3014,9 +3033,13 @@ void Lem::deleteContract(QString id, QString confirmation) {
         return;
     m_busy = true;
     emit changed();
-    request("POST", "/api/contracts/" + id + "/trash", json({{"confirmation", confirmation}}),
-            [this, id](QByteArray) {
-                suspendContractSync(id, "Contrato em espera de eliminação durante 30 dias. Sincronização suspensa até recuperação pelo administrador.");
+    bool job = false;
+    for (const auto row : m_contracts)
+        if (row.toObject()["id"] == id) job = row.toObject().contains("intervention");
+    request("POST", (job ? "/api/interventions/" : "/api/contracts/") + id + "/trash", json({{"confirmation", confirmation}}),
+            [this, id, job](QByteArray) {
+                suspendContractSync(id, job ? "Pedido em recuperação durante 48 horas." :
+                                             "Contrato em recuperação durante 30 dias.");
                 if (m_contract == id) {
                     m_current = {};
                     m_contract.clear();
@@ -3031,19 +3054,25 @@ void Lem::deleteContract(QString id, QString confirmation) {
                         m_contracts.removeAt(i);
                 m_busy = false;
                 persist();
-                status("Contrato apagado. Pode recuperá-lo na Gestão durante 30 dias.");
+                status(job ? "Pedido apagado. Pode recuperá-lo durante 48 horas." : "Contrato apagado. Pode recuperá-lo na Gestão durante 30 dias.");
             });
 }
 
-void Lem::loadDeletedContracts() {
-    if (switchingBlocked() || m_user["role"].toString() != "admin" || !online())
-        return;
+void Lem::loadDeletedContracts(QString kind) {
+    if (m_busy || m_user["role"].toString() != "admin" || !online()) return;
     m_deletedContracts = {};
     emit contractTrashChanged();
     m_busy = true;
     emit changed();
-    request("GET", "/api/admin/deleted-contracts", {}, [this](QByteArray data) {
-        m_deletedContracts = QJsonDocument::fromJson(data).array();
+    const auto token = m_token;
+    request("GET", "/api/admin/deleted-contracts", {}, [this, kind, token](QByteArray data) {
+        if (m_token != token) return;
+        const auto rows = QJsonDocument::fromJson(data).array();
+        for (const auto row : rows) {
+            const auto type = row.toObject()["kind"].toString();
+            const bool intervention = type == "corrective" || type == "commissioning";
+            if (kind.isEmpty() ? !intervention : kind == type) m_deletedContracts.append(row);
+        }
         m_busy = false;
         emit contractTrashChanged();
         emit changed();
@@ -3061,7 +3090,7 @@ void Lem::restoreContract(QString id) {
                 m_deletedContracts.removeAt(i);
         m_busy = false;
         emit contractTrashChanged();
-        status("Contrato recuperado com os seus carregadores, reports e fotografias.");
+        status("Recuperação concluída. Os relatórios e fotografias estão disponíveis.");
         refresh();
     });
 }

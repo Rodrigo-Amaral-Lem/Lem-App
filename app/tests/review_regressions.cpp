@@ -23,22 +23,9 @@ struct LemReviewTest {
         client.demo();
         auto report = client.m_current;
         const auto id = report["id"].toString();
-        auto schema = report["template"].toObject();
-        schema["version"] = 6;
-        auto sections = schema["sections"].toArray();
-        for (int n = 0; n < sections.size(); ++n) {
-            auto section = sections[n].toObject();
-            if (section["id"] != "MAN") continue;
-            QJsonArray items;
-            for (auto entry : section["items"].toArray()) {
-                auto item = entry.toObject();
-                if (item["id"] == "MAN.21") continue;
-                if (item["id"] == "MAN.22") item["id"] = "MAN.21";
-                items.append(item);
-            }
-            section["items"] = items; sections[n] = section;
-        }
-        schema["sections"] = sections; report["template"] = schema;
+        QFile historical(":/shared/checklist-v6.json");
+        if (!historical.open(QIODevice::ReadOnly)) return false;
+        report["template"] = QJsonDocument::fromJson(historical.readAll()).object();
         report["payload"] = QJsonObject{{"answers", QJsonObject{
             {"MAN.21", QJsonObject{{"value", ""}, {"notes", "Preservar antes de abrir"}}},
             {"MAN.11", QJsonObject{{"value", "0.03 A"}, {"notes", ""}}}}}};
@@ -62,9 +49,9 @@ struct LemReviewTest {
         QFile cache(client.cacheDir() + "/cache.json");
         if (!cache.open(QIODevice::ReadOnly)) return false;
         const auto saved = QJsonDocument::fromJson(cache.readAll()).object()["reports"].toObject()[id].toObject();
-        const bool passed = updated["template"].toObject()["version"] == 7 && client.m_current.value("id").toString().isEmpty()
-            && answers["MAN.22"].toObject()["notes"] == "Preservar antes de abrir"
-            && answers["MAN.11"].toObject()["value"] == "30 mA" && !answers.contains("MAN.21")
+        const bool passed = updated["template"].toObject()["version"] == 8 && client.m_current.value("id").toString().isEmpty()
+            && answers["MAN.24"].toObject()["notes"] == "Preservar antes de abrir"
+            && answers["MAN.11"].toObject()["value"] == "30 mA" && !answers.contains("MAN.23")
             && updated["_inflight_payload"] == updated["payload"]
             && saved["template"] == updated["template"] && saved["payload"] == updated["payload"];
         if (!passed) qCritical() << "Unopened migration" << updated["template"].toObject()["version"]

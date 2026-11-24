@@ -5,7 +5,7 @@ from pathlib import Path
 source=Path(__file__).with_name('test_report_tabs.py')
 exec(compile(source.read_text().partition('def run_tests():')[0],str(source),'exec'))
 js('splashActive=false;page="report"');w.setWidth(390);w.setHeight(844)
-for index,key in [(1,'SITE.06'),(2,'QVE.14'),(3,'EST.18'),(4,'MAN.22'),(5,'CARG.07'),(6,'FIN.03')]:
+for index,key in [(1,'SITE.06'),(2,'QVE.14'),(3,'EST.18'),(4,'MAN.24'),(5,'CARG.07'),(6,'FIN.03')]:
  js(f'selectSection({index})');QTest.qWait(30)
  assert find_visual(w.contentItem(),'notes_'+key).isVisible()
  assert find_visual(w.contentItem(),'addPhoto_'+key).isVisible()

@@ -16,7 +16,7 @@ instale a fonte Arial no sistema. Não é necessário ter a aplicação Lem aber
 Edite os ficheiros em UTF-8. No Markdown, `##` inicia uma das 16 secções, `###` cria um
 subtítulo, `**texto**` marca negrito e as tabelas usam barras `|`. O conversor suporta
 estes elementos, parágrafos, ligações e passos numerados; não é um conversor Markdown genérico.
-Mantenha os números explícitos dos passos. Se acrescentar secções, ajuste também as associações
+Para ilustrar uma pergunta na própria secção, use a sintaxe Markdown de imagem com legenda e um PNG em `manuals/images/`, como no exemplo de MAN.14 do manual Android. Mantenha os números explícitos dos passos. Se acrescentar secções, ajuste também as associações
 das figuras e a verificação do número de secções no gerador.
 
 As ilustrações mostram dados fictícios. As capturas Android foram obtidas num emulador;

@@ -3,6 +3,8 @@
 #pragma once
 #include "MaintenanceRules.h"
 #include <QJsonArray>
+#include <QFile>
+#include <QJsonDocument>
 #include <QStringList>
 
 namespace MaintenanceMigration {
@@ -169,4 +171,82 @@ inline QJsonObject report(QJsonObject result) {
     return result;
 }
 
+
+inline QString tripTimeCheckpoint(const QString &key) {
+    if (key == "MAN.12") return QStringLiteral("MAN.13");
+    if (key.size() == 6 && key >= "MAN.13" && key <= "MAN.22") {
+        bool numeric = false;
+        const int number = key.mid(4).toInt(&numeric);
+        if (numeric) return QString("MAN.%1").arg(number + 2);
+    }
+    return key;
+}
+
+inline QJsonObject tripTimeReport(QJsonObject result) {
+    auto schema = result["template"].toObject();
+    if (result["status"] != "draft" || schema["version"].toInt() != 7) return result;
+    // Use the shipped definitions for new questions; retain all frozen connector
+    // expansions and historical sections from the editable copy.
+    QFile file(":/shared/checklist-v1.json");
+    if (!file.open(QIODevice::ReadOnly)) return result;
+    QJsonObject definitions;
+    for (const auto section : QJsonDocument::fromJson(file.readAll()).object()["sections"].toArray())
+        if (section.toObject()["id"] == "MAN")
+            for (const auto entry : section.toObject()["items"].toArray())
+                definitions[entry.toObject()["id"].toString()] = entry;
+    auto sections = schema["sections"].toArray();
+    for (qsizetype i = 0; i < sections.size(); ++i) {
+        auto section = sections[i].toObject();
+        if (section["id"] != "MAN") continue;
+        QJsonArray items;
+        for (const auto entry : section["items"].toArray()) {
+            auto item = entry.toObject();
+            const auto old = item["id"].toString();
+            const auto key = tripTimeCheckpoint(old);
+            item["id"] = key;
+            if (key != old) item["measurement_key"] = old;
+            if (old == "MAN.12") item["nok_notes_default"] = definitions[key].toObject()["nok_notes_default"];
+            items.append(item);
+            if (old == "MAN.11" || old == "MAN.12")
+                items.append(definitions[old == "MAN.11" ? "MAN.12" : "MAN.14"]);
+        }
+        section["items"] = items;
+        sections[i] = section;
+    }
+    schema["version"] = 8;
+    schema["sections"] = sections;
+    result["template"] = schema;
+    for (const auto field : {"payload", "_inflight_payload"}) {
+        if (!result.value(field).isObject()) continue;
+        auto payload = result[field].toObject();
+        for (const auto name : {"answers", "signatures"}) {
+            if (!payload.value(name).isObject()) continue;
+            const auto original = payload[name].toObject();
+            QJsonObject mapped;
+            for (auto it = original.begin(); it != original.end(); ++it)
+                mapped[tripTimeCheckpoint(it.key())] = it.value();
+            if (QString::fromLatin1(name) == "answers") {
+                auto trip = mapped.value("MAN.13").toObject();
+                if (trip["assessment"] == "NOK" && MaintenanceRules::untouched(trip) &&
+                    trip["suggested_notes"] == MaintenanceRules::tripNote()) {
+                    trip["notes"] = QStringLiteral("Proteção diferencial não dispara");
+                    trip["suggested_notes"] = trip.value("notes");
+                    mapped["MAN.13"] = trip;
+                }
+            }
+            payload[name] = mapped;
+        }
+        result[field] = payload;
+    }
+    if (result.contains("photos")) {
+        auto photos = result["photos"].toArray();
+        for (qsizetype i = 0; i < photos.size(); ++i) {
+            auto photo = photos[i].toObject();
+            photo["checkpoint"] = tripTimeCheckpoint(photo["checkpoint"].toString());
+            photos[i] = photo;
+        }
+        result["photos"] = photos;
+    }
+    return result;
+}
 } // namespace MaintenanceMigration

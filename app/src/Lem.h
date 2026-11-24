@@ -222,7 +222,7 @@ class Lem : public QObject {
     Q_INVOKABLE void selectContract(QString id);
     // Local-first report editing and synchronization.
     Q_INVOKABLE bool openReport(QString chargerId, QString reportId = {});
-    Q_INVOKABLE void answer(QString checkpoint, QString value, QString notes);
+    Q_INVOKABLE void answer(QString checkpoint, QString value, QString notes, bool readingOnly = false);
     Q_INVOKABLE void beginNotesEdit(QString checkpoint);
     Q_INVOKABLE void setAssessment(QString checkpoint, QString assessment);
     Q_INVOKABLE void attach(QString checkpoint, QUrl file);
@@ -270,7 +270,9 @@ class Lem : public QObject {
     // Administrative Excel import and account/contract management.
     Q_INVOKABLE void createContract(QString company, int year, int semester, QString kind);
     Q_INVOKABLE void deleteContract(QString id, QString confirmation);
-    Q_INVOKABLE void loadDeletedContracts();
+    Q_INVOKABLE void loadDeletedContracts(QString kind = {});
+    Q_INVOKABLE void loadMemberships(QString contractId, bool corrective);
+    Q_INVOKABLE void changeMembership(QString contractId, QString memberId, bool corrective, bool restore);
     Q_INVOKABLE void restoreContract(QString id);
     Q_INVOKABLE void analyseExcel(QUrl file);
     Q_INVOKABLE void analyseContractIds(QUrl file, QString contractId);
@@ -308,6 +310,7 @@ class Lem : public QObject {
     void workOrdersChanged();
     void workOrderSaved(QString id);
     void correctiveContractsReceived(QString stationId, QVariantList contracts, QString error);
+    void membershipsReceived(QString contractId, QVariantList rows, QString error);
     void interventionSaved(QString id, bool saved, QString message);
     void contractsChanged();
     void contractTrashChanged();

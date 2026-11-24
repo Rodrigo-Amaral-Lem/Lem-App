@@ -53,17 +53,17 @@ int main(int argc,char **argv) {
             QJsonObject{{"id", "keep-one"}, {"checkpoint", "MAN.21"}},
             QJsonObject{{"id", "keep-two"}, {"checkpoint", "EST.10"}}}}};
     const auto upgraded = Checklist::correctedDraft(legacy);
-    CHECK(upgraded["template"].toObject()["version"] == 7);
+    CHECK(upgraded["template"].toObject()["version"] == 8);
     CHECK(Checklist::correctedDraft(upgraded) == upgraded);
     CHECK(upgraded["payload"] == upgraded["_inflight_payload"]);
     const auto migrated = upgraded["payload"].toObject()["answers"].toObject();
-    CHECK(migrated["MAN.22"].toObject()["notes"] == "Preservar manutenção");
+    CHECK(migrated["MAN.24"].toObject()["notes"] == "Preservar manutenção");
     CHECK(migrated["EST.18"].toObject()["notes"] == "Preservar limpeza");
-    CHECK(!migrated.contains("EST.10") && !migrated.contains("MAN.21"));
+    CHECK(!migrated.contains("EST.10") && !migrated.contains("MAN.23"));
     CHECK(migrated["MAN.11"].toObject()["value"] == "30 mA");
-    CHECK(migrated["MAN.12"].toObject()["previous_value"] == "30");
-    CHECK(migrated["MAN.12"].toObject()["value"] == "");
-    CHECK(upgraded["photos"].toArray()[0].toObject()["checkpoint"] == "MAN.22");
+    CHECK(migrated["MAN.13"].toObject()["previous_value"] == "30");
+    CHECK(migrated["MAN.13"].toObject()["value"] == "");
+    CHECK(upgraded["photos"].toArray()[0].toObject()["checkpoint"] == "MAN.24");
     CHECK(upgraded["photos"].toArray()[1].toObject()["checkpoint"] == "EST.18");
     legacy["status"] = "closed"; CHECK(Checklist::correctedDraft(legacy) == legacy);
 
@@ -78,28 +78,41 @@ int main(int argc,char **argv) {
     CHECK(answer("EST.15")["notes"] == "" && !answer("EST.15").contains("suggested_notes"));
     client.answer("EST.15", "NA", "Sem POS"); // Identical wording, now authored by the technician.
     client.answer("EST.15", "OK", "Sem POS"); CHECK(answer("EST.15")["notes"] == "Sem POS");
-    client.answer("MAN.11", "1000", ""); client.answer("MAN.12", "500", "");
-    CHECK(answer("MAN.12")["assessment"] == "NOK"); CHECK(MaintenanceRules::untouched(answer("MAN.12")));
+    client.answer("MAN.11", "1000", ""); client.answer("MAN.13", "500", "");
+    CHECK(answer("MAN.13")["assessment"] == "NOK"); CHECK(MaintenanceRules::untouched(answer("MAN.13")));
     // N/A replaces the numeric-failure suggestion with its own reason; clearing
     // a reading must not leave an obsolete automatic observation behind.
-    client.answer("MAN.12", "NA", answer("MAN.12")["notes"].toString());
-    CHECK(answer("MAN.12")["notes"] == QStringLiteral("Não testado devido a veículo em carga"));
-    client.answer("MAN.12", "500", answer("MAN.12")["notes"].toString());
-    CHECK(answer("MAN.12")["notes"] == MaintenanceRules::tripNote());
-    client.answer("MAN.12", "", answer("MAN.12")["notes"].toString());
-    CHECK(answer("MAN.12")["notes"] == "");
-    client.answer("MAN.12", "500", "");
-    client.beginNotesEdit("MAN.12"); CHECK(answer("MAN.12")["notes"] == "");
-    client.answer("MAN.12", "500", "Observação do técnico");
-    client.answer("MAN.12", "900", "Observação do técnico");
-    CHECK(answer("MAN.12")["assessment"] == "OK" && answer("MAN.12")["notes"] == "Observação do técnico");
-    client.answer("MAN.18", "51", ""); CHECK(answer("MAN.18")["assessment"] == "NOK");
-    client.answer("MAN.11", "300", ""); CHECK(answer("MAN.18")["assessment"] == "OK");
-    CHECK(answer("MAN.18")["notes"] == MaintenanceRules::earthHighNote());
-    client.answer("MAN.11", "0", ""); CHECK(!answer("MAN.18").contains("assessment"));
-    CHECK(answer("MAN.18")["notes"] == "");
+    client.answer("MAN.13", "NA", answer("MAN.13")["notes"].toString());
+    CHECK(answer("MAN.13")["notes"] == QStringLiteral("Não testado devido a veículo em carga"));
+    client.answer("MAN.13", "500", answer("MAN.13")["notes"].toString());
+    CHECK(answer("MAN.13")["notes"] == QStringLiteral("Proteção diferencial não dispara"));
+    client.answer("MAN.13", "", answer("MAN.13")["notes"].toString());
+    CHECK(answer("MAN.13")["notes"] == "");
+    client.answer("MAN.13", "500", "");
+    client.beginNotesEdit("MAN.13"); CHECK(answer("MAN.13")["notes"] == "");
+    client.answer("MAN.13", "500", "Observação do técnico");
+    client.answer("MAN.13", "900", "Observação do técnico");
+    CHECK(answer("MAN.13")["assessment"] == "OK" && answer("MAN.13")["notes"] == "Observação do técnico");
+    client.answer("MAN.20", "51", ""); CHECK(answer("MAN.20")["assessment"] == "NOK");
+    client.answer("MAN.11", "300", ""); CHECK(answer("MAN.20")["assessment"] == "OK");
+    CHECK(answer("MAN.20")["notes"] == MaintenanceRules::earthHighNote());
+    client.answer("MAN.11", "0", ""); CHECK(!answer("MAN.20").contains("assessment"));
+    CHECK(answer("MAN.20")["notes"] == "");
     client.answer("MAN.11", "300", "");
-    client.setAssessment("MAN.12", "OK"); CHECK(answer("MAN.12")["assessment"] == "NOK");
+    client.setAssessment("MAN.13", "OK"); CHECK(answer("MAN.13")["assessment"] == "NOK");
+
+    client.answer("MAN.12", "999999", "");
+    client.setAssessment("MAN.14", "NOK");
+    CHECK(answer("MAN.14")["notes"] == QStringLiteral("Proteção diferencial não dispara"));
+    client.answer("MAN.14", "NA", answer("MAN.14")["notes"].toString(), true);
+    client.setAssessment("MAN.14", "NOK");
+    CHECK(answer("MAN.14")["assessment"] == "NOK" && answer("MAN.14")["value"] == "NA");
+    client.beginNotesEdit("MAN.14"); CHECK(answer("MAN.14")["notes"] == "");
+    client.answer("MAN.14", "NA", "Comentário do técnico", true);
+    client.setAssessment("MAN.14", "OK");
+    CHECK(answer("MAN.14")["notes"] == QStringLiteral("Comentário do técnico"));
+    client.answer("MAN.14", "NA", "");
+    CHECK(!answer("MAN.14").contains("assessment"));
 
     for(const auto &section : client.sections())
         for(const auto &item : section.toMap()["items"].toList())
@@ -111,10 +124,10 @@ int main(int argc,char **argv) {
     QImage photo(8,8,QImage::Format_RGB32); photo.fill(Qt::cyan);
     const auto file=root.filePath("meter.png"); CHECK(photo.save(file));
     client.attach("MAN.07",QUrl::fromLocalFile(file));
-    client.attach("MAN.12",QUrl::fromLocalFile(file));
+    client.attach("MAN.13",QUrl::fromLocalFile(file));
     client.finish(); CHECK(client.current()["status"]=="closed");
     CHECK(client.current()["payload"].toMap()["answers"].toMap()["MAN.07"].toMap()["value"]=="206,99 V");
-    CHECK(client.current()["payload"].toMap()["answers"].toMap()["MAN.18"].toMap()["value"]==QStringLiteral("Não Aplicável"));
+    CHECK(client.current()["payload"].toMap()["answers"].toMap()["MAN.20"].toMap()["value"]==QStringLiteral("Não Aplicável"));
     if(argc>2) {
         QString error;
         CHECK(ReportPdf::write(QJsonObject::fromVariantMap(client.current()),QString::fromLocal8Bit(argv[2]),&error));

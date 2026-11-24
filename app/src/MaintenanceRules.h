@@ -39,11 +39,11 @@ inline void suggest(QJsonObject &answer, const QString &note) {
 }
 
 // -1 marks an unusable reading, including legacy units awaiting confirmation.
-inline qint64 reading(const QJsonObject &answers, const QString &key, int scale = 1) {
+inline qint64 reading(const QJsonObject &answers, const QString &key, int scale = 1, const QString &measurementKey = {}) {
     const auto answer = answers[key].toObject();
     if (answer.contains("previous_value")) return -1;
     bool valid = false;
-    const auto value = Measurements::format(key, answer["value"].toString(), &valid);
+    const auto value = Measurements::format(measurementKey.isEmpty() ? key : measurementKey, answer["value"].toString(), &valid);
     if (!valid || Measurements::notApplicable(value) || value == "OK" || value == "NOK") return -1;
     auto number = value.section(' ', 0, 0).replace(',', '.');
     bool numeric = false;
@@ -56,39 +56,43 @@ struct Assessment {
     QString note;
 };
 
-inline QMap<QString, Assessment> calculate(const QJsonObject &answers) {
+inline QMap<QString, Assessment> calculate(const QJsonObject &answers, int version = 7) {
     QMap<QString, Assessment> result;
     const qint64 configuredMilliamps = reading(answers, "MAN.11");
     if (configuredMilliamps <= 0) return result;
 
-    const qint64 tripMilliamps = reading(answers, "MAN.12");
+    const QString tripKey = version >= 8 ? "MAN.13" : "MAN.12";
+    const QString earthKey = version >= 8 ? "MAN.20" : "MAN.18";
+    const qint64 tripMilliamps = reading(answers, tripKey, 1, "MAN.12");
     if (tripMilliamps >= 0) {
         // Both endpoints fail. Cross-multiplication keeps 50% and 105% exact.
         const bool outsideTripBand = tripMilliamps * 100 >= configuredMilliamps * 105
                                      || tripMilliamps * 2 <= configuredMilliamps;
-        result["MAN.12"] = outsideTripBand ? Assessment{"NOK", tripNote()} : Assessment{"OK", {}};
+        result[tripKey] = outsideTripBand ? Assessment{"NOK", version >= 8 ? QStringLiteral("Proteção diferencial não dispara") : tripNote()} : Assessment{"OK", {}};
     }
 
     constexpr int hundredthsPerOhm = 100;
-    const qint64 earthHundredths = reading(answers, "MAN.18", hundredthsPerOhm);
+    const qint64 earthHundredths = reading(answers, earthKey, hundredthsPerOhm, "MAN.18");
     if (earthHundredths >= 0) {
         // Scale the form's temporary 50 V limit to hundredths of an ohm × mA.
         // Common/docs/report-contract.md describes the 25 V outdoor exception.
         constexpr qint64 scaledVoltageLimit = 50LL * hundredthsPerOhm * 1000;
         if (earthHundredths * configuredMilliamps > scaledVoltageLimit) {
-            result["MAN.18"] = {"NOK", earthFailNote()};
+            result[earthKey] = {"NOK", earthFailNote()};
         } else if (earthHundredths > 50 * hundredthsPerOhm) {
-            result["MAN.18"] = {"OK", earthHighNote()};
+            result[earthKey] = {"OK", earthHighNote()};
         } else {
-            result["MAN.18"] = {"OK", {}};
+            result[earthKey] = {"OK", {}};
         }
     }
     return result;
 }
 
-inline QJsonObject apply(QJsonObject answers, bool offerSuggestions) {
-    const auto calculated = calculate(answers);
-    for (const auto &key : {QString("MAN.12"), QString("MAN.18")}) {
+inline QJsonObject apply(QJsonObject answers, bool offerSuggestions, int version = 7) {
+    const auto calculated = calculate(answers, version);
+    const QString tripKey = version >= 8 ? "MAN.13" : "MAN.12";
+    const QString earthKey = version >= 8 ? "MAN.20" : "MAN.18";
+    for (const auto &key : {tripKey, earthKey}) {
         if (!answers.contains(key)) continue;
         auto answer = answers[key].toObject();
         if (calculated.contains(key)) {

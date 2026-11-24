@@ -451,6 +451,7 @@ void Lem::syncFailed(int code, QString message) {
             if (code == 409 && detail.toObject()["reason"] == "station_identity_conflict")
                 r["_conflict_kind"] = "station_identity_conflict";
             else if (code == 409 && (response["reason"] == "pcve_membership_detached" ||
+                     detail.toObject()["reason"] == "pcve_membership_detached" ||
                      message == detachedMembershipMessage))
                 r["_conflict_kind"] = "pcve_membership_detached";
             else if (code == 403 && (!r["_order_item"].toString().isEmpty() ||
@@ -720,7 +721,7 @@ void Lem::syncNext(int index, QString notice) {
                              {"work_item_id", local.value("_order_item")},
                              {"base_revision", local["revision"]},
                              {"checklist_version", local["template"].toObject()["version"]},
-                             {"frozen_history", local["status"] == "closed" && local["template"].toObject()["version"].toInt() == 6 && local["correction"].toObject()["state"] != "editing"},
+                             {"frozen_history", local["status"] == "closed" && (local["template"].toObject()["version"].toInt() == 6 || local["template"].toObject()["version"].toInt() == 7) && local["correction"].toObject()["state"] != "editing"},
                              {"load_test_connectors", local["template"].toObject()["load_test_connectors"]},
                              {"status", "draft"},
                              {"payload", local["payload"]}}),
@@ -1093,7 +1094,7 @@ void Lem::syncPhotos(int index, QJsonObject r, int photoIndex) {
                              {"work_item_id", r.value("_order_item")},
                              {"base_revision", r["revision"]},
                              {"checklist_version", r["template"].toObject()["version"]},
-                             {"frozen_history", !correction && r["template"].toObject()["version"].toInt() == 6},
+                             {"frozen_history", !correction && (r["template"].toObject()["version"].toInt() == 6 || r["template"].toObject()["version"].toInt() == 7)},
                              {"load_test_connectors", r["template"].toObject()["load_test_connectors"]},
                              {"status", "closed"},
                              {"payload", r["payload"]}}),

@@ -1,7 +1,7 @@
 # Field workflow
 
 The interface is Portuguese. The workflows below describe the current source, including the editable
-checklist-v7 rules. Detailed shared rules are in the
+checklist-v8 rules. Detailed shared rules are in the
 [report contract](../../Common/docs/report-contract.md).
 
 ## Select a contract and charger
@@ -21,7 +21,7 @@ contract. Every linked contract uses the same station details. On desktop, admin
 **Importar Excel** from **PCVEs** to create or update station records independently. Open a
 station and choose **Editar ficha** to change its current fields. The PCVE ID is permanent.
 **Relatórios associados** lists the reports you can read through direct contract assignments or work-order visits. Back returns to the same PCVE and scroll position. Offline, it shows reports saved on this device.
-Select a contract and open **Gestão → Contratos → Gerir IDs do contrato**. Use **Adicionar ou atualizar por Excel** to add memberships and update the central PCVE records shared by every linked contract. On desktop, **Editar** opens the same central record. **Retirar** removes the association and preserves existing reports. Importing the ID again restores the association.
+Select a contract and open **Gestão → Contratos → Gerir IDs do contrato**. Use **Adicionar ou atualizar por Excel** to add memberships and update the central PCVE records shared by every linked contract. On desktop, **Editar** opens the same central record. **Retirar** starts the 14-day recovery period for that ID and its reports. Open **Recuperar IDs retirados → Recuperar**, or reimport the ID before the deadline. A later reimport starts work on the ID with its expired reports removed.
 A closed report on the contract equipment card shows its local closing day, month and hour. For example, `30_03_16` means 30 March at 16:00–16:59.
 Use the postal address and coordinates for navigation. The site-name field is omitted.
 
@@ -52,11 +52,11 @@ MAN.02 uses OK/NOK/N/A and requires an observation for NOK; N/A does not require
 
 SEG.01 requires an explanatory observation for N/A; a photograph remains exempt for N/A.
 
-SEG.07, SITE.06, QVE.14, EST.18, MAN.22, CARG.07 and FIN.03 are optional observation/media entries with no status buttons. Leaving
-them empty does not block completion. MAN.12 needs a photograph when applicable; N/A exempts the photograph but requires an observation. A video does
+SEG.07, SITE.06, QVE.14, EST.18, MAN.24, CARG.07 and FIN.03 are optional observation/media entries with no status buttons. Leaving
+them empty does not block completion. MAN.13 and MAN.14 need a photograph when applicable; N/A exempts the photograph but requires an observation. A video does
 not satisfy a required photograph.
-MAN.14–18 also require a photograph for OK and NOK; N/A requires an observation and exempts
-the photograph. Existing editable v6 drafts and closed-report correction copies upgrade to v7; the original closed record is preserved until replacement succeeds.
+MAN.16–20 also require a photograph for OK and NOK; N/A requires an observation and exempts
+the photograph. Existing drafts and closed-report correction copies upgrade to v8. The old measured current and evidence move to MAN.13. Complete both new times in MAN.12 and MAN.14 before submitting. The server keeps the closed original until it accepts the replacement.
 
 The application validates closure locally; the server validates again after synchronization. A
 report marked closed locally can still have pending upload work. Confirm the synchronization state
@@ -104,7 +104,7 @@ mandatory; closure follows the saved checklist and validates references that are
 ## Reuse another charger's work
 
 **Copiar QVE de outro carregador…** copies the QVE group, including its optional general
-observations. **Copiar Medições de outro carregador…** copies only **MAN.04–MAN.10**; MAN.21/MAN.22 and the
+observations. **Copiar Medições de outro carregador…** copies only **MAN.04–MAN.10**; MAN.23/MAN.24 and the
 other maintenance answers are preserved.
 
 Choose another charger/report in the same contract and confirm applicability. Cached source answers
@@ -243,13 +243,14 @@ N/A suggestions are editable and apply only when entering N/A with empty notes. 
 are preserved. See the report contract for all required-note items. FIN.02 hides general media
 buttons and keeps notes and dedicated signature controls. QVE.01–03 use “Botoneira”.
 
-## Current measurements and photo tools (0.2.6)
+## Measurements and photo tools
 
-MAN.11/12 accept at most six integer digits in mA (1 A = 1000 mA; 0.03 A = 30 mA).
-MAN.12 and MAN.18 recalculate from MAN.11 using the boundaries in the shared report contract.
+MAN.11 and MAN.13 accept at most six integer digits in mA (1 A = 1000 mA; 0.03 A = 30 mA).
+MAN.13 and MAN.20 recalculate from MAN.11 using the boundaries in the shared report contract.
+MAN.12 (configured) and MAN.14 (measured) accept integer readings from 0 to 999999 ms, or NA. The form shows **1s = 1000ms**. MAN.12 has optional photography. For MAN.14 choose OK/NOK/N/A. OK and NOK need a photograph, NOK and N/A need an observation. Use **Leitura indisponível (NA)** if no trip time was obtained for a NOK test. MAN.13 and MAN.14 suggest “Proteção diferencial não dispara” for NOK and “Não testado devido a veículo em carga” for N/A.
 A migrated ambiguous reading shows its previous text and needs confirmation. Untouched suggested
 observations clear on state change or when entering the notes editor; custom text survives.
-EST.01 records before views/cleanliness; MAN.21 after views/cleanliness; general notes are MAN.22.
+EST.01 records before views/cleanliness; MAN.23 after views/cleanliness; general notes are MAN.24.
 EST.10 is removed, EST.13 only checks tariff and EST.16 only DGEG stickers. EST.15 checks the payment
 terminal (TPM) and suggests `Sem TPM` for N/A.
 
@@ -265,3 +266,9 @@ For a replanned corrective or commissioning visit, start its draft from the new 
 For an individual handoff, first sync the outgoing technician's changes. In the intervention, the administrator selects the next technician under **Atribuição individual** and chooses **Transferir atribuição e rascunho**. The new technician receives the same draft and its synchronized evidence. If another user changes the draft before the action, review the refreshed intervention and try again.
 
 A decimal point or comma in an integer mA reading remains visible until corrected. Review and correct the value before closure. A rejected oversized report reopens under its original ID. The device keeps its evidence and checks the finish against the recorded start.
+
+## Recovering a pending intervention or corrective contract ID
+
+An online administrator opens a pending corrective or commissioning request (including one with a draft), selects **Apagar pedido** and types **APAGAR**. In the same intervention list choose **Recuperar pedidos apagados → Recuperar pedido** before 48 hours have elapsed. Recovery restores the request, its synchronized draft and original attachments. A job with a closed report cannot be deleted this way.
+
+In **Contratos de corretivas**, select the contract’s **Gerir IDs** row. **Retirar** starts a 14-day recovery period. **Recuperar** against that ID restores its coverage and the jobs and reports taken out with it. A separately deleted job keeps its original 48-hour deadline. Restore the coverage first, then the job while both actions are still available. A whole preventive contract has its own 30-day recovery procedure.

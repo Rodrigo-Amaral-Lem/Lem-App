@@ -254,6 +254,10 @@ rotated selection geometry, reset/cancel and guarded Save) and signing during sy
 administrator-only technician reset, including confirmation mismatch, immutable target and clearing
 password fields on accept/cancel. It uses a mock backend; the native/API cases exercise real requests.
 
+## Checklist v8 and administrative recovery
+
+Exercise MAN.12 and MAN.14 in portrait, landscape and a narrow Android layout. Include six-digit milliseconds, invalid decimal input, a NOK test without an available reading, the photograph requirement and replacing an automatic observation. Correct a closed v7 report of each intervention type on desktop. Verify the old current and photographs move to MAN.13 and compare the accepted PDF, ZIP, JSON and original media. For administrative recovery, check the pending job, preventive ID and corrective coverage controls against the server. See the [server test cases](../../Server/docs/testing.md#checklist-v8-and-recovery-deadlines).
+
 ## Checklist v7 regressions
 
 Shared `maintenance-cases.json` covers trip endpoints and earth-resistance boundaries with exact

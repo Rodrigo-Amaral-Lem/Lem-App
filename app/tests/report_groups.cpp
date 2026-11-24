@@ -16,7 +16,7 @@
 struct LemReviewTest {
     static bool run(Lem &c, const QString &root, const QString &pdfPath) {
         c.demo();
-        CHECK(c.m_template["version"].toInt() == 7);
+        CHECK(c.m_template["version"].toInt() == 8);
         const auto sourceId = c.m_current["id"].toString();
         c.answer("QVE.01", "OK", "Botoneira comum");
         c.answer("QVE.02", "NOK", "Substituir contacto");
@@ -87,7 +87,7 @@ struct LemReviewTest {
                 const auto key = item.toObject()["id"].toString();
                 if (key != "FIN.02") c.answer(key, "NA", "Sem conector/veículo disponível");
             }
-        c.attach("MAN.12", QUrl::fromLocalFile(inputPath));
+        c.attach("MAN.13", QUrl::fromLocalFile(inputPath));
         c.finish(); CHECK(c.m_current["status"] == "closed");
         QString error;
         CHECK(ReportPdf::write(c.m_current, pdfPath, &error));

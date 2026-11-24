@@ -22,13 +22,14 @@ inline bool milliamp(const QString &key) {
 
 inline int digits(const QString &key) {
     // Only MAN.11 and MAN.12 use mA. Other MAN fields reuse their PC02 rules.
-    if (milliamp(key)) return 6;
+    if (milliamp(key) || key == "ms") return 6;
     const auto id = canonical(key);
     if (id == "PC02.19") return 5;
     return QRegularExpression("^PC02\\.(0[5-9]|10|11)$").match(id).hasMatch() ? 3 : 0;
 }
 
 inline QString unit(const QString &id) {
+    if (id == "ms") return QStringLiteral("ms");
     if (milliamp(id)) return QStringLiteral("mA");
     const int maxDigits = digits(id);
     if (maxDigits == 5) return QStringLiteral("Ω");
@@ -58,7 +59,7 @@ inline QString format(const QString &id, QString value, bool *valid = nullptr) {
     }
 
     const auto expectedUnit = unit(id);
-    const auto optionalFraction = milliamp(id) ? QString() : QString("(?:[.,][0-9]{1,2})?");
+    const auto optionalFraction = (milliamp(id) || id == "ms") ? QString() : QString("(?:[.,][0-9]{1,2})?");
     const auto pattern = QString("^([0-9]{1,%1}%2)(?:\\s*%3)?$")
         .arg(maxDigits).arg(optionalFraction, expectedUnit);
     const auto match = QRegularExpression(pattern, QRegularExpression::CaseInsensitiveOption).match(value);

@@ -168,10 +168,10 @@ attrs["saveSignature"] = Slot(str, str, result=bool)(saveSignature)
 
 
 
-def answer(self, checkpoint, value, notes):
+def answer(self, checkpoint, value, notes, reading_only=False):
     a = values["current"]["payload"]["answers"].setdefault(checkpoint, {})
     a.update(value=value, notes=notes)
-    if value in ("NA", "N/A", "Não Aplicável"): a.pop("assessment", None)
+    if not reading_only and value in ("NA", "N/A", "Não Aplicável"): a.pop("assessment", None)
     self.changed.emit()
 
 
@@ -183,7 +183,7 @@ def beginNotesEdit(self, key):
         self.changed.emit()
 attrs["beginNotesEdit"] = Slot(str)(beginNotesEdit)
 
-attrs["answer"] = Slot(str, str, str)(answer)
+attrs["answer"] = Slot(str, str, str)(Slot(str, str, str, bool)(answer))
 def setAssessment(self, key, status):
     a = values["current"]["payload"]["answers"].setdefault(key, {})
     if a.get("value") in ("NA", "N/A", "Não Aplicável"): a["value"] = ""

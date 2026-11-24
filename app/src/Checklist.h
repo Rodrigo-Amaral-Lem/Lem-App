@@ -55,7 +55,8 @@ inline QString naNotesDefault(const QJsonObject &schema, const QString &key) {
 // Normalize current v6 draft fields/order and optional notes; never reinterpret closed history.
 inline QJsonObject correctedDraft(QJsonObject report) {
     auto schema = report["template"].toObject();
-    if (report["status"] != "draft" || schema.value("frozen_upload").toBool() || (schema["version"].toInt() != 6 && schema["version"].toInt() != 7)) return report;
+    const int version = schema.value("version").toInt();
+    if (report["status"] != "draft" || schema.value("frozen_upload").toBool() || version < 6 || version > 8) return report;
     // A lost-ACK comparison must use exactly the same projection as the visible
     // draft and server GET. Repair both payloads, including saved v7 drafts.
     for (const auto &payloadKey : {"payload", "_inflight_payload"}) {
@@ -73,6 +74,7 @@ inline QJsonObject correctedDraft(QJsonObject report) {
             report[payloadKey] = payload;
         }
     }
+    if (version == 8) return report;
     auto sections = schema["sections"].toArray();
     for (int s = 0; s < sections.size(); ++s) {
         auto section = sections[s].toObject(); auto items = section["items"].toArray();
@@ -221,7 +223,7 @@ inline QJsonObject correctedDraft(QJsonObject report) {
     for (auto section : sections) if (!order.contains(section.toObject()["id"].toString())) ordered.append(section);
     sections = ordered;
     schema["sections"] = sections; report["template"] = schema;
-    return MaintenanceMigration::report(report);
+    return MaintenanceMigration::tripTimeReport(MaintenanceMigration::report(report));
 }
 
 // Canonical connector names and order are shared with server/app/checklist.py.

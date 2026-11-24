@@ -163,3 +163,34 @@ void Lem::importCorrectiveContract(QString id, QVariantMap fields, QUrl workbook
             if (token == m_token) emit interventionSaved(id, false, serverMessage(error));
         });
 }
+
+void Lem::loadMemberships(QString contractId, bool corrective) {
+    if (!authenticated() || m_user["role"] != "admin" || contractId.isEmpty()) return;
+    const auto path = corrective ? "/api/corrective-contracts/" + contractId + "/members"
+                                 : "/api/contracts/" + contractId + "/removed-chargers";
+    const auto token = m_token;
+    request("GET", path, {}, [this, token, contractId](QByteArray bytes) {
+        if (m_token != token) return;
+        const auto data = QJsonDocument::fromJson(bytes);
+        emit membershipsReceived(contractId, data.array().toVariantList(),
+                                 data.isArray() ? QString{} : QStringLiteral("Resposta inválida."));
+    }, "application/json", [this, token, contractId](int, QString error) {
+        if (token == m_token) emit membershipsReceived(contractId, {}, serverMessage(error));
+    });
+}
+
+void Lem::changeMembership(QString contractId, QString memberId, bool corrective, bool restore) {
+    if (!authenticated() || m_user["role"] != "admin" || contractId.isEmpty() || memberId.isEmpty()) return;
+    auto path = corrective ? "/api/corrective-contracts/" + contractId + "/members/" + memberId
+                           : "/api/contracts/" + contractId + "/chargers/" + memberId;
+    if (restore) path += "/restore";
+    const auto token = m_token;
+    request(restore ? "POST" : "DELETE", path, {}, [this, token, contractId, corrective](QByteArray) {
+        if (token != m_token) return;
+        loadMemberships(contractId, corrective);
+        if (corrective) refresh();
+        else if (m_contract == contractId) refreshCatalogue(contractId, true);
+    }, "application/json", [this, token, contractId](int, QString error) {
+        if (token == m_token) emit membershipsReceived(contractId, {}, serverMessage(error));
+    });
+}

@@ -8,6 +8,9 @@ ScrollView {
     id: page
     required property var controller
     signal openReport(string target, string report)
+    signal manageIds(string contractId, string name)
+    signal deleteJob(string jobId, string reference)
+    signal recoverJobs(string kind)
     signal openOrder(string id)
     signal openNotes(string id, string externalId)
     property string kind: "corrective"
@@ -38,6 +41,9 @@ ScrollView {
     onModeChanged: {
         contentItem.contentY = 0
         if (mode === "detail" && admin && controller.authenticated) controller.loadUsers()
+    }
+    onJobChanged: {
+        if (mode === "detail" && !job) mode = "list"
     }
     onOwnerChanged: { saving = false; requestId = ""; mode = "list"; station = null; coverage = []; message = ""; selectedId = "" }
 
@@ -181,6 +187,12 @@ ScrollView {
                 text: "Contratos de corretivas"
                 onClicked: { page.mode = "contracts"; page.coverage = []; page.message = ""; page.controller.loadCorrectiveContracts("") }
             }
+            Action {
+                visible: page.admin
+                enabled: page.controller.authenticated && !page.controller.busy
+                text: "Recuperar pedidos apagados"
+                onClicked: page.recoverJobs(page.kind)
+            }
             Entry { id: filter; placeholderText: "Pesquisar ID, referência ou contrato" }
             readonly property var matches: page.jobs.filter(j =>
                 (j.external_id + " " + j.reference + " " + (j.contract || {}).name).toLowerCase().includes(filter.text.trim().toLowerCase()))
@@ -260,6 +272,12 @@ ScrollView {
                 text: "Notas da corretiva"
                 onClicked: { page.controller.selectContract(page.selectedId); page.openNotes(page.selectedId, page.job.external_id) }
             }
+            Action {
+                visible: page.admin && !!page.job && page.job.status !== "closed"
+                enabled: page.controller.authenticated && !page.controller.busy
+                text: "Apagar pedido"
+                onClicked: page.deleteJob(page.job.id, page.job.reference)
+            }
             Line { visible: page.admin; text: "Atribuição individual" }
             ComboBox {
                 id: share
@@ -301,7 +319,11 @@ ScrollView {
             Line { visible: !page.coverage.length; text: "Sem contratos para mostrar." }
             Repeater {
                 model: page.mode === "contracts" ? page.coverage : []
-                Line { required property var modelData; text: modelData.name + "\n" + page.dateRange(modelData) }
+                Action {
+                    required property var modelData
+                    text: modelData.name + "\n" + page.dateRange(modelData) + " · Gerir IDs"
+                    onClicked: page.manageIds(modelData.id, modelData.name)
+                }
             }
         }
         ColumnLayout {
