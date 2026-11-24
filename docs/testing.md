@@ -245,6 +245,8 @@ retry, and preservation of reports and evidence after a successful reload.
 `data-safety-migration-sync` uses a loopback HTTP fixture to verify that identical answers cannot
 skip the draft PUT when the form version or historical-upload marker differs. It also checks that
 an already matching form does not cause an unnecessary write.
+`test_measurement_inputs.py` checks that MAN.14 retains the selected OK or NOK requirements
+when the tester reading is unavailable. Choosing N/A as the assessment requires an observation.
 The HTTP integration replaces a signature during an actual upload and repeats the observer
 sequence: cache draft, sync draft, owner closes/syncs, observer syncs and sees closed without clearing
 data. QML media/signature tests cover narrow screens, the combined photo editor (optional crop,

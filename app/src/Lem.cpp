@@ -41,6 +41,7 @@
 #include <QSettings>
 #include <QSslSocket>
 #include <QTimer>
+#include <QRandomGenerator>
 #include <QNetworkInformation>
 #include <QGuiApplication>
 #include <QHash>
@@ -633,7 +634,13 @@ void Lem::requestPhoto(QString path, QString destination, qint64 limit,
         if (failed && transient && attempt < 3 && !body->exceeded && !body->writeFailed && !body->invalidRange &&
             (!retryAllowed || retryAllowed())) {
             const int retryAfter = reply->rawHeader("Retry-After").toInt();
-            const int delay = retryAfter > 0 ? qBound(1, retryAfter, 30) * 1000 : (500 << attempt);
+            int delay = retryAfter > 0 ? qBound(1, retryAfter, 30) * 1000 : (500 << attempt);
+            if (code == 503 && retryAfter > 0 && path.contains("/photos/")) {
+                // Spread the retries across the server's stalled-transfer
+                // timeout so one group of devices does not exhaust them together.
+                constexpr int minimumDelayMs[] = {2000, 6000, 24000};
+                delay = qMax(delay, minimumDelayMs[attempt]) + QRandomGenerator::global()->bounded(500);
+            }
             status("A retomar transferência · tentativa " + QString::number(attempt + 2) + " / 4");
             QTimer::singleShot(delay, this, [this, path, destination, limit, cb, error, digest, body, attempt,
                                             retryAllowed, requestToken, requestServer, contractExport] {
@@ -2184,13 +2191,14 @@ void Lem::loadStationReports(QString stationId) {
             });
 }
 
-void Lem::detachCharger(QString contractId, QString chargerId) {
+void Lem::detachCharger(QString contractId, QString chargerId, int membershipRevision) {
     if (!authenticated() || m_user["role"] != "admin" || contractId != m_contract ||
         contractId.isEmpty() || chargerId.isEmpty() || m_busy || m_catalogueLoading) return;
     m_busy = true;
     emit changed();
     request("DELETE", "/api/contracts/" + QString::fromLatin1(QUrl::toPercentEncoding(contractId)) +
-            "/chargers/" + QString::fromLatin1(QUrl::toPercentEncoding(chargerId)), {},
+            "/chargers/" + QString::fromLatin1(QUrl::toPercentEncoding(chargerId)) +
+            "?membership_revision=" + QString::number(membershipRevision), {},
             [this, contractId, chargerId](QByteArray) {
                 m_busy = false;
                 auto rows = m_catalogues[contractId].toArray();

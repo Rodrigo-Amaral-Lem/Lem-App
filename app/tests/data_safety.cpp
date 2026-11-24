@@ -724,7 +724,8 @@ struct LemReviewTest {
             int unexpectedWrites = 0;
             const auto reportPath = "/api/reports/" + id.toUtf8();
             readRequests(server, [&](QTcpSocket *socket, const QByteArray &request) {
-                if (request.startsWith("GET " + reportPath + " ")) {
+                if (request.startsWith("GET " + reportPath + " ") ||
+                    request.startsWith("GET " + reportPath + "?include_stored_payload=true ")) {
                     reply(socket, "200 OK", remote);
                 } else if (request.startsWith("PUT " + reportPath + "/photos/" +
                                               replacement["id"].toString().toUtf8() + " ") &&
@@ -813,7 +814,8 @@ struct LemReviewTest {
             client.m_current = local; client.m_reports = QJsonObject{{id, local}};
             auto remote = local;
             auto schema = remote["template"].toObject();
-            schema["version"] = scenario < 2 ? 6 : 7;
+            if (scenario < 2) schema["version"] = 6;
+            if (scenario == 3) schema["version"] = 7;
             if (scenario == 1 || scenario == 3) schema["frozen_upload"] = true;
             remote["template"] = schema;
             if (scenario == 5) remote["owner_id"] = "new-owner";

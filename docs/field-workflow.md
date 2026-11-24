@@ -247,7 +247,7 @@ buttons and keeps notes and dedicated signature controls. QVE.01–03 use “Bot
 
 MAN.11 and MAN.13 accept at most six integer digits in mA (1 A = 1000 mA; 0.03 A = 30 mA).
 MAN.13 and MAN.20 recalculate from MAN.11 using the boundaries in the shared report contract.
-MAN.12 (configured) and MAN.14 (measured) accept integer readings from 0 to 999999 ms, or NA. The form shows **1s = 1000ms**. MAN.12 has optional photography. For MAN.14 choose OK/NOK/N/A. OK and NOK need a photograph, NOK and N/A need an observation. Use **Leitura indisponível (NA)** if no trip time was obtained for a NOK test. MAN.13 and MAN.14 suggest “Proteção diferencial não dispara” for NOK and “Não testado devido a veículo em carga” for N/A.
+MAN.12 (configured) and MAN.14 (measured) accept integer readings from 0 to 999999 ms, or NA. The form shows **1s = 1000ms**. MAN.12 has optional photography. For MAN.14 choose OK/NOK/N/A. Use **Leitura indisponível (NA)** when the test result is known and the tester could not record a time. OK still requires a photograph. NOK requires a photograph and an observation. Choosing N/A as the test result requires an observation and makes the photograph optional. MAN.13 and MAN.14 suggest “Proteção diferencial não dispara” for NOK and “Não testado devido a veículo em carga” for N/A.
 A migrated ambiguous reading shows its previous text and needs confirmation. Untouched suggested
 observations clear on state change or when entering the notes editor; custom text survives.
 EST.01 records before views/cleanliness; MAN.23 after views/cleanliness; general notes are MAN.24.
@@ -272,3 +272,5 @@ A decimal point or comma in an integer mA reading remains visible until correcte
 An online administrator opens a pending corrective or commissioning request (including one with a draft), selects **Apagar pedido** and types **APAGAR**. In the same intervention list choose **Recuperar pedidos apagados → Recuperar pedido** before 48 hours have elapsed. Recovery restores the request, its synchronized draft and original attachments. A job with a closed report cannot be deleted this way.
 
 In **Contratos de corretivas**, select the contract’s **Gerir IDs** row. **Retirar** starts a 14-day recovery period. **Recuperar** against that ID restores its coverage and the jobs and reports taken out with it. A separately deleted job keeps its original 48-hour deadline. Restore the coverage first, then the job while both actions are still available. A whole preventive contract has its own 30-day recovery procedure.
+
+Refresh the membership list if a removal is refused after another administrator recovers the ID. When a pending intervention is permanently deleted, its work-order visit records the impediment. If it was the last pending item, the order completes.

@@ -23,12 +23,11 @@ inline QString paymentNote(QString note) {
 // Legacy closure read missing optional answers through operator[], inserting null.
 // Remove only those placeholders; retain real answers and every required field.
 inline QJsonObject withoutNullOptionalAnswers(QJsonObject report) {
-    for (const auto &payloadKey : {"payload", "_inflight_payload"}) {
-        if (!report.value(payloadKey).isObject()) continue;
-        auto payload = report.value(payloadKey).toObject();
+    const auto sections = report["template"].toObject()["sections"].toArray();
+    MaintenanceMigration::transformPayloads(report, [&sections](QJsonObject payload) {
         auto answers = payload["answers"].toObject();
         bool changed = false;
-        for (auto section : report["template"].toObject()["sections"].toArray())
+        for (auto section : sections)
             for (auto entry : section.toObject()["items"].toArray()) {
                 const auto item = entry.toObject();
                 const auto id = item["id"].toString();
@@ -36,8 +35,9 @@ inline QJsonObject withoutNullOptionalAnswers(QJsonObject report) {
                     answers.remove(id); changed = true;
                 }
             }
-        if (changed) { payload["answers"] = answers; report[payloadKey] = payload; }
-    }
+        if (changed) payload["answers"] = answers;
+        return payload;
+    });
     return report;
 }
 inline QString naNotesDefault(const QJsonObject &schema, const QString &key) {
@@ -52,16 +52,13 @@ inline QString naNotesDefault(const QJsonObject &schema, const QString &key) {
     return {};
 }
 
-// Normalize current v6 draft fields/order and optional notes; never reinterpret closed history.
+// Upgrade editable draft fields and optional notes while preserving closed history.
 inline QJsonObject correctedDraft(QJsonObject report) {
     auto schema = report["template"].toObject();
     const int version = schema.value("version").toInt();
     if (report["status"] != "draft" || schema.value("frozen_upload").toBool() || version < 6 || version > 8) return report;
-    // A lost-ACK comparison must use exactly the same projection as the visible
-    // draft and server GET. Repair both payloads, including saved v7 drafts.
-    for (const auto &payloadKey : {"payload", "_inflight_payload"}) {
-        if (!report.value(payloadKey).isObject()) continue;
-        auto payload = report.value(payloadKey).toObject();
+    // Apply the same projection to editable answers and saved acknowledgements.
+    MaintenanceMigration::transformPayloads(report, [](QJsonObject payload) {
         auto answers = payload["answers"].toObject();
         auto finalNotes = answers.value("FIN.03").toObject();
         const auto previousText = finalNotes.value("value").toString();
@@ -71,9 +68,9 @@ inline QJsonObject correctedDraft(QJsonObject report) {
             finalNotes["value"] = "";
             answers["FIN.03"] = finalNotes;
             payload["answers"] = answers;
-            report[payloadKey] = payload;
         }
-    }
+        return payload;
+    });
     if (version == 8) return report;
     auto sections = schema["sections"].toArray();
     for (int s = 0; s < sections.size(); ++s) {

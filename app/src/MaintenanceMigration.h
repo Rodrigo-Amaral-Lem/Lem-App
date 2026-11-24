@@ -9,6 +9,20 @@
 
 namespace MaintenanceMigration {
 
+// Acknowledgement payloads follow the report's form version. Their operation
+// IDs, revisions and evidence digests must survive migration unchanged.
+template <typename Transform>
+void transformPayloads(QJsonObject &report, Transform transform) {
+    for (const auto key : {"payload", "_inflight_payload", "_inflight_delete_payload"})
+        if (report.value(key).isObject())
+            report[key] = transform(report.value(key).toObject());
+    auto replacement = report.value("_inflight_photo_replacement").toObject();
+    if (replacement.value("payload").isObject()) {
+        replacement["payload"] = transform(replacement.value("payload").toObject());
+        report["_inflight_photo_replacement"] = replacement;
+    }
+}
+
 inline QString checkpoint(const QString &key) {
     if (key == "MAN.21") return QString("MAN.22");
     if (key == "EST.10") return QString("EST.18");
@@ -155,12 +169,7 @@ inline QJsonObject report(QJsonObject result) {
     schema["version"] = 7;
     schema["sections"] = sections;
     result["template"] = schema;
-    result["payload"] = payload(result["payload"].toObject());
-    // Transform the acknowledgement snapshot identically to the server's GET
-    // projection, so upgrading after a lost ACK does not create a false conflict.
-    if (result["_inflight_payload"].isObject()) {
-        result["_inflight_payload"] = payload(result["_inflight_payload"].toObject());
-    }
+    transformPayloads(result, payload);
     auto photos = result["photos"].toArray();
     for (int photoIndex = 0; photoIndex < photos.size(); ++photoIndex) {
         auto photo = photos[photoIndex].toObject();
@@ -216,9 +225,7 @@ inline QJsonObject tripTimeReport(QJsonObject result) {
     schema["version"] = 8;
     schema["sections"] = sections;
     result["template"] = schema;
-    for (const auto field : {"payload", "_inflight_payload"}) {
-        if (!result.value(field).isObject()) continue;
-        auto payload = result[field].toObject();
+    transformPayloads(result, [](QJsonObject payload) {
         for (const auto name : {"answers", "signatures"}) {
             if (!payload.value(name).isObject()) continue;
             const auto original = payload[name].toObject();
@@ -236,8 +243,8 @@ inline QJsonObject tripTimeReport(QJsonObject result) {
             }
             payload[name] = mapped;
         }
-        result[field] = payload;
-    }
+        return payload;
+    });
     if (result.contains("photos")) {
         auto photos = result["photos"].toArray();
         for (qsizetype i = 0; i < photos.size(); ++i) {

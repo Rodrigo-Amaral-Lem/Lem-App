@@ -59,6 +59,34 @@ bool retryableCorrectionIdentity(const QJsonObject &report) {
     return report["_conflict_kind"] == "station_identity_conflict" ||
            report["_conflict_reason"].toString().startsWith("Os dados do carregador foram corrigidos noutro report;");
 }
+
+bool historicalForm(const QJsonObject &report) {
+    const int version = report["template"].toObject()["version"].toInt();
+    return version == 6 || version == 7;
+}
+
+bool pendingHistoricalCorrection(const QJsonObject &report) {
+    return report["status"] == "closed" && historicalForm(report) &&
+           report["correction"].toObject()["state"] == "editing";
+}
+
+bool hasEvidenceReceipt(const QJsonObject &report) {
+    return report["_inflight_delete_id"].isString() || report["_inflight_photo_replacement"].isObject();
+}
+
+bool retryableReceiptConflict(const QJsonObject &report) {
+    return report["_conflict"].toBool() && !report.contains("_replacement_id") &&
+           report["_conflict_reason"] == QStringLiteral("Report alterado noutro dispositivo. Rascunho local conservado.") &&
+           (hasEvidenceReceipt(report) || (historicalForm(report) && report["_inflight_payload"].isObject()));
+}
+
+QJsonObject editableProjection(QJsonObject report) {
+    report["status"] = "draft";
+    auto form = report["template"].toObject();
+    form.remove("frozen_upload");
+    report["template"] = form;
+    return Checklist::withoutNullOptionalAnswers(Checklist::correctedDraft(report));
+}
 } // namespace
 
 void Lem::recoverOrderSyncConflict(QJsonObject &report) {
@@ -318,10 +346,14 @@ void Lem::startSync(bool manual) {
         const bool owned = report["owner_id"] == m_user["id"];
         const bool recheckIdentity = (manual || m_manualRestoredCorrections.contains(i.key())) &&
                                      retryableCorrectionIdentity(report);
+        const bool recheckChecklist = pendingHistoricalCorrection(report) &&
+            report["_conflict_reason"] == QStringLiteral("A checklist mudou. Atualize a app e o report; a cópia local foi conservada") &&
+            !m_syncConflicts.contains(i.key());
+        const bool recheckReceipt = retryableReceiptConflict(report) && !m_syncConflicts.contains(i.key());
         const auto conflictKind = report["_conflict_kind"].toString();
         const bool recheckOrder = (conflictKind == "order_scope" || conflictKind == "pcve_membership_detached") &&
             (manual || !m_syncConflicts.contains(i.key()));
-        if ((report["_conflict"].toBool() && !recheckIdentity && !recheckOrder) ||
+        if ((report["_conflict"].toBool() && !recheckIdentity && !recheckOrder && !recheckChecklist && !recheckReceipt) ||
             report.contains("_contract_unavailable") || (dirty && !owned))
             m_syncConflicts.insert(i.key());
         if (owned && dirty && correctionAllowed(report) && !m_syncConflicts.contains(i.key()) &&
@@ -425,13 +457,7 @@ void Lem::syncFailed(int code, QString message) {
             // A rejected closure is still a draft on the server. Restore editing
             // with current rules, preserving answers/media from older offline apps.
             auto report = m_reports.value(m_syncReport).toObject();
-            report["status"] = "draft";
-            // A rejected historical closure is editable again. Keeping this
-            // transfer-only marker would disable editing and migration forever.
-            auto schema = report["template"].toObject();
-            schema.remove("frozen_upload");
-            report["template"] = schema;
-            report = Checklist::correctedDraft(report);
+            report = editableProjection(report);
             m_reports[m_syncReport] = report;
             if (m_current["id"] == m_syncReport) {
                 m_current = report;
@@ -524,7 +550,7 @@ QJsonArray Lem::reconcilePhotos(QJsonArray photos, const QJsonArray &serverPhoto
 
 // Merge acknowledgements into the LATEST local report, never replace it with sent data.
 // Only matching edit sequences and fully acknowledged photos/deletions clear dirty.
-bool Lem::mergeSync(QJsonObject sent, bool complete, QJsonValue serverPhotos) {
+bool Lem::mergeSync(QJsonObject sent, bool complete, QJsonValue serverPhotos, bool recoveredConflict) {
     const auto id = sent["id"].toString();
     if (!m_reports.contains(id)) {
         syncFailed(409, "Report local indisponível.");
@@ -596,9 +622,9 @@ bool Lem::mergeSync(QJsonObject sent, bool complete, QJsonValue serverPhotos) {
     const bool committedCorrection = complete && correction["state"] == "committed";
     const auto conflictKeys = {"_conflict", "_conflict_reason", "_conflict_kind"};
     // Keep the saved conflict until a clean replacement can reach the checkpoint.
-    const bool resolvedConflict = complete && !latest["dirty"].toBool() &&
+    const bool resolvedConflict = recoveredConflict || (complete && !latest["dirty"].toBool() &&
         ((committedCorrection && retryableCorrectionIdentity(previous)) ||
-         previous["_conflict_kind"] == "order_scope" || previous["_conflict_kind"] == "pcve_membership_detached");
+         previous["_conflict_kind"] == "order_scope" || previous["_conflict_kind"] == "pcve_membership_detached"));
     if (resolvedConflict)
         for (const auto key : conflictKeys) latest.remove(key);
     if (committedCorrection) {
@@ -721,7 +747,7 @@ void Lem::syncNext(int index, QString notice) {
                              {"work_item_id", local.value("_order_item")},
                              {"base_revision", local["revision"]},
                              {"checklist_version", local["template"].toObject()["version"]},
-                             {"frozen_history", local["status"] == "closed" && (local["template"].toObject()["version"].toInt() == 6 || local["template"].toObject()["version"].toInt() == 7) && local["correction"].toObject()["state"] != "editing"},
+                             {"frozen_history", local["status"] == "closed" && historicalForm(local) && !pendingHistoricalCorrection(local)},
                              {"load_test_connectors", local["template"].toObject()["load_test_connectors"]},
                              {"status", "draft"},
                              {"payload", local["payload"]}}),
@@ -746,7 +772,11 @@ void Lem::syncNext(int index, QString notice) {
                             syncPhotos(index, local, 0);
                     });
     };
-    const QString path = "/api/reports/" + id + (r["revision"].toInt() == 0 ? "/exists" : "");
+    QString path = "/api/reports/" + id;
+    if (r["revision"].toInt() == 0)
+        path += "/exists";
+    else if (hasEvidenceReceipt(r))
+        path += "?include_stored_payload=true";
     syncRequest("GET", path, {}, [this, index, r, send](QByteArray data) mutable {
         const auto remote = QJsonDocument::fromJson(data).object();
         if (m_deletedReports.contains(r["id"].toString())) {
@@ -821,19 +851,31 @@ void Lem::syncNext(int index, QString notice) {
             return;
         }
         const auto remotePhotos = remote["photos"].toArray();
+        const auto remoteTemplate = remote["template"].toObject();
+        // A GET can project a stored historical draft before any write persists the
+        // change. Use that view for receipt comparison while retaining the frozen
+        // payload and evidence checkpoints for an ordinary historical closure.
+        auto receipts = r;
+        if (r["status"] == "closed" && historicalForm(r) &&
+            remoteTemplate["version"].toInt() == 8 && !remoteTemplate["frozen_upload"].toBool())
+            receipts = editableProjection(r);
+        const auto storedPayload = remote.value("stored_payload");
+        const auto matchesReceipt = [&remote, &storedPayload](const QJsonValue &saved) {
+            return saved == remote["payload"] || (storedPayload.isObject() && saved == storedPayload);
+        };
+        bool lostAck = false;
         bool confirmedDelete = false;
         bool confirmedReplacement = false;
         if (remote["revision"] != r["revision"]) {
-            const bool lostAck = remote["payload"] == r["_inflight_payload"] &&
-                                 remote["revision"] == r["_inflight_revision"];
+            lostAck = matchesReceipt(receipts["_inflight_payload"]) && remote["revision"] == r["_inflight_revision"];
             auto queuedDeletions = r["deleted_photos"].toArray();
             // An older server can return the new revision even when DELETE did
             // nothing. Verify the actual report before adopting that revision.
             // Older checkpoints may only have a matching local or prior PUT payload.
             const bool matchesDeleteBase = r.contains("_inflight_delete_payload")
-                ? remote["payload"] == r["_inflight_delete_payload"]
+                ? matchesReceipt(receipts["_inflight_delete_payload"])
                 : samePayload || (r["_inflight_revision"] == r["revision"] &&
-                                  remote["payload"] == r["_inflight_payload"]);
+                                  matchesReceipt(receipts["_inflight_payload"]));
             if (!lostAck && !queuedDeletions.isEmpty() &&
                 r.value("_inflight_delete_id") == queuedDeletions.first() &&
                 r.value("_inflight_delete_revision") == r["revision"] &&
@@ -852,7 +894,7 @@ void Lem::syncNext(int index, QString notice) {
             const auto pendingReplacement = r["_inflight_photo_replacement"].toObject();
             if (!pendingReplacement.isEmpty() &&
                 pendingReplacement["revision"] == r["revision"] &&
-                pendingReplacement["payload"] == remote["payload"] &&
+                matchesReceipt(receipts["_inflight_photo_replacement"].toObject()["payload"]) &&
                 remote["revision"] == QJsonValue(r["revision"].toDouble() + 1) &&
                 remote["photos"].isArray()) {
                 const auto original = pendingReplacement["original"].toString();
@@ -889,10 +931,34 @@ void Lem::syncNext(int index, QString notice) {
             }
         }
         r["revision"] = remote["revision"];
+        if (pendingHistoricalCorrection(r)) {
+            const auto correction = remote["correction"].toObject();
+            if (correction["state"] != "editing" || correction["editor_id"] != m_user["id"] ||
+                correction["source_id"] != r["correction"].toObject()["source_id"]) {
+                syncFailed(409, "A correção mudou no servidor. A cópia local foi conservada.");
+                return;
+            }
+            // The server copy is still editable. Reopen at the current form so
+            // the technician's changes and evidence survive for review and closure.
+            r = editableProjection(r);
+            for (const auto key : {"_conflict", "_conflict_reason", "_conflict_kind"})
+                r.remove(key);
+            r["_edit_seq"] = r["_edit_seq"].toDouble() + 1;
+            const auto id = r["id"].toString();
+            m_reports[id] = r;
+            if (m_current["id"] == id) {
+                m_current = r;
+                m_template = r["template"].toObject();
+            }
+            saveEdits(r);
+            if (!persist()) { m_syncing = false; emit changed(); return; }
+            emit changed();
+            syncNext(index + 1, "Correção reaberta. Reveja as novas perguntas antes de a fechar.");
+            return;
+        }
         // Equal answers alone cannot acknowledge a form migration. In particular,
         // reopening a rejected historical closure must send the current version
         // and clear the server's frozen-upload marker before evidence is sent.
-        const auto remoteTemplate = remote["template"].toObject();
         const auto localTemplate = r["template"].toObject();
         const bool needsVisitBinding = r["_order_item"].isString() && !remote["work_item_id"].isString();
         const bool sameForm = !needsVisitBinding && r["_conflict_kind"] != "order_scope" &&
@@ -901,8 +967,11 @@ void Lem::syncNext(int index, QString notice) {
         r["_inflight_delete_payload"] = remote.value("payload");
         r["_server_photos"] = remotePhotos;
         // Checkpoint a recovered deletion before sending any newer local answers.
-        if ((confirmedDelete || confirmedReplacement || (samePayload && sameForm)) &&
-            !mergeSync(r, false, remote["photos"]))
+        const bool confirmedReceipt = confirmedDelete || confirmedReplacement || lostAck;
+        const bool recoveredConflict = confirmedReceipt && retryableReceiptConflict(r);
+        const auto evidence = historicalForm(r) && !sameForm ? QJsonValue{} : remote.value("photos");
+        if ((confirmedDelete || confirmedReplacement || recoveredConflict || (samePayload && sameForm)) &&
+            !mergeSync(r, false, evidence, recoveredConflict))
             return;
         if (samePayload && sameForm)
             syncPhotos(index, r, 0);
@@ -1094,7 +1163,7 @@ void Lem::syncPhotos(int index, QJsonObject r, int photoIndex) {
                              {"work_item_id", r.value("_order_item")},
                              {"base_revision", r["revision"]},
                              {"checklist_version", r["template"].toObject()["version"]},
-                             {"frozen_history", !correction && (r["template"].toObject()["version"].toInt() == 6 || r["template"].toObject()["version"].toInt() == 7)},
+                             {"frozen_history", !correction && historicalForm(r)},
                              {"load_test_connectors", r["template"].toObject()["load_test_connectors"]},
                              {"status", "closed"},
                              {"payload", r["payload"]}}),

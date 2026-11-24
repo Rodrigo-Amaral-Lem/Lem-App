@@ -3203,6 +3203,7 @@ ApplicationWindow {
                         onClicked: {
                             detachPcveDialog.contractId = contractIdsDialog.contractId;
                             detachPcveDialog.chargerId = modelData.id;
+                            detachPcveDialog.membershipRevision = Number(modelData.membership_revision || 0);
                             detachPcveDialog.pcveId = modelData.external_id;
                             detachPcveDialog.open();
                         }
@@ -3284,7 +3285,7 @@ ApplicationWindow {
                         onClicked: {
                             if (modelData.purge_after) {
                                 membershipDialog.loading = true;
-                                lem.changeMembership(membershipDialog.contractId, modelData.id, membershipDialog.corrective, true);
+                                lem.changeMembership(membershipDialog.contractId, modelData.id, membershipDialog.corrective, true, 0);
                             } else membershipDialog.removal = modelData;
                         }
                     }
@@ -3303,7 +3304,8 @@ ApplicationWindow {
                     text: "Confirmar remoção"
                     onClicked: {
                         membershipDialog.loading = true;
-                        lem.changeMembership(membershipDialog.contractId, membershipDialog.removal.id, true, false);
+                        lem.changeMembership(membershipDialog.contractId, membershipDialog.removal.id, true, false,
+                                             Number(membershipDialog.removal.membership_revision || 0));
                         membershipDialog.removal = null;
                     }
                 }
@@ -3318,6 +3320,7 @@ ApplicationWindow {
         property string contractId
         property string chargerId
         property string pcveId
+        property int membershipRevision
         title: "Retirar PCVE do contrato?"
         modal: true
         parent: Overlay.overlay
@@ -3336,7 +3339,8 @@ ApplicationWindow {
                     text: "Retirar"
                     objectName: "confirmDetachPcve"
                     onClicked: {
-                        lem.detachCharger(detachPcveDialog.contractId, detachPcveDialog.chargerId);
+                        lem.detachCharger(detachPcveDialog.contractId, detachPcveDialog.chargerId,
+                                          detachPcveDialog.membershipRevision);
                         detachPcveDialog.accept();
                     }
                 }
@@ -5878,7 +5882,7 @@ ApplicationWindow {
                                             id: itemCard
                                             required property var modelData
                                             property bool noteExpanded: false
-                                            property bool notesRequired: !modelData.notes_disabled && (win.answerFor(modelData.id).assessment === "NOK" || answerValue === "NOK" || (!!modelData.na_notes_required && Measurements.notApplicable(answerValue)))
+                                            property bool notesRequired: !modelData.notes_disabled && (win.answerFor(modelData.id).assessment === "NOK" || answerValue === "NOK" || (!!modelData.na_notes_required && testNA))
                                             enabled: !(lem.copyingGroup === "QVE" && modelData.id.indexOf("QVE.") === 0) && !(lem.copyingGroup === "MAN" && /^MAN\.(0[4-9]|10)$/.test(modelData.id))
                                             property string answerValue: win.answerFor(modelData.id).value || ""
                                             readonly property string measurementId: Number((lem.current.template || {}).version || 7) < 7 && Measurements.milliamp(modelData.id) ? Measurements.canonical(modelData.id) : modelData.measurement_key || modelData.id

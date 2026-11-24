@@ -68,6 +68,17 @@ trigger("clearMeasurement_MAN.10")
 assert values["current"]["payload"]["answers"]["MAN.10"]["value"]==""
 trigger("notApplicable_MAN.10")
 assert js('itemIssues(lem.sections[4].items.find(i=>i.id==="MAN.10")).length')==0
+# An unavailable time leaves the chosen test assessment in force.
+trip = find_visual(w.contentItem(), "checkpoint_MAN.14")
+for assessment, needs_notes in (("OK", False), ("NOK", True)):
+    lem.setAssessment("MAN.14", assessment)
+    lem.answer("MAN.14", "Não Aplicável", "", True)
+    QTest.qWait(10)
+    assert trip.property("notesRequired") == needs_notes
+    assert trip.property("needsPhoto")
+lem.answer("MAN.14", "Não Aplicável", "")
+QTest.qWait(10)
+assert trip.property("notesRequired") and not trip.property("needsPhoto")
 # Saved units never enter the editor, so backspace edits the last digit directly.
 lem.answer("MAN.07", "238,3 V", ""); QTest.qWait(10)
 field=find_visual(w.contentItem(),"value_MAN.07")

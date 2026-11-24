@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para desktop
 
-Desktop · Aplicação 0.11.1 · Edição 2.20 · 24 de novembro de 2026
+Desktop · Aplicação 0.11.2 · Edição 2.21 · 24 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-desktop.pdf](manual-utilizador-desktop.pdf).
 
@@ -20,7 +20,7 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. As ações são realizadas com o rato e o teclado. Clique nos botões e utilize a roda do rato ou a barra de deslocação para percorrer o relatório.
 
-Este manual descreve a versão 0.11.1 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
+Este manual descreve a versão 0.11.2 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios. A disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
 
@@ -127,6 +127,8 @@ Para comissionar um PCVE, abra a ficha ou o menu **Comissionamentos** e escolha 
 
 Consulte a data e hora limite na lista. Um pedido apagado separadamente mantém o seu prazo de 48 horas. Se também retirou o ID da corretiva, recupere primeiro o ID e depois o pedido dentro desse prazo.
 
+Atualize a lista de IDs se outro administrador tiver recuperado o ID entretanto. Quando um pedido é eliminado definitivamente, a ordem regista o impedimento na visita pendente. A ordem fica concluída se essa era a última visita pendente.
+
 ## 04 Preencher e navegar no relatório
 
 Confirme o ID do carregador e o estado no topo. Clique num separador ou em **Grupos** para mudar de secção. Os três pontos abrem as **Opções do report**. Use **Rever report** para identificar o que falta preencher ou anexar.
@@ -165,7 +167,7 @@ Nos campos de medição, introduza o resultado do instrumento. Quando existirem 
 
 Com MAN.11 válido, MAN.13 fica **NOK** se a leitura for menor ou igual a 50% ou maior ou igual a 105% do calibre configurado. Entre esses limites, fica OK. Exemplo: para 300 mA, 150 mA e 315 mA são NOK. A app sugere «Proteção diferencial não dispara».
 
-Em MAN.12 e MAN.14, **1s = 1000ms**. Por exemplo, introduza **500** para meio segundo. Em MAN.14, se a proteção não disparar, pode indicar **NA** no valor, escolher **NOK** e anexar a fotografia. A app sugere «Proteção diferencial não dispara». Se o teste não foi realizado, escolha **N/A**. A fotografia é dispensada e a app sugere «Não testado devido a veículo em carga». Toque ou clique na observação para escrever o motivo que se aplica.
+Em MAN.12 e MAN.14, **1s = 1000ms**. Por exemplo, introduza **500** para meio segundo. Em MAN.14, se conhece o resultado mas o testador não forneceu o tempo, escolha **Leitura indisponível (NA)**, indique **OK** ou **NOK** e anexe a fotografia. **NOK** apresenta a observação sugerida «Proteção diferencial não dispara». Se não realizou o teste, escolha **N/A**. A fotografia fica opcional e a app sugere «Não testado devido a veículo em carga». Toque ou clique na observação para escrever o motivo que se aplica.
 
 Para MAN.20, a app usa por agora **R máximo = 50 / (MAN.11 / 1000)**, em Ω. Acima desse limite, marca NOK e sugere «Valor de terra de proteção elevado e acima do limite para o calibre da proteção diferencial configurada». Até ao limite, marca OK; se a leitura também for superior a 50 Ω, sugere «Valor de terra de proteção elevado mas dentro de limites para o calibre da proteção diferencial configurada». Para 300 mA, 166,66 Ω fica OK e 166,67 Ω fica NOK. A igualdade ao limite é aceite.
 
@@ -388,6 +390,8 @@ As fotografias, os vídeos e a assinatura já guardados no servidor acompanham a
 Se a gravação das datas falhar, o relatório conserva as datas anteriores e o diálogo mantém os valores introduzidos. Depois de verificar a mensagem, volte a selecionar **Guardar datas**.
 
 Nos formulários muito antigos, os códigos podiam ter outros significados. A secção **ANT - Registos anteriores** conserva essas respostas, observações e evidências. Preencha e valide as perguntas atuais e assine novamente antes de guardar a correção.
+
+Se a sincronização reabrir uma correção antiga que aguardava envio, reveja a cópia em edição. Complete as perguntas novas e confirme o fecho novamente. O relatório original continua disponível até o servidor aceitar a correção.
 
 Se alterar fabricante/marca (EST.02), modelo (EST.03) ou número de série (EST.04), a correção aceite também atualiza a ficha do carregador nos contratos que partilham o equipamento. O servidor compara cada campo alterado com o valor que a ficha tinha ao abrir a cópia. Se o campo tiver mudado entretanto para outro valor, o envio indica o conflito e conserva os dois relatórios. Para voltar a verificar uma correção pendente por este motivo, escolha **Sincronizar**.
 

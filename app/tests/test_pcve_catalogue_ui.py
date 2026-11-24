@@ -123,7 +123,10 @@ def checks():
         assert refreshes and js("pcveList.count") == 2
         assert not find_visual(w.contentItem(), "importPcves").isVisible()
         js('pcveSearch.text=" parque NORTE "')
-        QTest.qWait(250)
+        for _ in range(100):
+            if js("pcveList.count") == 1:
+                break
+            QTest.qWait(20)
         assert js("pcveList.count") == 1
         pointer_click("pcveCard_station")
         assert js("pcveDetailsDialog.opened")

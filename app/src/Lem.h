@@ -176,7 +176,7 @@ class Lem : public QObject {
     QVariantMap stationEditResult() const { return m_stationEditResult.toVariantMap(); }
     QVariantMap stationReports() const { return m_stationReports.toVariantMap(); }
     Q_INVOKABLE void loadStationReports(QString stationId);
-    Q_INVOKABLE void detachCharger(QString contractId, QString chargerId);
+    Q_INVOKABLE void detachCharger(QString contractId, QString chargerId, int membershipRevision);
     Q_INVOKABLE void loadContractNotes(QString contractId, QString chargerId);
     Q_INVOKABLE QVariantMap historicalContractNotes(QString contractId, QString chargerId) const;
     Q_INVOKABLE void saveContractNotes(QString contractId, QString chargerId, int baseRevision, QString notes);
@@ -272,7 +272,8 @@ class Lem : public QObject {
     Q_INVOKABLE void deleteContract(QString id, QString confirmation);
     Q_INVOKABLE void loadDeletedContracts(QString kind = {});
     Q_INVOKABLE void loadMemberships(QString contractId, bool corrective);
-    Q_INVOKABLE void changeMembership(QString contractId, QString memberId, bool corrective, bool restore);
+    Q_INVOKABLE void changeMembership(QString contractId, QString memberId, bool corrective, bool restore,
+                                      int membershipRevision);
     Q_INVOKABLE void restoreContract(QString id);
     Q_INVOKABLE void analyseExcel(QUrl file);
     Q_INVOKABLE void analyseContractIds(QUrl file, QString contractId);
@@ -426,7 +427,8 @@ class Lem : public QObject {
     void startSync(bool manual);
     bool releasePhotoSync(QString reportId);
     void syncFailed(int code, QString message);
-    bool mergeSync(QJsonObject sent, bool complete = false, QJsonValue serverPhotos = {});
+    bool mergeSync(QJsonObject sent, bool complete = false, QJsonValue serverPhotos = {},
+                   bool recoveredConflict = false);
     void syncRequest(QString method, QString path, QByteArray body, Callback cb);
     bool saveEdits(QJsonObject report);
     QString editPath(QString reportId) const;

@@ -179,11 +179,12 @@ void Lem::loadMemberships(QString contractId, bool corrective) {
     });
 }
 
-void Lem::changeMembership(QString contractId, QString memberId, bool corrective, bool restore) {
+void Lem::changeMembership(QString contractId, QString memberId, bool corrective, bool restore, int membershipRevision) {
     if (!authenticated() || m_user["role"] != "admin" || contractId.isEmpty() || memberId.isEmpty()) return;
     auto path = corrective ? "/api/corrective-contracts/" + contractId + "/members/" + memberId
                            : "/api/contracts/" + contractId + "/chargers/" + memberId;
     if (restore) path += "/restore";
+    else path += "?membership_revision=" + QString::number(membershipRevision);
     const auto token = m_token;
     request(restore ? "POST" : "DELETE", path, {}, [this, token, contractId, corrective](QByteArray) {
         if (token != m_token) return;
