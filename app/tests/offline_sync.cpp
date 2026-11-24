@@ -431,7 +431,7 @@ int main(int argc, char **argv) {
     QDesktopServices::setUrlHandler("file", &exportViewer, "view");
     // These integration fixtures only contact the disposable loopback server.
     QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
-    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.10.0"));
+    app.setApplicationVersion(qEnvironmentVariable("LEM_TEST_CLIENT_VERSION", "0.11.0"));
     app.setOrganizationName("Lem-Offline-Test");
     app.setApplicationName("Lem Offline Test");
     const auto args = app.arguments();

@@ -522,11 +522,8 @@ def run_tests():
         for _ in range(3):
             pointer_click("reportOptionsButton")
             assert js("reportMenu.visible")
-            pointer_click("reportOptionsButton")
+            pointer_click("reportMenuClose")
             assert not js("reportMenu.visible")
-        assert not js(
-            'Array.from({length:reportMenu.count},(_,i)=>reportMenu.itemAt(i).text).includes("Conta")'
-        )
         js("statusDialog.open()")
         QTest.qWait(50)
         values["operationStatus"] = {
@@ -599,6 +596,9 @@ def run_tests():
             w.setWidth(320)
             QTest.qWait(60)
             check_answer_row()
+            # The resting strip fits complete group labels beside the picker.
+            assert js("Math.abs(sectionTabs.countInView * (sectionTabs.tabWidth + sectionTabs.spacing)"
+                      " - sectionTabs.spacing - sectionTabScroll.width) < 1")
             w.setWidth(width)
             QTest.qWait(60)
         trigger("answer_EST.01_NOK")
@@ -726,15 +726,22 @@ def run_tests():
         for ch in "Teste":
             QTest.keyClick(w, ord(ch))
         take = find_visual(w.contentItem(), "addPhoto_EST.01")
-        choose = find_visual(w.contentItem(), "choosePhoto_EST.01")
+        trigger("otherAttachments_EST.01")
+        assert js("attachmentSheet.opened") and js("photoItem") == "EST.01"
+        choose = find_visual(w.contentItem(), "chooseAttachmentPhoto")
+        assert choose.isVisible() == mobile
+        assert find_visual(w.contentItem(), "chooseAttachmentVideo").isVisible()
+        if mobile:
+            trigger("chooseAttachmentPhoto")
+            assert js("photoDialog.visible") and not js("attachmentSheet.visible")
+            js("photoDialog.reject()")
+        else:
+            trigger("chooseAttachmentVideo")
+            assert js("videoDialog.visible") and not js("attachmentSheet.visible")
+            js("videoDialog.reject()")
+        QTest.qWait(50)
         if mobile:
             assert take.property("text") == "Tirar fotografia"
-            assert choose.isVisible()
-            obs = find_visual(w.contentItem(), "toggleNotes_EST.01")
-            assert take.property("symbol") == "camera" and choose.property("symbol") == "gallery"
-            assert (
-                abs(take.y() - choose.y()) < 1 and abs(take.y() - obs.y()) < 1
-            ), "Three actions must share one row"
             trigger("addPhoto_EST.01")
             assert camera_calls == ["EST.01"]
             trigger("allGroupsButton")
@@ -744,7 +751,6 @@ def run_tests():
             assert find_visual(w.contentItem(), "answer_EST.01_OK").height() >= 48
         else:
             assert take.property("text") == "Adicionar fotografia"
-            assert not choose.isVisible()
         assert find_visual(w.contentItem(), "downloadAllReportPhotosButton").isVisible()
         trigger("downloadAllReportPhotosButton")
         assert js("photoDownloadDialog.opened")
@@ -826,7 +832,7 @@ def run_tests():
             ]:
                 button = find_visual(w.contentItem(), name)
                 assert button.width() >= 48 and button.height() >= 48, name
-            assert find_visual(w.contentItem(), "syncButton").property("text").startswith("Sinc.")
+            assert find_visual(w.contentItem(), "syncButton").property("text").startswith("Sincronizar (")
         if mobile:
             saved_width, saved_height = w.width(), w.height()
             w.setWidth(320)

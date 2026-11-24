@@ -574,6 +574,22 @@ ApplicationWindow {
                     c.lineTo(x - tx * arrow - Math.cos(end) * arrow * .65, y - ty * arrow - Math.sin(end) * arrow * .65);
                     c.stroke();
                 }
+            } else if (kind === "more" || kind === "info") {
+                c.fillStyle = ink;
+                if (kind === "info") {
+                    c.beginPath();
+                    c.arc(width * .5, height * .5, Math.min(width, height) * .42, 0, Math.PI * 2);
+                    c.stroke();
+                    c.beginPath();
+                    c.moveTo(width * .5, height * .49);
+                    c.lineTo(width * .5, height * .71);
+                    c.stroke();
+                }
+                for (const y of (kind === "more" ? [.2, .5, .8] : [.31])) {
+                    c.beginPath();
+                    c.arc(width * .5, height * y, kind === "more" ? width * .095 : width * .055, 0, Math.PI * 2);
+                    c.fill();
+                }
             } else if (kind === "menu") {
                 for (let y of [0.25, 0.5, 0.75]) {
                     c.beginPath();
@@ -802,6 +818,117 @@ ApplicationWindow {
             color: win.softSurface
         }
     }
+    component DestinationItem: Base.MenuItem {
+        id: destination
+        property bool current: false
+        implicitHeight: visible ? Math.max(win.touchHeight, contentItem.implicitHeight + 12) : 0
+        palette: lightPalette
+        Accessible.selectable: true
+        Accessible.selected: current
+        leftPadding: 14
+        contentItem: Text {
+            text: destination.text
+            font.bold: destination.current
+            color: destination.enabled ? win.ink : win.mutedInk
+            verticalAlignment: Text.AlignVCenter
+            wrapMode: Text.Wrap
+        }
+        background: Rectangle {
+            radius: 5
+            color: destination.current || destination.highlighted ? win.brandTint : "transparent"
+            border.width: destination.visualFocus ? 2 : 0
+            border.color: win.brandPrimary
+        }
+    }
+    component ActionSheet: Base.Popup {
+        id: sheet
+        required property string heading
+        property string contextLabel: ""
+        property int panelWidth: 440
+        property int columns: 1
+        default property alias groups: grid.data
+        parent: Overlay.overlay
+        modal: true
+        focus: true
+        popupType: Popup.Item
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        padding: 10
+        readonly property real sheetLeftMargin: win.SafeArea.margins.left + 8
+        readonly property real sheetRightMargin: win.SafeArea.margins.right + 8
+        readonly property real sheetBottomMargin: win.SafeArea.margins.bottom + 8
+        width: Math.min(panelWidth, parent.width - sheetLeftMargin - sheetRightMargin)
+        height: Math.min(parent.height - win.SafeArea.margins.top - 8 - sheetBottomMargin,
+                         sheetHeader.implicitHeight + grid.implicitHeight + 6 + topPadding + bottomPadding)
+        x: win.width > 640 ? parent.width - width - sheetRightMargin : sheetLeftMargin + (parent.width - sheetLeftMargin - sheetRightMargin - width) / 2
+        y: parent.height - height - sheetBottomMargin
+        onOpened: sheetScroll.contentItem.contentY = 0
+        background: Rectangle { color: "white"; radius: 10; border.color: win.cardOutline }
+        contentItem: ColumnLayout {
+            spacing: 6
+            RowLayout {
+                id: sheetHeader
+                Layout.fillWidth: true
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+                    UiLabel { text: sheet.contextLabel; visible: !!text; color: win.brandPrimary }
+                    UiLabel { Layout.fillWidth: true; text: sheet.heading; font.bold: true; font.pixelSize: 19; wrapMode: Text.Wrap }
+                }
+                UiIconButton { objectName: sheet.objectName + "Close"; symbol: "close"; text: "Fechar"; onClicked: sheet.close() }
+            }
+            ScrollView {
+                id: sheetScroll
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                contentWidth: availableWidth
+                clip: true
+                GridLayout {
+                    id: grid
+                    width: sheetScroll.availableWidth
+                    columns: sheet.columns
+                    columnSpacing: 12
+                    rowSpacing: 6
+                    uniformCellWidths: true
+                }
+            }
+        }
+    }
+    component ActionGroup: ColumnLayout {
+        id: actionGroup
+        property string heading: ""
+        Layout.fillWidth: true
+        Layout.alignment: Qt.AlignTop
+        spacing: 0
+        UiLabel {
+            visible: !!actionGroup.heading
+            Layout.fillWidth: true
+            padding: 6
+            text: actionGroup.heading
+            font.bold: true
+            color: win.brandPrimary
+            background: Rectangle { color: win.brandTint; radius: 4 }
+        }
+    }
+    component SheetAction: Base.ItemDelegate {
+        id: actionRow
+        Layout.fillWidth: true
+        implicitHeight: Math.max(win.touchHeight, contentItem.implicitHeight + 14)
+        height: visible ? implicitHeight : 0
+        property bool destructive: false
+        contentItem: Text {
+            text: actionRow.text
+            color: !actionRow.enabled ? win.mutedInk : actionRow.destructive ? win.danger : win.ink
+            font: actionRow.font
+            verticalAlignment: Text.AlignVCenter
+            wrapMode: Text.Wrap
+        }
+        background: Rectangle {
+            color: actionRow.down || actionRow.hovered ? win.hoverSurface : "white"
+            border.width: actionRow.visualFocus ? 2 : 0
+            border.color: win.brandPrimary
+            Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: win.cardOutline }
+        }
+    }
     component UiLabel: Base.Label {
         // UI values are literal text, including names and notes supplied by users.
         textFormat: Text.PlainText
@@ -857,6 +984,32 @@ ApplicationWindow {
                 color: "transparent"
                 border.width: control.visualFocus ? 1 : 0
                 border.color: control.primary || control.checked ? "#ffffff" : win.brandPrimary
+            }
+        }
+    }
+    component LabelledIconButton: UiButton {
+        id: labelled
+        implicitWidth: labelRow.implicitWidth + leftPadding + rightPadding
+        implicitHeight: Math.max(win.touchHeight, labelRow.implicitHeight + 12)
+        contentItem: Item {
+            RowLayout {
+                id: labelRow
+                anchors.centerIn: parent
+                width: Math.min(implicitWidth, parent.width)
+                spacing: 7
+                UiIcon {
+                    Layout.preferredWidth: 18
+                    Layout.preferredHeight: 18
+                    kind: labelled.symbol
+                    ink: (labelled.primary || labelled.checked) && labelled.enabled ? "white" : win.ink
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: labelled.text
+                    font: labelled.font
+                    color: (labelled.primary || labelled.checked) && labelled.enabled ? "white" : win.ink
+                    wrapMode: Text.Wrap
+                }
             }
         }
     }
@@ -1386,7 +1539,7 @@ ApplicationWindow {
                  && !pcveEditDialog.opened && !pcveImportDialog.opened && !contractNotesDialog.visible
                  && !photoPreview.opened && !cropDialog.opened && !removePhotoDialog.opened && !deleteReportDialog.opened
                  && !removeNotesDialog.opened && !photoDownloadDialog.opened && !statusDialog.opened && !loginDialog.opened
-                 && !clearLocalCopiesDialog.opened && !reportMenu.opened && !navMenu.opened
+                 && !clearLocalCopiesDialog.opened && !reportMenu.opened && !attachmentSheet.opened && !navMenu.opened
         onActivated: win.navigateBack()
     }
     readonly property var pcveRecords: lem.stations || []
@@ -1622,17 +1775,19 @@ ApplicationWindow {
                     enabled: !lem.busy
                     onClicked: win.page = "pcves"
                 }
-                UiButton {
+                LabelledIconButton {
                     text: "Intervenções"
+                    symbol: "down"
                     visible: win.width > 820 && !!lem.user.id
                     checked: win.page === "interventions"
                     enabled: !lem.busy
                     onClicked: jobMenu.open()
                     Base.Menu {
                         id: jobMenu
+                        width: Math.min(250, win.width - 16)
                         y: parent.height
-                        Base.MenuItem { text: "Manutenções corretivas"; onTriggered: win.showInterventions("corrective") }
-                        Base.MenuItem { text: "Comissionamentos"; onTriggered: win.showInterventions("commissioning") }
+                        DestinationItem { current: win.page === "interventions" && jobsPage.kind === "corrective"; text: "Manutenções corretivas"; onTriggered: win.showInterventions("corrective") }
+                        DestinationItem { current: win.page === "interventions" && jobsPage.kind === "commissioning"; text: "Comissionamentos"; onTriggered: win.showInterventions("commissioning") }
                     }
                 }
                 UiButton {
@@ -1669,42 +1824,53 @@ ApplicationWindow {
                         }
                         objectName: "navigationMenu"
                         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
-                        Base.MenuItem {
-                            implicitHeight: win.touchHeight
-                            palette: lightPalette
+                        DestinationItem {
+                            current: win.page === "catalog"
                             text: "Contratos"
                             onTriggered: win.page = "catalog"
                         }
-                        Base.MenuItem {
+                        DestinationItem {
+                            current: win.page === "orders"
                             text: "Ordens de trabalho"
                             visible: !!lem.user.id
-                            implicitHeight: visible ? win.touchHeight : 0
                             onTriggered: win.page = "orders"
                         }
-                        Base.MenuItem {
+                        DestinationItem {
                             objectName: "pcveCatalogueMenuItem"
-                            implicitHeight: visible ? win.touchHeight : 0
-                            palette: lightPalette
+                            current: win.page === "pcves"
                             text: "PCVEs"
                             visible: !!lem.user.id
                             enabled: !lem.busy
                             onTriggered: win.page = "pcves"
                         }
-                        Base.MenuItem {
+                        UiLabel {
+                            visible: !!lem.user.id
+                            height: lem.user.id ? Math.ceil(font.pixelSize * 1.5) + 10 : 0
+                            leftPadding: 12
+                            topPadding: 6
+                            bottomPadding: 4
+                            color: win.brandPrimary
+                            font.bold: true
+                            text: "Intervenções"
+                        }
+                        DestinationItem {
+                            current: win.page === "interventions" && jobsPage.corrective
                             text: "Manutenções corretivas"
                             visible: !!lem.user.id
-                            implicitHeight: visible ? win.touchHeight : 0
                             onTriggered: win.showInterventions("corrective")
                         }
-                        Base.MenuItem {
+                        DestinationItem {
+                            current: win.page === "interventions" && !jobsPage.corrective
                             text: "Comissionamentos"
                             visible: !!lem.user.id
-                            implicitHeight: visible ? win.touchHeight : 0
                             onTriggered: win.showInterventions("commissioning")
                         }
-                        Base.MenuItem {
-                            implicitHeight: visible ? win.touchHeight : 0
-                            palette: lightPalette
+                        Base.MenuSeparator {
+                            visible: lem.user.role === "admin"
+                            height: visible ? implicitHeight : 0
+                        }
+                        DestinationItem {
+                            current: win.page === "admin"
                             text: "Gestão"
                             visible: lem.user.role === "admin"
                             onTriggered: {
@@ -1716,156 +1882,11 @@ ApplicationWindow {
                 }
                 UiHeaderButton {
                     visible: win.page === "report"
-                    symbol: "menu"
+                    symbol: "more"
                     implicitWidth: win.touchHeight
                     Accessible.name: "Opções do report"
                     objectName: "reportOptionsButton"
                     onClicked: reportMenu.visible = !reportMenu.visible
-                    Base.Menu {
-                        id: reportMenu
-                        objectName: "reportMenu"
-                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
-                        popupType: Popup.Item
-                        width: Math.min(280, win.width - 24)
-                        x: parent.width - width
-                        y: parent.height
-                        palette: lightPalette
-                        background: Rectangle {
-                            color: "white"
-                            radius: 8
-                            border.color: win.outline
-                        }
-                        Base.MenuItem {
-                            objectName: "reportContractNotes"
-                            implicitHeight: win.touchHeight
-                            text: "Notas do PCVE"
-                            enabled: !!win.reportData.charger_id
-                            onTriggered: win.showReportNotes(false)
-                        }
-                        Base.MenuItem {
-                            implicitHeight: win.touchHeight
-                            text: "Atualizar report do servidor"
-                            enabled: !win.reportNetworkActivity
-                            onTriggered: lem.refreshReport()
-                        }
-                        Base.MenuItem {
-                            objectName: "downloadReportPhotosAction"
-                            implicitHeight: win.touchHeight
-                            text: lem.downloadingPhotos ? "Descarregamento em curso…" : "Descarregar todas as evidências"
-                            enabled: !!win.reportData.id && !lem.downloadingPhotos
-                            onTriggered: win.openPhotoDownloads()
-                        }
-                        Base.MenuItem {
-                            implicitHeight: win.touchHeight
-                            text: "Cancelar fotografias restantes"
-                            visible: lem.downloadingPhotos
-                            height: visible ? implicitHeight : 0
-                            onTriggered: lem.cancelReportPhotoDownloads()
-                        }
-                        Base.MenuItem {
-                            implicitHeight: win.touchHeight
-                            text: "Permitir limpeza destas fotografias"
-                            visible: !!win.reportData.offline_photos
-                            height: visible ? implicitHeight : 0
-                            enabled: !lem.currentReportDownloadingPhotos
-                            onTriggered: lem.releaseReportPhotos()
-                        }
-                        Base.MenuItem {
-                            objectName: "correctClosedReportAction"
-                            text: "Corrigir report fechado…"
-                            visible: !!lem.desktopCorrections && lem.user.role === "admin" && win.reportData.status === "closed" && !win.correctingReport
-                            height: visible ? implicitHeight : 0
-                            enabled: !win.reportNetworkActivity && lem.authenticated && !win.reportData.dirty && win.reportData.revision > 0
-                            onTriggered: beginCorrectionDialog.open()
-                        }
-                        Base.MenuItem {
-                            objectName: "correctionDatesAction"
-                            text: "Editar início e fim…"
-                            visible: win.correctingReport && win.editing
-                            height: visible ? implicitHeight : 0
-                            enabled: !lem.busy
-                            onTriggered: {
-                                correctionStart.text = (win.reportData.payload || {}).started || win.reportData.started || "";
-                                correctionEnd.text = (win.reportData.payload || {}).finished || win.reportData.finished || "";
-                                correctionDatesDialog.open();
-                            }
-                        }
-                        Base.MenuItem {
-                            objectName: "transferReportAction"
-                            implicitHeight: win.touchHeight
-                            text: "Transferir propriedade"
-                            visible: lem.user.role === "admin" && win.reportData.status === "draft" && !win.correctingReport
-                            height: visible ? implicitHeight : 0
-                            enabled: !win.reportNetworkActivity && win.reportData.revision > 0 && !win.reportData.dirty && !win.reportData._conflict
-                            onTriggered: {
-                                transferDialog.reportId = lem.current.id;
-                                lem.loadReportOwners();
-                                transferDialog.open();
-                            }
-                        }
-                        Base.MenuItem {
-                            implicitHeight: win.touchHeight
-                            text: "Criar rascunho como cópia"
-                            enabled: !!win.reportData.id && !win.reportNetworkActivity
-                            onTriggered: copyReportDialog.open()
-                        }
-                        Base.MenuItem {
-                            implicitHeight: win.touchHeight
-                            text: "Dados do carregador"
-                            onTriggered: detailsDialog.open()
-                        }
-                        Base.MenuItem {
-                            implicitHeight: win.touchHeight
-                            text: "Estado da operação"
-                            onTriggered: statusDialog.open()
-                        }
-                        Base.MenuItem {
-                            objectName: "deleteReportAction"
-                            implicitHeight: win.touchHeight
-                            visible: win.canDeleteReport && win.correctionPermitted
-                            height: visible ? implicitHeight : 0
-                            text: win.correctingReport ? "Cancelar e apagar cópia de correção…" : win.reportData.status === "closed" ? "Apagar report fechado…" : "Apagar rascunho…"
-                            enabled: !win.reportNetworkActivity
-                            onTriggered: {
-                                deleteReportDialog.reportId = lem.current.id;
-                                deleteReportDialog.reportIdentifier = lem.current.identifier || "";
-                                deleteReportDialog.closedReport = lem.current.status === "closed";
-                                deleteReportDialog.open();
-                            }
-                        }
-                        Base.MenuItem {
-                            id: exportPdfAction
-                            implicitHeight: win.touchHeight
-                            objectName: "exportPdfAction"
-                            visible: !!win.reportData.id && win.reportData.status === "closed"
-                            height: visible ? implicitHeight : 0
-                            text: "Exportar PDF"
-                            enabled: !!win.reportData.id && win.reportData.status === "closed" && !lem.busy
-                            onTriggered: {
-                                if (!lem.prepareExport("pdf"))
-                                    return;
-                                win.exportKind = "pdf";
-                                exportDialog.selectedFile = lem.defaultExport("pdf");
-                                exportDialog.open();
-                            }
-                        }
-                        Base.MenuItem {
-                            id: exportBundleAction
-                            implicitHeight: win.touchHeight
-                            objectName: "exportBundleAction"
-                            visible: !!win.reportData.id && win.reportData.status === "closed"
-                            height: visible ? implicitHeight : 0
-                            text: "PDF + evidências (ZIP)"
-                            enabled: !!win.reportData.id && win.reportData.status === "closed" && !lem.busy
-                            onTriggered: {
-                                if (!lem.prepareExport("bundle"))
-                                    return;
-                                win.exportKind = "bundle";
-                                exportDialog.selectedFile = lem.defaultExport("bundle");
-                                exportDialog.open();
-                            }
-                        }
-                    }
                 }
                 UiHeaderButton {
                     id: accountControl
@@ -2080,7 +2101,7 @@ ApplicationWindow {
                 contentItem: UiIcon {
                     id: operationGlyph
                     objectName: "operationStatusIcon"
-                    kind: "sync"
+                    kind: win.operationActive ? "sync" : "info"
                     implicitWidth: 26
                     implicitHeight: 26
                     ink: win.operationActive ? "#ffffff" : win.brandPrimary
@@ -2107,7 +2128,7 @@ ApplicationWindow {
             UiButton {
                 objectName: "syncButton"
                 Layout.fillWidth: win.compact
-                text: "Sinc. (" + lem.pendingReports + ")"
+                text: "Sincronizar (" + lem.pendingReports + ")"
                 Accessible.name: "Sincronizar. " + lem.pendingReports + " reports pendentes"
                 enabled: !lem.busy && !lem.syncing && !!lem.user.id
                 onClicked: lem.sync()
@@ -2271,6 +2292,169 @@ ApplicationWindow {
                 text: "Fechar"
                 Layout.fillWidth: true
                 onClicked: statusDialog.close()
+            }
+        }
+    }
+    ActionSheet {
+        id: reportMenu
+        objectName: "reportMenu"
+        heading: "Opções do report"
+        panelWidth: win.width > 640 ? 640 : win.width
+        columns: win.width > 640 ? 2 : 1
+        ActionGroup {
+            heading: "Consultar"
+            SheetAction {
+                objectName: "reportContractNotes"
+                text: "Notas do PCVE"
+                enabled: !!win.reportData.charger_id
+                onClicked: {
+                    reportMenu.close();
+                    win.showReportNotes(false);
+                }
+            }
+            SheetAction {
+                text: "Dados do carregador"
+                onClicked: {
+                    reportMenu.close();
+                    detailsDialog.open();
+                }
+            }
+        }
+        ActionGroup {
+            heading: "Exportar"
+            visible: !!win.reportData.id && win.reportData.status === "closed"
+            SheetAction {
+                id: exportPdfAction
+                objectName: "exportPdfAction"
+                visible: !!win.reportData.id && win.reportData.status === "closed"
+                text: "Exportar PDF"
+                enabled: !!win.reportData.id && win.reportData.status === "closed" && !lem.busy
+                onClicked: {
+                    reportMenu.close();
+                    if (!lem.prepareExport("pdf"))
+                        return;
+                    win.exportKind = "pdf";
+                    exportDialog.selectedFile = lem.defaultExport("pdf");
+                    exportDialog.open();
+                }
+            }
+            SheetAction {
+                id: exportBundleAction
+                objectName: "exportBundleAction"
+                visible: !!win.reportData.id && win.reportData.status === "closed"
+                text: "PDF + evidências (ZIP)"
+                enabled: !!win.reportData.id && win.reportData.status === "closed" && !lem.busy
+                onClicked: {
+                    reportMenu.close();
+                    if (!lem.prepareExport("bundle"))
+                        return;
+                    win.exportKind = "bundle";
+                    exportDialog.selectedFile = lem.defaultExport("bundle");
+                    exportDialog.open();
+                }
+            }
+        }
+        ActionGroup {
+            heading: "Sincronização"
+            SheetAction {
+                text: "Estado da operação"
+                onClicked: {
+                    reportMenu.close();
+                    statusDialog.open();
+                }
+            }
+            SheetAction {
+                text: "Atualizar report do servidor"
+                enabled: !win.reportNetworkActivity
+                onClicked: {
+                    reportMenu.close();
+                    lem.refreshReport();
+                }
+            }
+            SheetAction {
+                objectName: "downloadReportPhotosAction"
+                text: lem.downloadingPhotos ? "Descarregamento em curso…" : "Descarregar todas as evidências"
+                enabled: !!win.reportData.id && !lem.downloadingPhotos
+                onClicked: {
+                    reportMenu.close();
+                    win.openPhotoDownloads();
+                }
+            }
+            SheetAction {
+                text: "Cancelar fotografias restantes"
+                visible: lem.downloadingPhotos
+                onClicked: {
+                    reportMenu.close();
+                    lem.cancelReportPhotoDownloads();
+                }
+            }
+            SheetAction {
+                text: "Permitir limpeza destas fotografias"
+                visible: !!win.reportData.offline_photos
+                enabled: !lem.currentReportDownloadingPhotos
+                onClicked: {
+                    reportMenu.close();
+                    lem.releaseReportPhotos();
+                }
+            }
+        }
+        ActionGroup {
+            heading: "Gerir report"
+            SheetAction {
+                text: "Criar rascunho como cópia"
+                enabled: !!win.reportData.id && !win.reportNetworkActivity
+                onClicked: {
+                    reportMenu.close();
+                    copyReportDialog.open();
+                }
+            }
+            SheetAction {
+                objectName: "correctClosedReportAction"
+                text: "Corrigir report fechado…"
+                visible: !!lem.desktopCorrections && lem.user.role === "admin" && win.reportData.status === "closed" && !win.correctingReport
+                enabled: !win.reportNetworkActivity && lem.authenticated && !win.reportData.dirty && win.reportData.revision > 0
+                onClicked: {
+                    reportMenu.close();
+                    beginCorrectionDialog.open();
+                }
+            }
+            SheetAction {
+                objectName: "correctionDatesAction"
+                text: "Editar início e fim…"
+                visible: win.correctingReport && win.editing
+                enabled: !lem.busy
+                onClicked: {
+                    reportMenu.close();
+                    correctionStart.text = (win.reportData.payload || {}).started || win.reportData.started || "";
+                    correctionEnd.text = (win.reportData.payload || {}).finished || win.reportData.finished || "";
+                    correctionDatesDialog.open();
+                }
+            }
+            SheetAction {
+                objectName: "transferReportAction"
+                text: "Transferir propriedade"
+                visible: lem.user.role === "admin" && win.reportData.status === "draft" && !win.correctingReport
+                enabled: !win.reportNetworkActivity && win.reportData.revision > 0 && !win.reportData.dirty && !win.reportData._conflict
+                onClicked: {
+                    reportMenu.close();
+                    transferDialog.reportId = lem.current.id;
+                    lem.loadReportOwners();
+                    transferDialog.open();
+                }
+            }
+            SheetAction {
+                destructive: true
+                objectName: "deleteReportAction"
+                visible: win.canDeleteReport && win.correctionPermitted
+                text: win.correctingReport ? "Cancelar e apagar cópia de correção…" : win.reportData.status === "closed" ? "Apagar report fechado…" : "Apagar rascunho…"
+                enabled: !win.reportNetworkActivity
+                onClicked: {
+                    reportMenu.close();
+                    deleteReportDialog.reportId = lem.current.id;
+                    deleteReportDialog.reportIdentifier = lem.current.identifier || "";
+                    deleteReportDialog.closedReport = lem.current.status === "closed";
+                    deleteReportDialog.open();
+                }
             }
         }
     }
@@ -4348,6 +4532,38 @@ ApplicationWindow {
                 cropDialog.close();
         }
     }
+    ActionSheet {
+        id: attachmentSheet
+        objectName: "attachmentSheet"
+        heading: "Outros anexos"
+        contextLabel: win.photoItem
+        property string reportId: ""
+        readonly property bool canAttach: win.page === "report" && win.editing && !lem.busy &&
+                                          !!reportId && reportId === win.sectionReportId
+        onCanAttachChanged: if (!canAttach && visible) close()
+        ActionGroup {
+            SheetAction {
+                objectName: "chooseAttachmentPhoto"
+                visible: win.androidCamera
+                enabled: attachmentSheet.canAttach
+                text: "Escolher fotografia da galeria"
+                onClicked: { attachmentSheet.close(); photoDialog.open(); }
+            }
+            SheetAction {
+                objectName: "recordAttachmentVideo"
+                visible: win.androidCamera
+                enabled: attachmentSheet.canAttach
+                text: "Gravar vídeo"
+                onClicked: { attachmentSheet.close(); lem.takeVideo(win.photoItem); }
+            }
+            SheetAction {
+                objectName: "chooseAttachmentVideo"
+                enabled: attachmentSheet.canAttach
+                text: win.androidCamera ? "Escolher vídeo da galeria" : "Adicionar vídeo"
+                onClicked: { attachmentSheet.close(); videoDialog.open(); }
+            }
+        }
+    }
     FileDialog {
         id: videoDialog
         title: "Adicionar vídeos · até 120 segundos e 60 MiB por vídeo"
@@ -5241,7 +5457,11 @@ ApplicationWindow {
                         Row {
                             id: sectionTabs
                             objectName: "reportSectionTabs"
-                            width: Math.max(sectionTabScroll.width, lem.sections.length * 88)
+                            // Reserve whole tabs beside the group picker, including after rotation.
+                            readonly property int countInView: Math.max(1, Math.min(lem.sections.length,
+                                Math.floor((sectionTabScroll.width + spacing) / ((win.compact ? 66 : 92) + spacing))))
+                            readonly property real tabWidth: Math.max(48, (sectionTabScroll.width + spacing) / countInView - spacing)
+                            width: Math.max(0, lem.sections.length * (tabWidth + spacing) - spacing)
                             height: 56
                             spacing: 4
                             property int currentIndex: win.selectedSection
@@ -5279,7 +5499,7 @@ ApplicationWindow {
                                         sectionTabs.itemAt(win.selectedSection).forceActiveFocus(Qt.TabFocusReason);
                                     }
                                     objectName: "sectionTab_" + modelData.id
-                                    width: Math.max(84, (sectionTabs.width - 28) / Math.max(1, lem.sections.length))
+                                    width: sectionTabs.tabWidth
                                     height: 56
                                     y: 0
                                     text: modelData.id === "SEG" && !win.compact ? "Segurança" : modelData.id
@@ -5323,11 +5543,10 @@ ApplicationWindow {
                             }
                         }
                     }
-                    UiButton {
-                        visible: win.compact
+                    LabelledIconButton {
                         objectName: "allGroupsButton"
-                        symbol: "menu"
-                        implicitWidth: win.touchHeight
+                        symbol: "down"
+                        text: "Grupos"
                         Accessible.name: "Ver todos os grupos"
                         onClicked: groupDialog.open()
                     }
@@ -5800,20 +6019,21 @@ ApplicationWindow {
                                                         color: itemCard.needsPhoto ? "#8a5200" : win.mutedInk
                                                         font.bold: itemCard.needsPhoto
                                                     }
-                                                    RowLayout {
+                                                    GridLayout {
+                                                        id: attachmentActions
                                                         Layout.fillWidth: true
-                                                        spacing: 4
-                                                        UiButton {
+                                                        columns: width < Math.max(310, addPhoto.implicitWidth + otherAttachments.implicitWidth + columnSpacing) ? 1 :
+                                                                 width >= Math.max(540, addPhoto.implicitWidth + otherAttachments.implicitWidth + notesButton.implicitWidth + 2 * columnSpacing) ? 3 : 2
+                                                        columnSpacing: 8
+                                                        rowSpacing: 6
+                                                        LabelledIconButton {
+                                                            id: addPhoto
                                                             objectName: "addPhoto_" + itemCard.modelData.id
-                                                            Layout.minimumWidth: 44
-                                                            Layout.preferredWidth: win.touchHeight
-                                                            Layout.maximumWidth: win.touchHeight
-                                                            implicitHeight: win.touchHeight
+                                                            Layout.fillWidth: true
+                                                            primary: true
                                                             symbol: win.androidCamera ? "camera" : "gallery"
                                                             text: win.androidCamera ? "Tirar fotografia" : "Adicionar fotografia"
                                                             Accessible.name: text + " · " + itemCard.modelData.id
-                                                            ToolTip.visible: hovered
-                                                            ToolTip.text: text
                                                             enabled: win.editing && !lem.busy
                                                             onClicked: {
                                                                 if (win.androidCamera)
@@ -5825,78 +6045,27 @@ ApplicationWindow {
                                                             }
                                                         }
                                                         UiButton {
-                                                            objectName: "choosePhoto_" + itemCard.modelData.id
-                                                            Layout.minimumWidth: 44
-                                                            Layout.preferredWidth: win.touchHeight
-                                                            Layout.maximumWidth: win.touchHeight
-                                                            implicitHeight: win.touchHeight
-                                                            symbol: "gallery"
-                                                            text: "Galeria"
-                                                            visible: win.androidCamera
-                                                            Accessible.name: "Escolher fotografia da galeria · " + itemCard.modelData.id
-                                                            ToolTip.visible: hovered
-                                                            ToolTip.text: text
+                                                            id: otherAttachments
+                                                            objectName: "otherAttachments_" + itemCard.modelData.id
+                                                            Layout.fillWidth: true
+                                                            text: "Outros anexos"
+                                                            Accessible.name: text + " · " + itemCard.modelData.id
                                                             enabled: win.editing && !lem.busy
                                                             onClicked: {
                                                                 win.photoItem = itemCard.modelData.id;
-                                                                photoDialog.open();
+                                                                attachmentSheet.reportId = win.sectionReportId;
+                                                                attachmentSheet.open();
                                                             }
                                                         }
                                                         UiButton {
-                                                            objectName: "addVideo_" + itemCard.modelData.id
-                                                            Layout.minimumWidth: 44
-                                                            Layout.preferredWidth: win.touchHeight
-                                                            Layout.maximumWidth: win.touchHeight
-                                                            implicitHeight: win.touchHeight
-                                                            symbol: "video"
-                                                            text: "Vídeo"
-                                                            Accessible.name: "Adicionar vídeo · " + itemCard.modelData.id
-                                                            ToolTip.visible: hovered
-                                                            ToolTip.text: "Vídeo · até 120 segundos e 60 MiB"
-                                                            enabled: win.editing && !lem.busy
-                                                            onClicked: {
-                                                                win.photoItem = itemCard.modelData.id;
-                                                                if (win.androidCamera) lem.takeVideo(itemCard.modelData.id); else videoDialog.open();
-                                                            }
-                                                        }
-                                                        UiButton {
-                                                            objectName: "chooseVideo_" + itemCard.modelData.id
-                                                            Layout.minimumWidth: 44
-                                                            Layout.preferredWidth: win.touchHeight
-                                                            Layout.maximumWidth: win.touchHeight
-                                                            implicitHeight: win.touchHeight
-                                                            symbol: "gallery"
-                                                            text: "Galeria de vídeos"
-                                                            visible: win.androidCamera
-                                                            Accessible.name: "Escolher vídeo da galeria · " + itemCard.modelData.id
-                                                            ToolTip.visible: hovered
-                                                            ToolTip.text: text
-                                                            enabled: win.editing && !lem.busy
-                                                            UiIcon {
-                                                                anchors.right: parent.right
-                                                                anchors.bottom: parent.bottom
-                                                                anchors.margins: 4
-                                                                width: 12; height: 12
-                                                                kind: "video"
-                                                                ink: win.ink
-                                                            }
-                                                            onClicked: {
-                                                                win.photoItem = itemCard.modelData.id;
-                                                                videoDialog.open();
-                                                            }
-                                                        }
-                                                        UiButton {
+                                                            id: notesButton
                                                             objectName: "toggleNotes_" + itemCard.modelData.id
                                                             visible: !itemCard.modelData.notes_button_hidden
-                                                            Layout.minimumWidth: 44
-                                                            Layout.preferredWidth: win.touchHeight
-                                                            Layout.maximumWidth: win.touchHeight
-                                                            padding: 6
-                                                            text: "Obs."
+                                                            Layout.fillWidth: true
+                                                            Layout.columnSpan: attachmentActions.columns === 2 ? 2 : 1
                                                             checked: notes.visible
-                                                            Accessible.name: (notes.visible ? "Remover observação" : "Adicionar observação") + " · " + itemCard.modelData.id
-                                                            ToolTip.visible: hovered
-                                                            ToolTip.text: (itemCard.answerValue === "NOK" || win.answerFor(itemCard.modelData.id).assessment === "NOK") ? "Observação obrigatória em NOK" : notes.visible ? "Remover observação" : "Adicionar observação"
+                                                            text: checked ? "Remover observação" : "Adicionar observação"
+                                                            Accessible.name: text + " · " + itemCard.modelData.id
                                                             enabled: !lem.busy
                                                             onClicked: {
                                                                 if (notes.visible) {
@@ -5913,9 +6082,6 @@ ApplicationWindow {
                                                                     notes.forceActiveFocus();
                                                                 }
                                                             }
-                                                        }
-                                                        Item {
-                                                            Layout.fillWidth: true
                                                         }
                                                     }
                                                 }

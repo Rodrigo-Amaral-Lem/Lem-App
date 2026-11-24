@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para Android
 
-Android · Aplicação 0.8.0 · Edição 2.18 · 21 de novembro de 2026
+Android · Aplicação 0.11.0 · Edição 2.19 · 24 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-android.pdf](manual-utilizador-android.pdf).
 
@@ -20,7 +20,7 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. Utilize o toque para selecionar opções e deslize o dedo para percorrer as perguntas. O botão de retrocesso do sistema permite regressar ao ecrã anterior quando aplicável.
 
-Este manual descreve a versão 0.8.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. As capturas mostram a app num emulador Android, em orientação vertical.
+Este manual descreve a versão 0.11.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios; a disposição varia com o tamanho do ecrã e o sistema operativo. As capturas mostram a app num emulador Android, em orientação vertical.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
 
@@ -87,11 +87,11 @@ O cartão **Concluído** indica que esse PCVE tem uma intervenção fechada no c
 
 ### Ordens de trabalho
 
-Em **Ordens** (no menu de navegação, **Ordens de trabalho**), escolha uma ordem para consultar os técnicos, as datas e as intervenções. **Informação do ID** mostra a ficha e as notas do contrato antes da visita. **Operador** identifica quem opera o PCVE e **Cliente** identifica o cliente do trabalho. Podem ser entidades diferentes.
+Em **Ordens** (no menu de navegação, **Ordens de trabalho**), escolha uma ordem para consultar os técnicos, as datas e as intervenções. Em cada visita, expanda **Informação do ID** para consultar a ficha e as notas do contrato. **Operador** identifica quem opera o PCVE e **Cliente** identifica o cliente do trabalho. Podem ser entidades diferentes.
 
-O administrador escolhe **Nova ordem**, indica o início e o prazo, seleciona técnicos e acrescenta os IDs por fazer. **Subir** e **Descer** organizam a sequência sugerida. Em **Editar ordem** pode ajustar o prazo, a equipa e as intervenções por fazer. Se a ordem mudar durante a edição, escolha **Rever alterações**. A app conserva os seus ajustes e recebe os campos que só mudaram no servidor. Nos campos alterados dos dois lados, escolha **Usar valor do servidor** ou **Manter o meu valor** antes de guardar. Depois do início, a data inicial fica fixa. Um ID com rascunho em curso permanece na ordem. Antes do dia de início, **Cancelar ordem** e **Confirmar cancelamento** libertam os IDs pendentes. A ordem é eliminada 24 horas após o cancelamento. Os relatórios e os anexos já guardados são conservados. Numa ordem concluída pode escolher **Deixar de seguir**.
+O administrador escolhe **Nova ordem**, indica o início e o prazo, seleciona técnicos e acrescenta os IDs por fazer. As setas junto de **Retirar** movem a visita uma posição para cima ou para baixo. Em **Editar ordem** pode ajustar o prazo, a equipa e as intervenções por fazer. Se a ordem mudar durante a edição, escolha **Rever alterações**. A app conserva os seus ajustes e recebe os campos que só mudaram no servidor. Nos campos alterados dos dois lados, escolha **Usar valor do servidor** ou **Manter o meu valor** antes de guardar. Depois do início, a data inicial fica fixa. Um ID com rascunho em curso permanece na ordem. Antes do dia de início, **Cancelar ordem** e **Confirmar cancelamento** libertam os IDs pendentes. A ordem é eliminada 24 horas após o cancelamento. Os relatórios e os anexos já guardados são conservados. Numa ordem concluída pode escolher **Deixar de seguir**.
 
-A partir do dia de início em Lisboa, o técnico pode escolher qualquer ID e **Abrir intervenção**. Para trabalhar sem rede, atualize a ordem após o início enquanto ainda tem ligação. O seu rascunho offline aparece como **Em preenchimento · por sincronizar**. **Consultar rascunho** abre o trabalho do colega identificado na ordem. **Consultar cópia local em conflito** abre o seu trabalho da mesma visita. Se o ID ficar temporariamente indisponível, **Recuperar rascunho local** abre a cópia guardada no dispositivo. Após a reposição do ID ou da atribuição, sincronize para retomar a mesma visita. Para entregar o trabalho a outro técnico, escolha **Guardar cópia para entrega**. O ZIP inclui as respostas e os anexos disponíveis no dispositivo. Se a intervenção for impossível, escolha **Assinalar impedimento**, escreva o motivo e confirme em **Marcar inválida**. A ação fica indisponível enquanto o ID estiver retirado ou o contrato estiver no lixo. O administrador pode planear uma nova visita com um rascunho próprio. A última tarefa resolvida regista a hora de fecho. **Recuperar rascunho** abre uma cópia anterior para consulta. **Relatório removido** identifica um documento apagado após o fecho.
+A partir do dia de início em Lisboa, o técnico pode escolher qualquer ID e **Abrir intervenção**. Para trabalhar sem rede, atualize a ordem após o início enquanto ainda tem ligação. O seu rascunho offline aparece como **Em preenchimento · por sincronizar**. **Consultar rascunho** abre o trabalho do colega identificado na ordem. **Consultar cópia local em conflito** abre o seu trabalho da mesma visita. Se o ID ficar temporariamente indisponível, **Recuperar rascunho local** abre a cópia guardada no dispositivo. Em ecrãs baixos, percorra a visita até esse botão. Após a reposição do ID ou da atribuição, sincronize para retomar a mesma visita. Para entregar o trabalho a outro técnico, escolha **Guardar cópia para entrega**. O ZIP inclui as respostas e os anexos disponíveis no dispositivo. Se a intervenção for impossível, escolha **Assinalar impedimento**, escreva o motivo e confirme em **Marcar inválida**. A ação fica indisponível enquanto o ID estiver retirado ou o contrato estiver no lixo. O administrador pode planear uma nova visita com um rascunho próprio. A última tarefa resolvida regista a hora de fecho. **Recuperar rascunho** abre uma cópia anterior para consulta. **Relatório removido** identifica um documento apagado após o fecho.
 
 Quando perder uma atribuição ou o servidor apagar um report que ainda tem alterações locais, procure **Cópias locais para recuperação** na lista de ordens. Abra a cópia para consulta e escolha **Guardar cópia para entrega** para exportar as respostas e os anexos disponíveis neste dispositivo. Se um PCVE for retirado do contrato, **Consultar rascunho** na ordem continua a abrir o trabalho existente.
 
@@ -99,7 +99,7 @@ O criador segue a ordem. Qualquer administrador pode geri-la ou escolher **Segui
 
 ### Corretivas e comissionamentos
 
-Abra **Manutenções corretivas** no menu de navegação ou em **Intervenções**. Para criar um contrato, o administrador escolhe **Contratos de corretivas** e **Importar contrato**. Preencha o cliente, o nome e as datas. Use a primeira folha de um ficheiro XLSX com um ID já registado por linha na coluna A, sem cabeçalho. Um ID desconhecido ou repetido impede a importação de toda a folha.
+Em **Intervenções**, escolha **Manutenções corretivas** ou **Comissionamentos**. Nos ecrãs compactos, as duas opções estão no menu de navegação. Para criar um contrato, o administrador escolhe **Contratos de corretivas** e **Importar contrato**. Preencha o cliente, o nome e as datas. Use a primeira folha de um ficheiro XLSX com um ID já registado por linha na coluna A, sem cabeçalho. Um ID desconhecido ou repetido impede a importação de toda a folha.
 
 O nome segue o formato **Ano_Cliente_NomeContrato**, com o ano do início. As datas podem começar a partir de 1 de janeiro do ano atual. A data final pode coincidir com o início ou chegar ao segundo aniversário. Ambos os dias contam para a cobertura do PCVE.
 
@@ -113,7 +113,7 @@ Para comissionar um PCVE, abra a ficha ou o menu **Comissionamentos** e escolha 
 
 No topo do relatório encontra o ID do carregador, o estado e a contagem de respostas. A linha de grupos permite mudar de secção.
 
-Em ecrãs compactos, utilize as setas ou abra **Grupos do report** para chegar aos restantes grupos. A app conserva a posição ao mudar de grupo.
+Toque num separador visível ou em **Grupos** para escolher qualquer secção. A app conserva a posição ao mudar de grupo. Os três pontos abrem as **Opções do report**.
 
 Percorra as perguntas de cima para baixo. Cada cartão apresenta o código, a descrição, os controlos de resposta e as evidências aplicáveis.
 
@@ -171,7 +171,7 @@ Uma tensão fora do intervalo pode ser registada e fica assinalada. A indicaçã
 
 1. Abra a pergunta a que a evidência pertence. Confirme o código antes de anexar o ficheiro.
 
-2. Utilize **Tirar fotografia** para captar no local ou **Galeria** para escolher uma imagem existente. Para adicionar um vídeo, utilize o botão de vídeo junto à pergunta correspondente.
+2. Toque em **Tirar fotografia** para captar no local. Em **Outros anexos**, confirme o código da pergunta e escolha **Escolher fotografia da galeria**, **Gravar vídeo** ou **Escolher vídeo da galeria**. Para escrever uma nota opcional, toque em **Adicionar observação**.
 
 3. Se o seletor permitir, escolha vários ficheiros. Aguarde o processamento e leia o resultado: um ficheiro recusado não impede o processamento dos restantes.
 
@@ -272,7 +272,7 @@ O relatório fechado passa a ser consultado como registo da intervenção. Um ad
 
 ## 10 Confirmar a sincronização
 
-A app guarda as alterações no dispositivo e organiza o envio em segundo plano. Respostas e ficheiros podem ser enviados em momentos diferentes. Utilize o botão **Sinc.**, identificado pelo símbolo de sincronização, para pedir o envio manual e acompanhe as mensagens da operação.
+A app guarda as alterações no dispositivo e organiza o envio em segundo plano. Respostas e ficheiros podem ser enviados em momentos diferentes. Escolha **Sincronizar** no rodapé para pedir o envio. O número entre parênteses indica os reports pendentes. Acompanhe o envio no estado da operação.
 
 Pode voltar ao ecrã inicial ou mudar de aplicação enquanto descarrega evidências. Permita as notificações para acompanhar a transferência e tocar na notificação para regressar à Lem. Com sessão iniciada, o Android agenda a atualização dos contratos, dos carregadores do contrato selecionado e da base de IDs de PCVEs. A rede e a poupança de bateria podem adiar a atualização. Se encerrar a Lem ou se o sistema terminar o processo, reabra a app e repita o descarregamento para obter as evidências em falta.
 
@@ -288,7 +288,7 @@ Pode voltar ao ecrã inicial ou mudar de aplicação enquanto descarrega evidên
 
 1. Confirme a ligação à Internet e a sessão da conta. Após reabrir a app, pode ser necessário voltar a **Entrar**, mesmo que os dados locais continuem visíveis.
 
-2. Peça **Sinc.** e aguarde o fim das operações. Corrija qualquer mensagem que exija intervenção.
+2. Peça **Sincronizar** e aguarde o fim das operações. Corrija qualquer mensagem que exija intervenção.
 
 3. Verifique que o relatório está fechado, sincronizado e sem erro de envio. Quando houver dúvida, consulte a versão do servidor antes de limpar cópias ou mudar de dispositivo.
 
@@ -296,7 +296,7 @@ Pode voltar ao ecrã inicial ou mudar de aplicação enquanto descarrega evidên
 
 Conserve o relatório existente e tente novamente com ligação estável. Não apague um rascunho, não limpe os dados da app e não crie duplicados para resolver uma falha temporária de envio.
 
-Se uma ordem futura adiar o envio, a app conserva o rascunho e volta a tentar quando a ordem começa ou é cancelada. Use **Sinc.** para verificar de imediato.
+Se uma ordem futura adiar o envio, a app conserva o rascunho e volta a tentar quando a ordem começa ou é cancelada. Use **Sincronizar** para verificar de imediato.
 
 ## 11 Preparar o trabalho sem rede
 
@@ -332,7 +332,7 @@ A limpeza não apaga os originais da galeria nem as evidências do servidor. Tra
 
 ### Guardar uma cópia para consulta ou entrega
 
-1. Abra um relatório **fechado** e o respetivo menu de opções.
+1. Abra um relatório **fechado**, escolha os três pontos no cabeçalho e procure a secção **Exportar**.
 
 2. Escolha **Exportar PDF** para o documento de leitura ou **PDF + evidências (ZIP)** para o conjunto com os ficheiros originais.
 
@@ -366,7 +366,7 @@ A opção **Criar rascunho como cópia** cria um relatório independente para re
 | Situação | O que fazer |
 | --- | --- |
 | O contrato ou o carregador não aparece | Confirme a conta e o contrato selecionados, limpe a pesquisa e escolha **Atualizar**. Se continuar em falta, peça ao administrador para confirmar a atribuição. |
-| Vejo dados locais mas não consigo enviar | Abra a conta e volte a **Entrar**. Confirme a ligação e o endereço do servidor e peça **Sinc.**. |
+| Vejo dados locais mas não consigo enviar | Abra a conta e volte a **Entrar**. Confirme a ligação e o endereço do servidor e peça **Sincronizar**. |
 | Não consigo concluir | Abra **Rever** e use **Abrir item**. Confirme leituras, justificações NOK/N/A e fotografias. Verifique o relógio se o fim for anterior ao início. Se atingir o limite de texto, reduza as observações no mesmo rascunho. Em MAN.02, substitua texto de um rascunho antigo por OK, NOK ou N/A. Aguarde cópias e anexações em curso. |
 | Uma fotografia ou um vídeo foi recusado | Leia o motivo. Verifique o formato, o tamanho e a duração. Para uma fotografia incompleta, selecione novamente o original. Experimente JPG/PNG para imagens ou MP4/3GP para vídeos. Confirme os restantes ficheiros aceites. |
 | A evidência está na lista mas não abre | O original pode não estar no dispositivo. Ligue-se à rede e descarregue a evidência ou todas as evidências do relatório. |

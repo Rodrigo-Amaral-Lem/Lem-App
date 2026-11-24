@@ -7,23 +7,74 @@ ScrollView {
     id: page
     component OrderButton: Button {
         id: button
-        implicitHeight: Math.max(44, contentItem.implicitHeight + 12)
+        property bool primary: false
+        property bool subtle: false
+        implicitHeight: Math.max(48, contentItem.implicitHeight + 12)
         leftPadding: 12
         rightPadding: 12
         contentItem: Text {
             text: button.text
-            color: button.enabled ? "#20353c" : "#77858a"
+            color: !button.enabled ? "#67767b" : button.primary ? "white" : button.subtle ? "#006875" : "#20353c"
             font: button.font
             wrapMode: Text.Wrap
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
-            implicitWidth: 78
+            implicitWidth: button.subtle ? 48 : 78
             radius: 6
-            color: button.down ? "#d6ecea" : button.enabled ? "white" : "#eef1f2"
+            color: !button.enabled ? "#eef1f2" : button.primary ? (button.down ? "#005e6a" : "#007383") :
+                   button.down ? "#d6ecea" : button.subtle ? "transparent" : "white"
             border.color: button.activeFocus ? "#007d83" : "#a2b3b9"
-            border.width: button.activeFocus ? 2 : 1
+            border.width: button.activeFocus ? 2 : button.subtle || button.primary ? 0 : 1
+        }
+    }
+    component DirectionButton: OrderButton {
+        id: directionButton
+        property bool pointsUp: false
+        subtle: true
+        contentItem: Item {
+            implicitWidth: directionRow.implicitWidth
+            implicitHeight: directionRow.implicitHeight
+            RowLayout {
+                id: directionRow
+                anchors.centerIn: parent
+                spacing: 7
+                Text {
+                    visible: !!directionButton.text
+                    text: directionButton.text
+                    font: directionButton.font
+                    color: "#006875"
+                }
+                Canvas {
+                    id: directionMark
+                    Layout.preferredWidth: 18
+                    Layout.preferredHeight: 18
+                    readonly property bool up: directionButton.pointsUp
+                    readonly property color ink: directionButton.enabled ? "#006875" : "#67767b"
+                    onUpChanged: requestPaint()
+                    onInkChanged: requestPaint()
+                    onPaint: {
+                        const c = getContext("2d");
+                        c.reset();
+                        c.strokeStyle = ink;
+                        c.lineWidth = 2;
+                        c.lineCap = "round";
+                        c.lineJoin = "round";
+                        c.translate(width / 2, height / 2);
+                        if (up) c.rotate(Math.PI);
+                        c.beginPath();
+                        c.moveTo(-5, -2);
+                        c.lineTo(0, 3);
+                        c.lineTo(5, -2);
+                        if (!directionButton.text) {
+                            c.moveTo(0, 3);
+                            c.lineTo(0, -6);
+                        }
+                        c.stroke();
+                    }
+                }
+            }
         }
     }
     required property var controller
@@ -193,121 +244,165 @@ ScrollView {
                 }
             }
         }
-        ColumnLayout {
+        GridLayout {
             Layout.fillWidth: true
             visible: page.mode === "detail" && !!page.selected
             readonly property var order: page.selected || {items: [], technicians: []}
             id: detail
-            Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: page.selected ? page.result(detail.order) + "\nInício " + detail.order.start + " · Prazo " + detail.order.due + "\n" + detail.order.technicians.map(t => t.name).join(", ") : "" }
-            Label { Layout.fillWidth: true; visible: !!detail.order.completed; text: "Fecho · " + page.localTime(detail.order.completed); wrapMode: Text.Wrap }
-            Label { Layout.fillWidth: true; visible: !!detail.order.cancelled_at; text: "Cancelamento · " + page.localTime(detail.order.cancelled_at); wrapMode: Text.Wrap }
-            RowLayout {
-                visible: page.admin && !detail.order.cancelled_at && (!detail.order.completed || detail.order.following)
-                OrderButton { text: "Editar ordem"; visible: !detail.order.completed; enabled: controller.authenticated; onClicked: page.edit(detail.order) }
-                OrderButton { text: detail.order.following ? "Deixar de seguir" : "Seguir"; enabled: controller.authenticated && !controller.savingOrder; onClicked: controller.followOrder(detail.order.id, !detail.order.following) }
-            }
-            OrderButton {
-                visible: page.admin && detail.visible && !detail.order.started && !detail.order.completed && !detail.order.cancelled_at && page.cancelId !== detail.order.id
-                text: "Cancelar ordem"
-                enabled: controller.authenticated && !controller.savingOrder
-                onClicked: { page.cancelRevision = detail.order.revision; page.cancelId = detail.order.id }
+            columns: page.availableWidth >= 720 ? 2 : 1
+            columnSpacing: 16
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignTop
+                Layout.preferredWidth: detail.columns === 2 ? 220 : -1
+                Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: page.selected ? page.result(detail.order) + "\nInício " + detail.order.start + " · Prazo " + detail.order.due + "\n" + detail.order.technicians.map(t => t.name).join(", ") : "" }
+                Label { Layout.fillWidth: true; visible: !!detail.order.completed; text: "Fecho · " + page.localTime(detail.order.completed); wrapMode: Text.Wrap }
+                Label { Layout.fillWidth: true; visible: !!detail.order.cancelled_at; text: "Cancelamento · " + page.localTime(detail.order.cancelled_at); wrapMode: Text.Wrap }
+                RowLayout {
+                    visible: page.admin && !detail.order.cancelled_at && (!detail.order.completed || detail.order.following)
+                    OrderButton { text: "Editar ordem"; visible: !detail.order.completed; enabled: controller.authenticated; onClicked: page.edit(detail.order) }
+                    OrderButton { text: detail.order.following ? "Deixar de seguir" : "Seguir"; enabled: controller.authenticated && !controller.savingOrder; onClicked: controller.followOrder(detail.order.id, !detail.order.following) }
+                }
+                OrderButton {
+                    visible: page.admin && detail.visible && !detail.order.started && !detail.order.completed && !detail.order.cancelled_at && page.cancelId !== detail.order.id
+                    text: "Cancelar ordem"
+                    enabled: controller.authenticated && !controller.savingOrder
+                    onClicked: { page.cancelRevision = detail.order.revision; page.cancelId = detail.order.id }
+                }
+                ColumnLayout {
+                    visible: !!page.cancelId && page.cancelId === detail.order.id && !detail.order.cancelled_at
+                    Label { Layout.fillWidth: true; text: "Os IDs por fazer ficam disponíveis para outras ordens. A ordem será eliminada 24 horas após o cancelamento."; wrapMode: Text.Wrap }
+                    OrderButton { text: "Manter ordem"; enabled: !controller.savingOrder; onClicked: page.cancelId = "" }
+                    OrderButton { text: "Confirmar cancelamento"; enabled: controller.authenticated && !controller.savingOrder; onClicked: { controller.cancelOrder(detail.order.id, page.cancelRevision); page.cancelId = "" } }
+                }
             }
             ColumnLayout {
-                visible: !!page.cancelId && page.cancelId === detail.order.id && !detail.order.cancelled_at
-                Label { Layout.fillWidth: true; text: "Os IDs por fazer ficam disponíveis para outras ordens. A ordem será eliminada 24 horas após o cancelamento."; wrapMode: Text.Wrap }
-                OrderButton { text: "Manter ordem"; enabled: !controller.savingOrder; onClicked: page.cancelId = "" }
-                OrderButton { text: "Confirmar cancelamento"; enabled: controller.authenticated && !controller.savingOrder; onClicked: { controller.cancelOrder(detail.order.id, page.cancelRevision); page.cancelId = "" } }
-            }
-            Repeater {
-                model: detail.visible ? detail.order.items : []
-                delegate: ColumnLayout {
-                    id: taskRow
-                    required property var modelData
-                    required property int index
-                    Layout.fillWidth: true
-                    readonly property var localDraft: {
-                        const drafts = controller.localOrderDrafts || {}
-                        const unbound = modelData.state === "pending" && modelData.kind !== "preventive"
-                            && modelData.drafts.length === 0 ? drafts[modelData.target] : null
-                        return drafts[modelData.id] || unbound || null
-                    }
-                    readonly property bool localRecovery: !!localDraft && localDraft.item === modelData.id &&
-                        (modelData.state === "closed" || modelData.state === "invalid" ||
-                            (modelData.state === "pending" && !modelData.available) || !!peerDraft) &&
-                        localDraft.id !== modelData.report_id &&
-                        !modelData.drafts.some(d => d.id === localDraft.id)
-                    readonly property var peerDraft: modelData.drafts.find(d => d.owner_id !== page.owner)
-                    readonly property bool peerOnly: !!peerDraft && !modelData.drafts.some(d => d.owner_id === page.owner)
-                    Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: "#bac6ca" }
-                    Label { Layout.fillWidth: true; font.bold: true; wrapMode: Text.Wrap; text: (taskRow.index + 1) + ". " + page.taskLabel(taskRow.modelData) }
-                    Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: {
-                        const item = taskRow.modelData
-                        if (item.state === "cancelled") return "Cancelada"
-                        if (item.state === "invalid") return "Inválida · " + item.note
-                        if (item.state === "closed") return item.report_removed ? "Relatório removido" : "Relatório fechado"
-                        if (taskRow.peerOnly) return "Em preenchimento · " + (taskRow.peerDraft.owner_name || "outro técnico")
-                        if (taskRow.localDraft) return taskRow.localDraft.closed ? "Fechado · por sincronizar" : "Em preenchimento · por sincronizar"
-                        return item.drafts.length ? "Em preenchimento" : "Por fazer"
-                    } }
-                    OrderButton { text: page.expanded === taskRow.modelData.id ? "Ocultar informação" : "Informação do ID"; onClicked: page.expanded = page.expanded === taskRow.modelData.id ? "" : taskRow.modelData.id }
-                    Label {
-                        Layout.fillWidth: true; wrapMode: Text.Wrap; visible: page.expanded === taskRow.modelData.id
-                        text: {
-                            const d = taskRow.modelData.details || {}
-                            const labels = {operator:"Operador",address:"Morada",postal_code:"Código postal",region:"Região",manufacturer:"Fabricante",model:"Modelo",serial:"N.º de série",cpe:"CPE",connectors:"Tomadas",power:"Potência",latitude:"Latitude",longitude:"Longitude",energy_supply:"Energia",power_limit:"Limitação"}
-                            const lines = Object.keys(labels).filter(k => d[k]).map(k => labels[k] + " · " + d[k])
-                            if (taskRow.modelData.client) lines.unshift("Cliente · " + taskRow.modelData.client)
-                            if (taskRow.modelData.contract_notes) lines.push("Notas · " + taskRow.modelData.contract_notes)
-                            return lines.join("\n") || "Sem informação adicional."
+                Layout.fillWidth: true
+                Layout.preferredWidth: detail.columns === 2 ? 540 : -1
+                Layout.alignment: Qt.AlignTop
+                spacing: 10
+                Repeater {
+                    model: detail.visible ? detail.order.items : []
+                    delegate: Frame {
+                        id: taskRow
+                        required property var modelData
+                        required property int index
+                        Layout.fillWidth: true
+                        readonly property var localDraft: {
+                            const drafts = controller.localOrderDrafts || {}
+                            const unbound = modelData.state === "pending" && modelData.kind !== "preventive"
+                                && modelData.drafts.length === 0 ? drafts[modelData.target] : null
+                            return drafts[modelData.id] || unbound || null
                         }
-                    }
-                    OrderButton {
-                        visible: taskRow.modelData.state === "closed" || (!page.admin && taskRow.modelData.state === "pending")
-                        enabled: (detail.order.started || taskRow.modelData.state === "closed") &&
-                            (taskRow.modelData.available || taskRow.modelData.drafts.length > 0) && !controller.busy
-                        text: taskRow.modelData.state === "closed" ? "Consultar relatório" :
-                            taskRow.peerOnly || !taskRow.modelData.available ? "Consultar rascunho" : "Abrir intervenção"
-                        onClicked: {
-                            const rid = controller.prepareOrderReport(detail.order.id, taskRow.modelData.id)
-                            if (rid !== "!") page.openReport(taskRow.modelData.target, rid)
-                        }
-                    }
-                    OrderButton {
-                        visible: taskRow.localRecovery
-                        enabled: !controller.busy
-                        text: taskRow.localDraft && taskRow.localDraft.conflict ? "Consultar cópia local em conflito" : "Recuperar rascunho local"
-                        onClicked: {
-                            const rid = controller.prepareOrderReport(detail.order.id, taskRow.modelData.id, taskRow.localDraft.id)
-                            if (rid !== "!") page.openReport(taskRow.modelData.target, rid)
-                        }
-                    }
-                    Repeater {
-                        model: page.admin || taskRow.modelData.state !== "pending" ? taskRow.modelData.drafts : []
-                        delegate: OrderButton {
-                            required property var modelData
-                            text: (taskRow.modelData.state === "pending" ? "Consultar rascunho · " : "Recuperar rascunho · ") + (modelData.owner_name || modelData.id.slice(0, 8))
-                            enabled: !controller.busy
-                            onClicked: {
-                                const rid = controller.prepareOrderReport(detail.order.id, taskRow.modelData.id, modelData.id)
-                                if (rid !== "!") page.openReport(taskRow.modelData.target, rid)
+                        readonly property bool localRecovery: !!localDraft && localDraft.item === modelData.id &&
+                            (modelData.state === "closed" || modelData.state === "invalid" ||
+                                (modelData.state === "pending" && !modelData.available) || !!peerDraft) &&
+                            localDraft.id !== modelData.report_id &&
+                            !modelData.drafts.some(d => d.id === localDraft.id)
+                        readonly property var peerDraft: modelData.drafts.find(d => d.owner_id !== page.owner)
+                        readonly property bool peerOnly: !!peerDraft && !modelData.drafts.some(d => d.owner_id === page.owner)
+                        padding: 12
+                        background: Rectangle { color: "white"; border.color: "#c7d3d9"; radius: 9 }
+                        contentItem: ColumnLayout {
+                            spacing: 6
+                            Label { Layout.fillWidth: true; font.bold: true; wrapMode: Text.Wrap; text: (taskRow.index + 1) + ". " + page.taskLabel(taskRow.modelData) }
+                            Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: {
+                                const item = taskRow.modelData
+                                if (item.state === "cancelled") return "Cancelada"
+                                if (item.state === "invalid") return "Inválida · " + item.note
+                                if (item.state === "closed") return item.report_removed ? "Relatório removido" : "Relatório fechado"
+                                if (taskRow.peerOnly) return "Em preenchimento · " + (taskRow.peerDraft.owner_name || "outro técnico")
+                                if (taskRow.localDraft) return taskRow.localDraft.closed ? "Fechado · por sincronizar" : "Em preenchimento · por sincronizar"
+                                return item.drafts.length ? "Em preenchimento" : "Por fazer"
+                            } }
+                            Label {
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                visible: taskRow.localRecovery
+                                text: !taskRow.modelData.available && taskRow.modelData.state === "pending"
+                                      ? "A visita está indisponível. O rascunho está neste dispositivo."
+                                      : "Há uma cópia guardada neste dispositivo."
+                            }
+                            OrderButton {
+                                primary: true
+                                Layout.fillWidth: true
+                                visible: taskRow.localRecovery
+                                enabled: !controller.busy
+                                text: taskRow.localDraft && taskRow.localDraft.conflict ? "Consultar cópia local em conflito" : "Recuperar rascunho local"
+                                onClicked: {
+                                    const rid = controller.prepareOrderReport(detail.order.id, taskRow.modelData.id, taskRow.localDraft.id)
+                                    if (rid !== "!") page.openReport(taskRow.modelData.target, rid)
+                                }
+                            }
+                            OrderButton {
+                                primary: !taskRow.localRecovery
+                                Layout.fillWidth: true
+                                visible: (taskRow.modelData.state === "closed" || (!page.admin && taskRow.modelData.state === "pending")) &&
+                                         (!taskRow.localRecovery || taskRow.modelData.available || taskRow.modelData.drafts.length > 0)
+                                enabled: (detail.order.started || taskRow.modelData.state === "closed") &&
+                                    (taskRow.modelData.available || taskRow.modelData.drafts.length > 0) && !controller.busy
+                                text: taskRow.modelData.state === "closed" ? (taskRow.localRecovery ? "Consultar relatório do servidor" : "Consultar relatório") :
+                                    taskRow.peerOnly ? "Consultar rascunho · " + (taskRow.peerDraft.owner_name || "outro técnico") :
+                                    !taskRow.modelData.available ? "Consultar rascunho" : "Abrir intervenção"
+                                onClicked: {
+                                    const rid = controller.prepareOrderReport(detail.order.id, taskRow.modelData.id)
+                                    if (rid !== "!") page.openReport(taskRow.modelData.target, rid)
+                                }
+                            }
+                            Repeater {
+                                model: page.admin || taskRow.modelData.state !== "pending" ? taskRow.modelData.drafts : []
+                                delegate: OrderButton {
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    text: (taskRow.modelData.state === "pending" ? "Consultar rascunho · " : "Recuperar rascunho · ") + (modelData.owner_name || modelData.id.slice(0, 8))
+                                    enabled: !controller.busy
+                                    onClicked: {
+                                        const rid = controller.prepareOrderReport(detail.order.id, taskRow.modelData.id, modelData.id)
+                                        if (rid !== "!") page.openReport(taskRow.modelData.target, rid)
+                                    }
+                                }
+                            }
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: width >= 400 ? 2 : 1
+                                DirectionButton {
+                                    Layout.fillWidth: true
+                                    readonly property bool showing: page.expanded === taskRow.modelData.id
+                                    text: "Informação do ID"
+                                    pointsUp: showing
+                                    Accessible.name: showing ? "Ocultar informação do ID" : "Informação do ID"
+                                    Accessible.expanded: showing
+                                    onClicked: page.expanded = showing ? "" : taskRow.modelData.id
+                                }
+                                OrderButton { subtle: true; Layout.fillWidth: true; visible: !page.admin && taskRow.modelData.state === "pending" && detail.order.started; enabled: taskRow.modelData.available && controller.authenticated && !controller.savingOrder; text: "Assinalar impedimento"; onClicked: { page.invalidNote = ""; page.invalidId = taskRow.modelData.id; reason.forceActiveFocus(); } }
+                            }
+                            Label {
+                                Layout.fillWidth: true; wrapMode: Text.Wrap; visible: page.expanded === taskRow.modelData.id
+                                text: {
+                                    const d = taskRow.modelData.details || {}
+                                    const labels = {operator:"Operador",address:"Morada",postal_code:"Código postal",region:"Região",manufacturer:"Fabricante",model:"Modelo",serial:"N.º de série",cpe:"CPE",connectors:"Tomadas",power:"Potência",latitude:"Latitude",longitude:"Longitude",energy_supply:"Energia",power_limit:"Limitação"}
+                                    const lines = Object.keys(labels).filter(k => d[k]).map(k => labels[k] + " · " + d[k])
+                                    if (taskRow.modelData.client) lines.unshift("Cliente · " + taskRow.modelData.client)
+                                    if (taskRow.modelData.contract_notes) lines.push("Notas · " + taskRow.modelData.contract_notes)
+                                    return lines.join("\n") || "Sem informação adicional."
+                                }
+                            }
+                            TextArea {
+                                id: reason
+                                Layout.fillWidth: true
+                                wrapMode: TextEdit.Wrap
+                                visible: page.invalidId === taskRow.modelData.id
+                                text: visible ? page.invalidNote : ""
+                                placeholderText: "Observação obrigatória"
+                                Accessible.name: placeholderText
+                                onTextChanged: if (visible && activeFocus) page.invalidNote = text
+                            }
+                            RowLayout {
+                                visible: reason.visible
+                                OrderButton { text: "Cancelar"; onClicked: page.invalidId = "" }
+                                OrderButton { text: "Marcar inválida"; enabled: taskRow.modelData.available && controller.authenticated && !controller.savingOrder && reason.text.trim().length > 0 && reason.text.length <= 4000; onClicked: controller.invalidateOrderItem(detail.order.id, taskRow.modelData.id, detail.order.revision, reason.text) }
                             }
                         }
-                    }
-                    OrderButton { visible: !page.admin && taskRow.modelData.state === "pending" && detail.order.started; enabled: taskRow.modelData.available && controller.authenticated && !controller.savingOrder; text: "Assinalar impedimento"; onClicked: { page.invalidNote = ""; page.invalidId = taskRow.modelData.id; reason.forceActiveFocus(); } }
-                    TextArea {
-                        id: reason
-                        Layout.fillWidth: true
-                        wrapMode: TextEdit.Wrap
-                        visible: page.invalidId === taskRow.modelData.id
-                        text: visible ? page.invalidNote : ""
-                        placeholderText: "Observação obrigatória"
-                        Accessible.name: placeholderText
-                        onTextChanged: if (visible && activeFocus) page.invalidNote = text
-                    }
-                    RowLayout {
-                        visible: reason.visible
-                        OrderButton { text: "Cancelar"; onClicked: page.invalidId = "" }
-                        OrderButton { text: "Marcar inválida"; enabled: taskRow.modelData.available && controller.authenticated && !controller.savingOrder && reason.text.trim().length > 0 && reason.text.length <= 4000; onClicked: controller.invalidateOrderItem(detail.order.id, taskRow.modelData.id, detail.order.revision, reason.text) }
                     }
                 }
             }
@@ -382,8 +477,21 @@ ScrollView {
                     Layout.fillWidth: true
                     Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: (planned.index + 1) + ". " + page.taskLabel(planned.modelData) }
                     RowLayout {
-                        OrderButton { text: "Subir"; enabled: planned.index > 0; onClicked: page.move(planned.index, -1) }
-                        OrderButton { text: "Descer"; enabled: planned.index + 1 < page.targets.length; onClicked: page.move(planned.index, 1) }
+                        DirectionButton {
+                            pointsUp: true
+                            Accessible.name: "Subir · " + planned.modelData.external_id
+                            ToolTip.visible: hovered
+                            ToolTip.text: Accessible.name
+                            enabled: planned.index > 0
+                            onClicked: page.move(planned.index, -1)
+                        }
+                        DirectionButton {
+                            Accessible.name: "Descer · " + planned.modelData.external_id
+                            ToolTip.visible: hovered
+                            ToolTip.text: Accessible.name
+                            enabled: planned.index + 1 < page.targets.length
+                            onClicked: page.move(planned.index, 1)
+                        }
                         OrderButton { text: "Retirar"; enabled: !planned.modelData.state || planned.modelData.state === "pending"; onClicked: page.targets = page.targets.filter(t => t.target !== planned.modelData.target) }
                     }
                 }

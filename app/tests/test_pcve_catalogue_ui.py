@@ -266,6 +266,9 @@ def checks():
         assert js('orderPage.mapToItem(appFooter, 0, orderPage.height).y <= 0')
         pointer_click("pcveCatalogueMenuItem")
         assert js('page === "pcves" && pcveList.count === 3 && !contractChrome.visible')
+        pointer_click("navigationButton")
+        assert js(f'navMenu.itemAt({pcve_menu}).current')
+        js("navMenu.close()")
         # Preserve the selected card's screen position and the history scroll,
         # even with many results and a contract selection behind the report.
         values["stations"] = [

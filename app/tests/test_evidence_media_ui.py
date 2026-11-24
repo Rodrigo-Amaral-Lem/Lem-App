@@ -91,11 +91,17 @@ for width, height in [(320, 760), (360, 760), (640, 360), (1100, 820)]:
     js('androidCamera=true')
     QTest.qWait(100)
     actions = [find_visual(w.contentItem(), name + '_EST.01')
-               for name in ['addPhoto', 'choosePhoto', 'addVideo', 'chooseVideo', 'toggleNotes']]
-    assert all(action.width() >= 44 for action in actions)
-    assert max(action.mapToScene(QPoint(0, 0)).y() for action in actions) - min(action.mapToScene(QPoint(0, 0)).y() for action in actions) < 1
-    assert actions[-1].mapToScene(QPoint(int(actions[-1].width()), 0)).x() <= width
-    trigger('addVideo_EST.01')
+               for name in ['addPhoto', 'otherAttachments', 'toggleNotes']]
+    assert all(action.width() >= 48 and action.height() >= 48 for action in actions)
+    for button in actions:
+        left = button.mapToScene(QPoint(0, 0)).x()
+        assert left >= 0 and left + button.width() <= width + 1
+    if width == 320:
+        assert actions[0].y() < actions[1].y() < actions[2].y()
+    trigger('otherAttachments_EST.01')
+    assert js('attachmentSheet.opened') and js('photoItem') == 'EST.01'
+    trigger('recordAttachmentVideo')
+    assert not js('attachmentSheet.visible')
     assert video_calls[-1] == 'EST.01'
     assert find_visual(w.contentItem(), 'rotatePhoto_picture') is None
     assert find_visual(w.contentItem(), 'cropPhoto_picture') is None

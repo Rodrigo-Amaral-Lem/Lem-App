@@ -40,7 +40,7 @@ navigation on the contract card, then **Editar notas** and **Guardar**.
 
 ## Fill and review a report
 
-The groups are **SEG → SITE → QVE → EST → MAN → CARG → FIN**. Switching groups retains position and
+The groups are **SEG → SITE → QVE → EST → MAN → CARG → FIN**. Select a group tab or choose **Grupos** to jump directly to another section. The three-dot **Opções do report** panel groups consultation, exports for closed reports, synchronization and management. Switching groups retains position and
 releases deferred evidence synchronization. Review shows missing answers, required photographs and
 required observations; tapping an issue returns to the field.
 
@@ -70,7 +70,7 @@ another device changes the report; resolve the reported conflict before continui
 
 ## Photographs, videos and editing
 
-Use the camera/gallery controls on the relevant item. File selectors accept multiple files;
+On Android choose **Tirar fotografia** on the relevant item. Open **Outros anexos** on that item for a gallery photo, a video recording or a gallery video. On desktop choose **Adicionar fotografia**, or open **Outros anexos** for **Adicionar vídeo**. **Adicionar observação** opens the optional note. File selectors accept multiple files;
 admission proceeds sequentially and reports how many were accepted/refused. Invalid files do not
 prevent the remaining selection from being processed. Original gallery files are not deleted.
 
@@ -131,7 +131,7 @@ Use manual synchronization when ready to send deferred evidence. A lost network 
 retried using the report's durable revision/fingerprint data; do not recreate or delete the report
 just because a request failed.
 
-If a PCVE is temporarily withdrawn from its contract, **Recuperar rascunho local** in the order
+Use the arrows beside **Retirar** to reorder visits in the planner. Open **Informação do ID** on a visit to expand its details. If a PCVE is temporarily withdrawn from its contract, **Recuperar rascunho local** in the order
 opens the draft kept on the device. Once the administrator restores the membership, synchronize
 to retry the original visit. A different or completed visit still requires separate recovery.
 

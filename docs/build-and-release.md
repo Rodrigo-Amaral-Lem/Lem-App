@@ -257,7 +257,7 @@ python -m unittest discover -s tools/tests -v
 ### Qt Creator and device checks
 
 Use an Android Qt kit, compatible SDK/NDK/JDK and the desired ABIs in Qt Creator. The project
-currently declares package ID `pt.lem.app`, version name `0.8.0`, and version code **191**.
+currently declares package ID `pt.lem.app`, version name `0.11.0`, and version code **196**.
 Increase the version code for a future Android release. Changing a package ID creates a different
 installation; synchronize outstanding reports before switching or uninstalling.
 
