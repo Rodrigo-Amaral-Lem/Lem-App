@@ -519,7 +519,28 @@ ApplicationWindow {
             c.lineWidth = 2;
             c.lineCap = "round";
             c.lineJoin = "round";
-            if (kind === "erase") {
+            if (kind === "allIds") {
+                for (const y of [.23, .50, .77]) {
+                    c.beginPath();
+                    c.moveTo(width * .12, height * y);
+                    c.lineTo(width * .17, height * y);
+                    c.moveTo(width * .36, height * y);
+                    c.lineTo(width * .88, height * y);
+                    c.stroke();
+                }
+            } else if (kind === "withReports" || kind === "withoutReports") {
+                c.strokeRect(width * .17, height * .09, width * .66, height * .82);
+                c.beginPath();
+                if (kind === "withReports") {
+                    c.moveTo(width * .31, height * .51);
+                    c.lineTo(width * .45, height * .65);
+                    c.lineTo(width * .69, height * .36);
+                } else {
+                    c.moveTo(width * .34, height * .50);
+                    c.lineTo(width * .66, height * .50);
+                }
+                c.stroke();
+            } else if (kind === "erase") {
                 c.beginPath();
                 c.moveTo(width * .16, height * .61);
                 c.lineTo(width * .57, height * .18);
@@ -1143,6 +1164,10 @@ ApplicationWindow {
     // serializing the displayed catalogue again on every refresh.
     property string catalogEncoded: "[]"
     property string catalogScope: ""
+    property string catalogReportFilter: "allIds"
+    function currentCatalogScope() {
+        return JSON.stringify([lem.contractId(), search.text, catalogReportFilter]);
+    }
     property var catalogAnchor: ({})
     property bool openingCatalogReport: false
     function rememberCatalogPosition() {
@@ -1155,7 +1180,7 @@ ApplicationWindow {
             id: index >= 0 ? catalogRows[index].id : "",
             offset: item ? y - item.y : 0,
             y: y,
-            scope: lem.contractId() + "|" + search.text
+            scope: currentCatalogScope()
         };
     }
     function addressLine(details) {
@@ -1215,12 +1240,19 @@ ApplicationWindow {
     function refreshCatalog(restore) {
         if (page !== "catalog" || openingCatalogReport)
             return;
-        const scope = lem.contractId() + "|" + search.text;
+        const scope = currentCatalogScope();
         const sameScope = catalogScope === scope;
         if (!restore && sameScope)
             rememberCatalogPosition();
         const needle = search.text.trim().toLowerCase();
-        const rows = lem.chargers.filter(c => chargerMatches(c, needle));
+        const rows = lem.chargers.filter(charger => {
+            const hasReports = (charger.reports || []).length > 0;
+            if (catalogReportFilter === "withReports" && !hasReports)
+                return false;
+            if (catalogReportFilter === "withoutReports" && hasReports)
+                return false;
+            return chargerMatches(charger, needle);
+        });
         const encodedRows = JSON.stringify(rows);
         if (encodedRows === catalogEncoded && !restore && sameScope)
             return;
@@ -5086,10 +5118,22 @@ ApplicationWindow {
                             search.forceActiveFocus();
                         }
                     }
+                    UiIconButton {
+                        objectName: "catalogReportFilterButton"
+                        symbol: win.catalogReportFilter
+                        primary: symbol !== "allIds"
+                        text: symbol === "withReports" ? "IDs com reports" : symbol === "withoutReports" ? "IDs sem reports" : "Todos os IDs"
+                        onClicked: {
+                            win.catalogReportFilter = symbol === "allIds" ? "withReports" : symbol === "withReports" ? "withoutReports" : "allIds";
+                            win.refreshCatalog(false);
+                        }
+                    }
                 }
                 UiLabel {
                     visible: chargerList.count === 0
-                    text: lem.chargers.length ? "Nenhum carregador corresponde à pesquisa." : "Escolha um contrato. O administrador pode importar o Excel na área Gestão."
+                    text: !lem.chargers.length ? "Escolha um contrato. O administrador pode importar o Excel na área Gestão."
+                        : win.catalogReportFilter === "allIds" ? "Nenhum carregador corresponde à pesquisa."
+                        : "Nenhum carregador corresponde ao filtro" + (search.text.trim() ? " e à pesquisa." : ".")
                     wrapMode: Text.Wrap
                     Layout.fillWidth: true
                 }

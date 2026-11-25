@@ -2,7 +2,7 @@
 # Part of LEM. See the accompanying LICENSE for license terms and warranty disclaimer.
 
 cmake_minimum_required(VERSION 3.25)
-project(Lem VERSION 0.11.2 LANGUAGES CXX)
+project(Lem VERSION 0.12.0 LANGUAGES CXX)
 set(report_limits_file "${CMAKE_CURRENT_SOURCE_DIR}/../shared/report-limits.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${report_limits_file}")
 file(READ "${report_limits_file}" report_limits)
@@ -106,8 +106,8 @@ set_target_properties(Lem PROPERTIES MACOSX_BUNDLE TRUE WIN32_EXECUTABLE TRUE MA
 if(ANDROID)
  set_property(TARGET Lem PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
  # Preserve the R1 scroll fix; Android version codes increase for every release.
- set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_NAME "0.11.2")
- set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_CODE 198)
+ set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_NAME "0.12.0")
+ set_property(TARGET Lem PROPERTY QT_ANDROID_VERSION_CODE 199)
 endif()
 include(GNUInstallDirs)
 install(TARGETS Lem

@@ -40,6 +40,31 @@ try:
     assert w.grabWindow().save(str(PREVIEW_DIR / 'visual-catalogue.png'))
     print('Catalogue screenshot:', PREVIEW_DIR / 'visual-catalogue.png')
 
+    # Presence includes open drafts as well as closed reports in this contract.
+    for index, status in enumerate(('draft', 'closed')):
+        values['chargers'][index]['reports'] = [dict(id=f'report-{index}', status=status)]
+    values['chargers'][0]['details']['address'] = 'Âncora São João · Service Bay'
+    lem.chargersChanged.emit()
+    QTest.qWait(100)
+    js('chargerList.positionViewAtBeginning()')
+    QTest.qWait(250)
+    pointer_click('catalogReportFilterButton')
+    assert js('catalogRows.map(c => c.id).join(",")') == 'perf-0,perf-1', js('catalogReportFilter')
+    js('search.text="São João · Service"')
+    QTest.qWait(250)
+    assert js('catalogRows.map(c => c.id).join(",")') == 'perf-0'
+    pointer_click('catalogReportFilterButton')
+    assert js('chargerList.count') == 0
+    values['chargers'][0]['reports'] = []
+    lem.chargersChanged.emit()
+    QTest.qWait(100)
+    assert js('catalogRows.map(c => c.id).join(",")') == 'perf-0'
+    pointer_click('clearCatalogSearch')
+    QTest.qWait(250)
+    assert js('chargerList.count') == 149
+    pointer_click('catalogReportFilterButton')
+    assert js('chargerList.count') == 150
+
     js('page="report"')
     before = js('totalAnswered()')
     item = next(i for s in values['sections'] for i in s['items']

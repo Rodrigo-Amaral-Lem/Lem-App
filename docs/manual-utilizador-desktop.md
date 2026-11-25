@@ -1,6 +1,6 @@
 # Manual de utilização da app Lem para desktop
 
-Desktop · Aplicação 0.11.2 · Edição 2.21 · 24 de novembro de 2026
+Desktop · Aplicação 0.12.0 · Edição 2.22 · 25 de novembro de 2026
 
 Versão de leitura e impressão: [manual-utilizador-desktop.pdf](manual-utilizador-desktop.pdf).
 
@@ -20,7 +20,7 @@ Este manual acompanha a utilização da app Lem, desde a entrada na conta até �
 
 Na interface, o relatório de intervenção é designado por **report**. Neste manual, as expressões a negrito identificam botões, opções ou estados da app. As ações são realizadas com o rato e o teclado. Clique nos botões e utilize a roda do rato ou a barra de deslocação para percorrer o relatório.
 
-Este manual descreve a versão 0.11.2 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios. A disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
+Este manual descreve a versão 0.12.0 e o formulário de manutenção atual. Relatórios antigos ou fechados podem apresentar perguntas diferentes. As capturas utilizam dados fictícios. A disposição varia com o tamanho do ecrã e o sistema operativo. Todas as capturas desta edição mostram a interface desktop.
 
 Este documento explica a aplicação. Os ensaios elétricos e os procedimentos de segurança seguem as instruções técnicas da Lem e devem ser realizados por pessoal qualificado.
 
@@ -75,7 +75,7 @@ Pode anexar fotografias, vídeos e uma imagem da assinatura a partir dos ficheir
 
 1. No seletor superior, escolha o **contrato** da intervenção. A lista apresenta os carregadores desse contrato.
 
-2. Utilize **Pesquisar carregadores…** para procurar por ID, número de série, morada, modelo ou CPE. Limpe a pesquisa para voltar à lista completa.
+2. Utilize **Pesquisar carregadores…** para procurar por ID, número de série, morada, modelo ou CPE. À direita da pesquisa, clique no botão para alternar entre **Todos os IDs** (lista), **IDs com reports** (documento com visto) e **IDs sem reports** (documento com traço). O filtro conta rascunhos e relatórios fechados do contrato selecionado. Limpar a pesquisa mantém o filtro.
 
 3. Confirme os dados do cartão. Quando disponível, o botão com a seta de navegação abre a localização numa aplicação externa.
 
